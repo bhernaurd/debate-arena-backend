@@ -3,16 +3,17 @@ import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
 import rateLimit from 'express-rate-limit';
 import dotenv from 'dotenv';
+import dailyChallengeRouter from './dailyChallenge.js';
 
 dotenv.config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 app.use(cors());
-app.use(express.json({ limit: '50kb' })); // Increased to handle summaries
+app.use(express.json({ limit: '50kb' }));
+app.use(dailyChallengeRouter);
 
 const limiter = rateLimit({
   windowMs: 60 * 1000,
@@ -40,12 +41,9 @@ async function summarizeMessages(messages) {
 // Manage conversation history to prevent payload bloat
 async function manageHistory(messages) {
   if (messages.length <= 20) return messages;
-
   const olderMessages = messages.slice(0, -10);
   const recentMessages = messages.slice(-10);
-
   const summary = await summarizeMessages(olderMessages);
-
   return [
     {
       role: 'user',
@@ -79,19 +77,14 @@ app.post('/debate', async (req, res) => {
   }
 
   try {
-    // Manage history before sending to main model
     const managedMessages = await manageHistory(validMessages);
-
     const response = await client.messages.create({
       model: 'claude-sonnet-4-5-20250929',
       max_tokens: 1024,
       system,
       messages: managedMessages
     });
-
     const reply = response.content?.find(b => b.type === 'text')?.text ?? '';
-
-    // Return both reply and managed messages so client stays in sync
     res.json({ reply, messages: managedMessages });
   } catch (error) {
     console.error('Anthropic API error:', error);
