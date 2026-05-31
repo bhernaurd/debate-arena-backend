@@ -1,11 +1,12 @@
+// env.js must be first — loads dotenv before any module reads process.env
+import './env.js';
 import express from 'express';
 import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
 import rateLimit from 'express-rate-limit';
-import dotenv from 'dotenv';
 import dailyChallengeRouter from './dailyChallenge.js';
-
-dotenv.config();
+import pushRouter from './pushRoutes.js';
+import './pushScheduler.js';  // registers cron jobs on startup
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -14,6 +15,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 app.use(cors());
 app.use(express.json({ limit: '50kb' }));
 app.use(dailyChallengeRouter);
+app.use(pushRouter);
 
 const limiter = rateLimit({
   windowMs: 60 * 1000,
