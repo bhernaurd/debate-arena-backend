@@ -110,4 +110,16 @@ router.post('/api/push/test', async (req, res) => {
     }
 });
 
+// ─── GET /api/push/tokens ─────────────────────────────────────────────────────
+// List all registered device tokens. Temporary dev endpoint.
+
+router.get('/api/push/tokens', (req, res) => {
+    const list = Object.keys(tokens).map(t => ({
+        token: t,
+        timezone: tokens[t].timezone || 'unknown',
+        completedId: tokens[t].lastCompletedChallengeId || null,
+    }));
+    return res.json({ count: list.length, tokens: list });
+});
+
 export default router;
