@@ -71,12 +71,42 @@ function getCurrentWindow() {
 // luxon weekday: 1=Mon 2=Tue 3=Wed 4=Thu 5=Fri 6=Sat 7=Sun
 
 const PHILOSOPHERS = {
-    socrates: { id: 'socrates', name: 'Socrates', era: '470–399 BC', discipline: 'Socratic Method' },
-    nietzsche: { id: 'nietzsche', name: 'Nietzsche', era: '1844–1900', discipline: 'Will to Power' },
-    aurelius: { id: 'aurelius', name: 'Marcus Aurelius', era: '121–180 AD', discipline: 'Stoic Emperor' },
-    jung: { id: 'jung', name: 'Carl Jung', era: '1875–1961', discipline: 'Psyche & Shadow' },
-    plato: { id: 'plato', name: 'Plato', era: '428–348 BC', discipline: 'Forms & Dialectic' },
-    aristotle: { id: 'aristotle', name: 'Aristotle', era: '384–322 BC', discipline: 'Logic & Virtue' },
+    socrates: {
+        id: 'socrates',
+        name: 'Socrates',
+        era: '470–399 BC',
+        discipline: 'Socratic Method',
+    },
+    nietzsche: {
+        id: 'nietzsche',
+        name: 'Nietzsche',
+        era: '1844–1900',
+        discipline: 'Will to Power',
+    },
+    aurelius: {
+        id: 'aurelius',
+        name: 'Marcus Aurelius',
+        era: '121–180 AD',
+        discipline: 'Stoic Emperor',
+    },
+    jung: {
+        id: 'jung',
+        name: 'Carl Jung',
+        era: '1875–1961',
+        discipline: 'Psyche & Shadow',
+    },
+    plato: {
+        id: 'plato',
+        name: 'Plato',
+        era: '428–348 BC',
+        discipline: 'Forms & Dialectic',
+    },
+    aristotle: {
+        id: 'aristotle',
+        name: 'Aristotle',
+        era: '384–322 BC',
+        discipline: 'Logic & Virtue',
+    },
 };
 
 const ROTATION = {
@@ -97,12 +127,42 @@ function getPhilosopherForDate(dateString) {
 // ─── Themes ───────────────────────────────────────────────────────────────────
 
 const THEMES = {
-    socrates: ['self-knowledge', 'democracy and mob opinion', 'the examined life', 'what counts as wisdom today'],
-    nietzsche: ['social media and herd mentality', 'comfort culture', 'modern morality', 'the pursuit of greatness'],
-    aurelius: ['anxiety in modern life', 'productivity culture', 'the dichotomy of control', 'stoicism vs hustle culture'],
-    jung: ['identity in the age of social media', 'the shadow in cancel culture', 'modern loneliness', 'the collective unconscious today'],
-    plato: ['algorithmic reality', 'truth vs viral content', 'education and the cave', 'justice in modern democracy'],
-    aristotle: ['habit and character in the smartphone era', 'the good life today', 'virtue vs success', 'friendship in the digital age'],
+    socrates: [
+        'self-knowledge',
+        'democracy and mob opinion',
+        'the examined life',
+        'what counts as wisdom today',
+    ],
+    nietzsche: [
+        'social media and herd mentality',
+        'comfort culture',
+        'modern morality',
+        'the pursuit of greatness',
+    ],
+    aurelius: [
+        'anxiety in modern life',
+        'productivity culture',
+        'the dichotomy of control',
+        'stoicism vs hustle culture',
+    ],
+    jung: [
+        'identity in the age of social media',
+        'the shadow in cancel culture',
+        'modern loneliness',
+        'the collective unconscious today',
+    ],
+    plato: [
+        'algorithmic reality',
+        'truth vs viral content',
+        'education and the cave',
+        'justice in modern democracy',
+    ],
+    aristotle: [
+        'habit and character in the smartphone era',
+        'the good life today',
+        'virtue vs success',
+        'friendship in the digital age',
+    ],
 };
 
 function pickTheme(philosopherId) {
@@ -198,6 +258,12 @@ Rules:
 - Modern, personal, genuinely debatable. Not generic academic questions.
 - Do not mention AI or ChatGPT unless it is the explicit theme.
 - Do not assume the user's position. Invite them to explain their own side.
+- The Daily Challenge question is the center of the experience.
+- The notification copy must directly revolve around the generated challengeQuestion.
+- Each notification should tease, challenge, pressure, or reframe the exact Daily Challenge question.
+- Do not write generic philosopher-themed notifications.
+- The user should be able to read the notification and immediately understand it belongs to today's specific question.
+- The notifications must connect to BOTH the selected philosopher and the specific debate question.
 - Notification copy must sound like the philosopher's voice — sharp, characteristic, inviting tension. Not motivational quotes.
 - The notification copy must be written in the voice and style of ${philosopher.name} ONLY.
 - The notifications must NOT mention, reference, or allude to any other philosopher by name.
@@ -212,7 +278,11 @@ Date: ${dateString}
 
 CRITICAL:
 The morningNotification, afternoonNotification, and eveningNotification must be written ONLY in the voice of ${philosopher.name}.
+They must directly relate to the exact challengeQuestion you generate.
+Do not write generic ${philosopher.name} notifications.
 Do not name, reference, or allude to any other philosopher in the notifications.
+The notification should make sense as a reminder to answer today's specific Daily Challenge.
+Each notification should feel like it belongs to the exact debate question, not just the general theme.
 
 Return this exact JSON with no other text:
 {
@@ -223,9 +293,9 @@ Return this exact JSON with no other text:
   "theme": "${theme}",
   "difficulty": "Accessible or Challenging or Demanding",
   "shareHook": "One-sentence hook for sharing on social media",
-  "morningNotification": "${philosopher.name}'s voice — morning, sharp tension (max 2 sentences, do NOT name any other philosopher)",
-  "afternoonNotification": "${philosopher.name}'s voice — afternoon, different angle (max 2 sentences, do NOT name any other philosopher)",
-  "eveningNotification": "${philosopher.name}'s voice — evening, reflective close (max 2 sentences, do NOT name any other philosopher)"
+  "morningNotification": "${philosopher.name}'s voice — morning reminder tied directly to the challengeQuestion (max 2 sentences, do NOT name any other philosopher)",
+  "afternoonNotification": "${philosopher.name}'s voice — afternoon reminder that reframes or pressures the exact challengeQuestion (max 2 sentences, do NOT name any other philosopher)",
+  "eveningNotification": "${philosopher.name}'s voice — evening final call tied directly to the challengeQuestion (max 2 sentences, do NOT name any other philosopher)"
 }`;
 
     const message = await client.messages.create({
@@ -252,9 +322,9 @@ const FALLBACKS = {
         theme: 'self-knowledge',
         difficulty: 'Accessible',
         shareHook: 'I just had my beliefs cross-examined by Socrates. It did not go how I expected.',
-        morningNotification: 'Is an unexamined belief worth keeping? Come to the Agora and test one.',
-        afternoonNotification: 'You know many things — but do you know how you came to know them? Shall we look?',
-        eveningNotification: 'The day is ending. Was any of it examined? Enter the Agora and consider it.',
+        morningNotification: 'You hold beliefs with confidence — but have you examined where they came from? Bring one to the Agora.',
+        afternoonNotification: 'The question remains: is your belief knowledge, or only habit wearing the mask of certainty?',
+        eveningNotification: 'The day is ending. Before it passes, examine one belief you have carried without question.',
     },
 
     nietzsche: {
@@ -265,9 +335,9 @@ const FALLBACKS = {
         theme: 'comfort culture',
         difficulty: 'Challenging',
         shareHook: 'Nietzsche just called my comfortable life into question. I had to answer.',
-        morningNotification: 'Does comfort strengthen the soul, or weaken it? Bring your answer, if it has teeth.',
-        afternoonNotification: 'The last man seeks warmth and safety above all else — are you certain you are not him?',
-        eveningNotification: 'What did you overcome today? Or did you only endure? Enter and answer plainly.',
+        morningNotification: 'Does comfort strengthen you, or slowly tame you? Bring your answer, if it has teeth.',
+        afternoonNotification: 'You have had hours of comfort already. Has it made you stronger, or merely easier to manage?',
+        eveningNotification: 'The day is almost over. Did you overcome anything, or only preserve your comfort?',
     },
 
     aurelius: {
@@ -278,9 +348,9 @@ const FALLBACKS = {
         theme: 'anxiety in modern life',
         difficulty: 'Accessible',
         shareHook: 'Marcus Aurelius asked me where I actually find peace. The answer surprised me.',
-        morningNotification: 'Return always to this — is peace found by changing life, or mastering judgment? Enter the Agora.',
-        afternoonNotification: 'You have been disturbed today by things outside your control. Was that necessary?',
-        eveningNotification: 'What is it to you if circumstances were imperfect? You still had your reason. Did you use it?',
+        morningNotification: 'Is peace found by changing the world around you, or by mastering your judgment of it?',
+        afternoonNotification: 'You have met circumstances today. Did they disturb you, or did your judgment give them power?',
+        eveningNotification: 'Before the day ends, ask plainly: was peace absent, or did you surrender it?',
     },
 
     jung: {
@@ -291,9 +361,9 @@ const FALLBACKS = {
         theme: 'the shadow',
         difficulty: 'Demanding',
         shareHook: 'Carl Jung suggested that what bothers me most about others is actually about me.',
-        morningNotification: 'Do the people who disturb us reveal something hidden within us? Bring the shadow into the light.',
-        afternoonNotification: 'The strongest reactions are rarely about the other person. Are you prepared to look inward?',
-        eveningNotification: 'What disturbed you today? Consider whether the world showed you something — or you showed it to yourself.',
+        morningNotification: 'What disturbed you today may not be outside you. Are you willing to look at what it reveals?',
+        afternoonNotification: 'The strongest irritation often points inward. What does your reaction expose?',
+        eveningNotification: 'Before the day sinks back into shadow, name what disturbed you — and ask why.',
     },
 
     plato: {
@@ -304,9 +374,9 @@ const FALLBACKS = {
         theme: 'algorithmic reality',
         difficulty: 'Challenging',
         shareHook: 'Plato compared my social media feed to a cave. He wasn\'t entirely wrong.',
-        morningNotification: 'Is modern life reality, or a cave of shadows? Turn toward the question and answer.',
-        afternoonNotification: 'Consider the images you have consumed today. How many pointed toward truth?',
-        eveningNotification: 'The prisoner who escapes the cave finds the light painful at first. What have you been looking at?',
+        morningNotification: 'You have been shown images all day. Are they leading you toward truth, or keeping you in the cave?',
+        afternoonNotification: 'The feed has shaped your attention. Has it also shaped your reality?',
+        eveningNotification: 'Before the shadows close, ask whether what you believed today was reality — or only what was shown to you.',
     },
 
     aristotle: {
@@ -317,9 +387,9 @@ const FALLBACKS = {
         theme: 'habit and character',
         difficulty: 'Accessible',
         shareHook: 'Aristotle made me look at my daily habits and ask what kind of person they are building.',
-        morningNotification: 'Is the good life built by desire, or by habit? Reason through your answer in the Agora.',
-        afternoonNotification: 'Excellence is not an act but a habit. What habits did this morning build?',
-        eveningNotification: 'We become what we repeatedly do. What did today\'s repetitions say about you?',
+        morningNotification: 'Your habits are already building someone. Are they building the person you claim to seek?',
+        afternoonNotification: 'Look at what you have repeated today. What kind of character is being formed?',
+        eveningNotification: 'The day has cast its vote through your actions. What did your habits say you are becoming?',
     },
 };
 
@@ -380,6 +450,7 @@ export async function ensureTodaysChallenge() {
         console.log(`[DailyChallenge] Generated challenge for ${date}`);
         console.log(`[DailyChallenge] philosopherId: ${challengeData.philosopherId}`);
         console.log(`[DailyChallenge] philosopherName: ${challengeData.philosopherName}`);
+        console.log(`[DailyChallenge] challengeQuestion: ${challengeData.challengeQuestion}`);
         console.log(`[DailyChallenge] morningNotification: ${challengeData.morningNotification}`);
         console.log(`[DailyChallenge] afternoonNotification: ${challengeData.afternoonNotification}`);
         console.log(`[DailyChallenge] eveningNotification: ${challengeData.eveningNotification}`);
@@ -417,6 +488,7 @@ cron.schedule(
             console.log(`[DailyChallengeScheduler] date: ${challenge.date}`);
             console.log(`[DailyChallengeScheduler] philosopherId: ${challenge.philosopherId}`);
             console.log(`[DailyChallengeScheduler] philosopherName: ${challenge.philosopherName}`);
+            console.log(`[DailyChallengeScheduler] challengeQuestion: ${challenge.challengeQuestion}`);
             console.log(`[DailyChallengeScheduler] morningNotification: ${challenge.morningNotification}`);
             console.log(`[DailyChallengeScheduler] afternoonNotification: ${challenge.afternoonNotification}`);
             console.log(`[DailyChallengeScheduler] eveningNotification: ${challenge.eveningNotification}`);
@@ -441,6 +513,7 @@ ensureTodaysChallenge()
         console.log(`[DailyChallengeStartup] date: ${challenge.date}`);
         console.log(`[DailyChallengeStartup] philosopherId: ${challenge.philosopherId}`);
         console.log(`[DailyChallengeStartup] philosopherName: ${challenge.philosopherName}`);
+        console.log(`[DailyChallengeStartup] challengeQuestion: ${challenge.challengeQuestion}`);
     })
     .catch((err) => {
         console.error('[DailyChallengeStartup] Cache check failed:', err.message);
