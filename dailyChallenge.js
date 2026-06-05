@@ -31,7 +31,8 @@ function readCache() {
     try {
         if (!fs.existsSync(CACHE_PATH)) return null;
         return JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
-    } catch {
+    } catch (err) {
+        console.error('[DailyChallenge] Cache read error:', err.message);
         return null;
     }
 }
@@ -41,7 +42,7 @@ function writeCache(data) {
         fs.writeFileSync(CACHE_PATH, JSON.stringify(data, null, 2), 'utf8');
         return true;
     } catch (err) {
-        console.error('[DailyChallenge] Cache write error:', err);
+        console.error('[DailyChallenge] Cache write error:', err.message);
         return false;
     }
 }
@@ -116,11 +117,40 @@ const ROTATION = {
     4: 'jung',
     5: 'plato',
     6: 'aristotle',
-    7: 'nietzsche',
+    // Sunday is randomized deterministically below.
 };
+
+const ALL_PHILOSOPHER_IDS = [
+    'socrates',
+    'nietzsche',
+    'aurelius',
+    'jung',
+    'plato',
+    'aristotle',
+];
+
+function stableHashString(value) {
+    let hash = 0;
+
+    for (let i = 0; i < value.length; i++) {
+        hash = ((hash * 31) + value.charCodeAt(i)) >>> 0;
+    }
+
+    return hash;
+}
 
 function getPhilosopherForDate(dateString) {
     const dow = DateTime.fromISO(dateString, { zone: 'America/Chicago' }).weekday;
+
+    if (dow === 7) {
+        // Sunday: deterministic random based on date.
+        // All users get the same Sunday philosopher, but it varies week to week.
+        const hash = stableHashString(dateString);
+        const id = ALL_PHILOSOPHER_IDS[hash % ALL_PHILOSOPHER_IDS.length];
+
+        return PHILOSOPHERS[id] ?? PHILOSOPHERS.socrates;
+    }
+
     return PHILOSOPHERS[ROTATION[dow]] ?? PHILOSOPHERS.socrates;
 }
 
@@ -189,6 +219,8 @@ function normalizePhilosopherId(raw) {
 }
 
 // ─── Validation ───────────────────────────────────────────────────────────────
+// Confirms all required fields exist and that notification copy does not
+// mention any philosopher other than the one assigned today.
 
 function validateChallenge(challenge) {
     const required = [
@@ -312,6 +344,7 @@ Return this exact JSON with no other text:
 }
 
 // ─── Fallbacks ────────────────────────────────────────────────────────────────
+// Fallbacks are tied to their exact fallback challenge question.
 
 const FALLBACKS = {
     socrates: {
@@ -407,6 +440,8 @@ function getFallback(philosopher, dateString, expiresAt) {
 }
 
 // ─── ensureTodaysChallenge ────────────────────────────────────────────────────
+// Shared function used by the 5 AM cron, startup check, and HTTP route.
+// Returns the current window's challenge, generating it if the cache is stale.
 
 export async function ensureTodaysChallenge() {
     const { date, expiresAt } = getCurrentWindow();
@@ -476,6 +511,8 @@ export async function ensureTodaysChallenge() {
 }
 
 // ─── 5 AM proactive generation cron ──────────────────────────────────────────
+// Runs at 5:00 AM Chicago every day.
+// Guarantees the cache is fresh before pushScheduler.js reads it.
 
 cron.schedule(
     '0 5 * * *',
@@ -526,7 +563,7 @@ router.get('/api/daily-challenge', async (req, res) => {
         const challenge = await ensureTodaysChallenge();
         return res.json(challenge);
     } catch (err) {
-        console.error('[DailyChallenge] Endpoint error:', err);
+        console.error('[DailyChallenge] Endpoint error:', err.message);
 
         const { date, expiresAt } = getCurrentWindow();
         const philosopher = getPhilosopherForDate(date);
