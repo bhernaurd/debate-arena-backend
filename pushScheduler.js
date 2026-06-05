@@ -18,24 +18,29 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { sendPush } from './apnsService.js';
 
-const __dirname    = path.dirname(fileURLToPath(import.meta.url));
-const CACHE_PATH   = path.join(__dirname, 'daily_challenge_cache.json');
-const TOKENS_PATH  = path.join(__dirname, 'push_tokens.json');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CACHE_PATH = path.join(__dirname, 'daily_challenge_cache.json');
+const TOKENS_PATH = path.join(__dirname, 'push_tokens.json');
 
 // ─── Cache reader ─────────────────────────────────────────────────────────────
-// Handles both flat shape { id, philosopherId, ... }
-// and accidentally-wrapped shape { challenge: { id, ... } }.
 
 function readChallenge() {
     try {
         if (!fs.existsSync(CACHE_PATH)) return null;
+
         const raw = JSON.parse(fs.readFileSync(CACHE_PATH, 'utf8'));
         if (!raw) return null;
-        // Unwrap if nested
-        const c = (raw.challenge && typeof raw.challenge === 'object') ? raw.challenge : raw;
-        if (!c.id || !c.philosopherId) return null;
-        return c;
-    } catch {
+
+        const challenge =
+            raw.challenge && typeof raw.challenge === 'object'
+                ? raw.challenge
+                : raw;
+
+        if (!challenge.id || !challenge.philosopherId) return null;
+
+        return challenge;
+    } catch (err) {
+        console.error('[PushScheduler] Challenge read error:', err.message);
         return null;
     }
 }
@@ -44,23 +49,24 @@ function readTokens() {
     try {
         if (!fs.existsSync(TOKENS_PATH)) return {};
         return JSON.parse(fs.readFileSync(TOKENS_PATH, 'utf8'));
-    } catch {
+    } catch (err) {
+        console.error('[PushScheduler] Token read error:', err.message);
         return {};
     }
 }
 
 // ─── Display name helper ──────────────────────────────────────────────────────
-// philosopherName is now stored in the cache, but this is a safe fallback.
 
 function philosopherDisplayName(id) {
     const names = {
         aristotle: 'Aristotle',
-        plato:     'Plato',
+        plato: 'Plato',
         nietzsche: 'Nietzsche',
-        socrates:  'Socrates',
-        jung:      'Carl Jung',
-        aurelius:  'Marcus Aurelius',
+        socrates: 'Socrates',
+        jung: 'Carl Jung',
+        aurelius: 'Marcus Aurelius',
     };
+
     return names[String(id).toLowerCase()] || 'The philosopher';
 }
 
@@ -74,14 +80,16 @@ async function sendDailyPush(timeOfDay) {
         return;
     }
 
-    // Prefer stored philosopherName; fall back to display name map
-    const philosopherName = challenge.philosopherName
-        || philosopherDisplayName(challenge.philosopherId);
+    const philosopherName =
+        challenge.philosopherName ||
+        philosopherDisplayName(challenge.philosopherId);
 
-    // Select the correct pre-generated notification body
-    const bodyKey = timeOfDay === 'morning'   ? 'morningNotification'
-                  : timeOfDay === 'afternoon' ? 'afternoonNotification'
-                  :                             'eveningNotification';
+    const bodyKey =
+        timeOfDay === 'morning'
+            ? 'morningNotification'
+            : timeOfDay === 'afternoon'
+            ? 'afternoonNotification'
+            : 'eveningNotification';
 
     const body = challenge[bodyKey]?.trim();
 
@@ -90,14 +98,14 @@ async function sendDailyPush(timeOfDay) {
         return;
     }
 
-    // Title is always derived from the cached philosopher — never generated here
-    const title = timeOfDay === 'morning'
-        ? 'A question enters the Agora'
-        : timeOfDay === 'afternoon'
-        ? `${philosopherName} is waiting.`
-        : `${philosopherName} has a final question.`;
+    const title =
+        timeOfDay === 'morning'
+            ? 'A question enters the Agora'
+            : timeOfDay === 'afternoon'
+            ? `${philosopherName} is waiting.`
+            : `${philosopherName} has a final question.`;
 
-    const tokens  = readTokens();
+    const tokens = readTokens();
     const entries = Object.values(tokens);
 
     if (entries.length === 0) {
@@ -105,50 +113,90 @@ async function sendDailyPush(timeOfDay) {
         return;
     }
 
-    // Full log so any mismatch is immediately visible in Railway
+    console.log('──────────────────────────────────────────────');
     console.log(`[PushScheduler] ${timeOfDay} push`);
     console.log(`[PushScheduler] Challenge ID: ${challenge.id}`);
+    console.log(`[PushScheduler] Challenge Date: ${challenge.date || 'unknown'}`);
     console.log(`[PushScheduler] Philosopher ID: ${challenge.philosopherId}`);
     console.log(`[PushScheduler] Philosopher name: ${philosopherName}`);
     console.log(`[PushScheduler] Title: ${title}`);
     console.log(`[PushScheduler] Body: ${body}`);
+    console.log(`[PushScheduler] Token count: ${entries.length}`);
+    console.log('──────────────────────────────────────────────');
 
-    // APNs payload — iOS AppDelegate reads source + challengeId + philosopher
     const challengePayload = {
-        challengeId:   challenge.id,
-        challengeDate: challenge.date  || '',
+        challengeId: challenge.id,
+        challengeDate: challenge.date || '',
         philosopherId: challenge.philosopherId,
-        philosopher:   philosopherName,
+        philosopher: philosopherName,
     };
 
-    let sent = 0, skipped = 0;
+    let sent = 0;
+    let skipped = 0;
+    let failed = 0;
 
     for (const record of entries) {
-        if (!record.notificationsEnabled)                     { skipped++; continue; }
-        if (record.lastCompletedChallengeId === challenge.id) { skipped++; continue; }
+        if (!record.deviceToken) {
+            skipped++;
+            continue;
+        }
 
-        const ok = await sendPush(record.deviceToken, title, body, challengePayload);
-        if (ok) sent++; else skipped++;
+        if (record.notificationsEnabled === false) {
+            skipped++;
+            continue;
+        }
+
+        if (record.lastCompletedChallengeId === challenge.id) {
+            skipped++;
+            continue;
+        }
+
+        const ok = await sendPush(
+            record.deviceToken,
+            title,
+            body,
+            challengePayload
+        );
+
+        if (ok) {
+            sent++;
+        } else {
+            failed++;
+        }
     }
 
-    console.log(`[PushScheduler] ${timeOfDay} — sent: ${sent}, skipped: ${skipped}`);
+    console.log(
+        `[PushScheduler] ${timeOfDay} — sent: ${sent}, skipped: ${skipped}, failed: ${failed}`
+    );
 }
 
-// ─── Cron jobs (America/Chicago) ─────────────────────────────────────────────
+// ─── Cron jobs America/Chicago ────────────────────────────────────────────────
 
-cron.schedule('0 9 * * *', () => {
-    console.log('[PushScheduler] Firing morning push job');
-    sendDailyPush('morning');
-}, { timezone: 'America/Chicago' });
+cron.schedule(
+    '0 9 * * *',
+    () => {
+        console.log('[PushScheduler] Firing morning push job');
+        sendDailyPush('morning');
+    },
+    { timezone: 'America/Chicago' }
+);
 
-cron.schedule('0 14 * * *', () => {
-    console.log('[PushScheduler] Firing afternoon push job');
-    sendDailyPush('afternoon');
-}, { timezone: 'America/Chicago' });
+cron.schedule(
+    '0 14 * * *',
+    () => {
+        console.log('[PushScheduler] Firing afternoon push job');
+        sendDailyPush('afternoon');
+    },
+    { timezone: 'America/Chicago' }
+);
 
-cron.schedule('0 20 * * *', () => {
-    console.log('[PushScheduler] Firing evening push job');
-    sendDailyPush('evening');
-}, { timezone: 'America/Chicago' });
+cron.schedule(
+    '0 20 * * *',
+    () => {
+        console.log('[PushScheduler] Firing evening push job');
+        sendDailyPush('evening');
+    },
+    { timezone: 'America/Chicago' }
+);
 
 console.log('[PushScheduler] Cron jobs registered — 9 AM / 2 PM / 8 PM America/Chicago');
