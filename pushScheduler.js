@@ -100,10 +100,10 @@ async function sendDailyPush(timeOfDay) {
 
     const title =
         timeOfDay === 'morning'
-            ? 'A question enters the Agora'
+            ? '${philosopherName} enters the Agora'
             : timeOfDay === 'afternoon'
-            ? `${philosopherName} is waiting.`
-            : `${philosopherName} has a final question.`;
+            ? `${philosopherName} awaits your answer.`
+            : `${philosopherName} time in the Agora is almost over.`;
 
     const tokens = readTokens();
     const entries = Object.values(tokens);
