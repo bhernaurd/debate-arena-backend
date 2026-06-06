@@ -1,4 +1,4 @@
-// dailyChallenge.jss
+// dailyChallenge.js
 // ES module — matches the import/export style of server.js
 //
 // Daily Challenge window: 5:00 AM Chicago → 4:59 AM Chicago next day.
