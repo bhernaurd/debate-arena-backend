@@ -1,4 +1,4 @@
-// pushScheduler.js
+// pushScheduler.jss
 // Scheduled APNs push jobs for Daily Challenge retention.
 // Registered as side-effect import in server.js: import './pushScheduler.js';
 //
