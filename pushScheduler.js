@@ -100,7 +100,7 @@ async function sendDailyPush(timeOfDay) {
 
     const title =
         timeOfDay === 'morning'
-            ? '${philosopherName} enters the Agora'
+            ? `${philosopherName} enters the Agora`
             : timeOfDay === 'afternoon'
             ? `${philosopherName} awaits your answer.`
             : `${philosopherName} time in the Agora is almost over.`;
