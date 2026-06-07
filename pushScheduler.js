@@ -23,6 +23,8 @@ const CACHE_PATH = path.join(__dirname, 'daily_challenge_cache.json');
 const TOKENS_PATH = path.join(__dirname, 'push_tokens.json');
 
 // ─── Cache reader ─────────────────────────────────────────────────────────────
+// Handles both flat shape { id, philosopherId, ... }
+// and accidentally-wrapped shape { challenge: { id, ... } }.
 
 function readChallenge() {
     try {
@@ -56,6 +58,7 @@ function readTokens() {
 }
 
 // ─── Display name helper ──────────────────────────────────────────────────────
+// philosopherName is stored in the cache, but this is a safe fallback.
 
 function philosopherDisplayName(id) {
     const names = {
@@ -68,6 +71,23 @@ function philosopherDisplayName(id) {
     };
 
     return names[String(id).toLowerCase()] || 'The philosopher';
+}
+
+// ─── Grammar helper ───────────────────────────────────────────────────────────
+// Correct possessive titles:
+// Aristotle -> Aristotle's
+// Plato -> Plato's
+// Socrates -> Socrates'
+// Marcus Aurelius -> Marcus Aurelius'
+
+function possessiveName(name) {
+    const clean = String(name || '').trim();
+
+    if (!clean) return 'The philosopher’s';
+
+    return clean.toLowerCase().endsWith('s')
+        ? `${clean}'`
+        : `${clean}'s`;
 }
 
 // ─── Core send function ───────────────────────────────────────────────────────
@@ -98,12 +118,15 @@ async function sendDailyPush(timeOfDay) {
         return;
     }
 
+    // IMPORTANT:
+    // These use backticks, not regular quotes.
+    // Regular quotes would show the literal text "${philosopherName}".
     const title =
         timeOfDay === 'morning'
-            ? `${philosopherName} enters the Agora`
+            ? `${philosopherName} enters the Agora.`
             : timeOfDay === 'afternoon'
-            ? `${philosopherName} awaits your answer.`
-            : `${philosopherName} time in the Agora is almost over.`;
+            ? `${philosopherName} is waiting.`
+            : `${possessiveName(philosopherName)} time in the Agora is almost over.`;
 
     const tokens = readTokens();
     const entries = Object.values(tokens);
