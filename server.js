@@ -57,7 +57,13 @@ to maintain debate continuity:\n\n${JSON.stringify(messages)}`
 ]
 });
 
-return response.content?.find(b => b.type === 'text')?.text ?? '';
+const summary = response.content
+?.filter(block => block.type === 'text')
+?.map(block => block.text)
+?.join('\n')
+?.trim() ?? '';
+
+return summary;
 }
 
 // Manage conversation history to prevent payload bloat
@@ -88,7 +94,7 @@ if (!messages || !Array.isArray(messages) || messages.length === 0) {
 return res.status(400).json({ error: 'messages array is required.' });
 }
 
-if (!system || typeof system !== 'string') {
+if (!system || typeof system !== 'string' || system.trim().length === 0) {
 return res.status(400).json({ error: 'system prompt is required.' });
 }
 
@@ -96,6 +102,7 @@ const validMessages = messages.filter(m =>
 m &&
 typeof m.role === 'string' &&
 typeof m.content === 'string' &&
+m.content.trim().length > 0 &&
 (m.role === 'user' || m.role === 'assistant')
 );
 
@@ -107,14 +114,29 @@ try {
 const managedMessages = await manageHistory(validMessages);
 
 ```
+console.log('[Debate] Sending request to Claude:', {
+  model: 'claude-sonnet-4-5-20250929',
+  messageCount: managedMessages.length,
+  systemLength: system.length
+});
+
 const response = await client.messages.create({
-  model: 'claude-haiku-4-5-20251001',
+  model: 'claude-sonnet-4-5-20250929',
   max_tokens: 1024,
-  system,
+  system: system.trim(),
   messages: managedMessages
 });
 
-const reply = response.content?.find(b => b.type === 'text')?.text ?? '';
+const reply = response.content
+  ?.filter(block => block.type === 'text')
+  ?.map(block => block.text)
+  ?.join('\n')
+  ?.trim() ?? '';
+
+if (!reply) {
+  console.error('[Debate] Empty Claude reply:', JSON.stringify(response));
+  return res.status(500).json({ error: 'AI returned an empty response.' });
+}
 
 return res.json({
   reply,
@@ -123,7 +145,7 @@ return res.json({
 ```
 
 } catch (error) {
-console.error('Anthropic API error:', error);
+console.error('[Debate] Anthropic API error full:', error?.stack || error);
 return res.status(500).json({ error: 'Failed to get response from AI.' });
 }
 });
