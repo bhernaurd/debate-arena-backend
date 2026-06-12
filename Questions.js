@@ -1,149 +1,150 @@
-// =====================================================================
-// routes/questions.js — Question Generator endpoint for The Agora
-// (FINAL v3: alias normalization, unlimited generation, generation_id)
-// =====================================================================
+// questions.js
+// ES module — matches the import/export style of server.js and dailyChallenge.js
 //
-// ENDPOINTS:
-//   POST  /api/questions/generate   -> generates 3 philosopher-specific debate questions
-//   PATCH /api/questions/:id/used   -> marks a question as used when a debate starts
+// Question Generator for The Agora.
+//   POST  /api/questions/generate   -> 3 philosopher-specific debate questions
+//   PATCH /api/questions/:id/used   -> marks a question used when a debate starts
 //
-// CHANGES IN v3:
-//   - PHILOSOPHER_ALIASES map: "Nietzsche" and "Jung" (and any casing of
-//     the full names) are normalized to canonical names BEFORE validation,
-//     so the app can send either short or full names safely.
-//   - Clear swap-in points for your EXISTING shared Postgres pool and
-//     your EXISTING Claude model/helper (see TODO comments below).
+// Storage matches the dailyChallenge.js pattern: a local JSON file
+// (generated_questions.json) instead of a database, since this backend
+// has no Postgres. Duplicate prevention only needs the recent ~20
+// questions per user+philosopher, so a capped JSON file is plenty for v1.
 //
-// =====================================================================
+// Model: same one the Daily Challenge already uses successfully
+// (claude-haiku-4-5-20251001) — proven to work with this API key,
+// and cheap, which matters since generation is unlimited for now.
+//
+// Wiring in server.js (same style as dailyChallenge):
+//   import questionsRouter from './questions.js';
+//   app.use(questionsRouter);
 
-const express = require('express');
-const crypto = require('crypto');
+import express from 'express';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import crypto from 'crypto';
+import Anthropic from '@anthropic-ai/sdk';
+
 const router = express.Router();
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ---------------------------------------------------------------------
-// DATABASE POOL
-// ---------------------------------------------------------------------
-// TODO (IMPORTANT): If your backend already has a shared pool — very
-// likely, since your daily-challenge cron and push-token cleanup talk to
-// the database — REUSE IT instead of the block below. Find where your
-// existing code does `new Pool(...)`. If it's in its own file, e.g.:
-//
-//     // db.js
-//     module.exports = pool;
-//
-// then DELETE the block below and replace it with ONE line:
-//
-//     const pool = require('../db');   // adjust the path to your file
-//
-// If your pool is created inside index.js/server.js and not exported,
-// the cleanest fix is to move it into its own db.js and require it from
-// both places. Two pools won't crash anything, but they double your
-// Postgres connections, and Railway's free-tier connection cap is low.
-//
-// Only keep the block below if you truly have no existing pool:
-const { Pool } = require('pg');
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-});
+// ─── Storage (same pattern as dailyChallenge.js) ─────────────────────────────
 
-// ---------------------------------------------------------------------
-// CLAUDE CLIENT
-// ---------------------------------------------------------------------
-// TODO (IMPORTANT): Your daily-challenge generation already calls Claude
-// successfully. Open that file and check two things:
-//   1. HOW it calls Claude — if it uses @anthropic-ai/sdk like below,
-//      you're done. If it uses raw fetch to api.anthropic.com, copy that
-//      pattern into callClaudeForQuestions() instead.
-//   2. WHICH model string it uses — and use THE SAME ONE here. Replace
-//      CLAUDE_MODEL below with whatever string your daily challenge uses,
-//      since that string is proven to work with your API key and plan.
-// 'claude-sonnet-4-6' is a valid current model name and a good default,
-// but "matches what already works in your backend" beats "valid".
-const Anthropic = require('@anthropic-ai/sdk');
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const CLAUDE_MODEL = 'claude-sonnet-4-6'; // <-- match your daily-challenge model string
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const QUESTIONS_PATH = path.join(__dirname, 'generated_questions.json');
 
-// ---------------------------------------------------------------------
-// 1. CONFIG
-// ---------------------------------------------------------------------
+// Keep the file from growing forever. 5000 entries is years of headroom
+// at current scale and the file stays well under 2 MB.
+const MAX_STORED_QUESTIONS = 5000;
 
-// Canonical names — these are what get stored in the database and what
-// the themes map is keyed on. Keeping storage canonical matters for
-// duplicate prevention: if "Nietzsche" and "Friedrich Nietzsche" were
-// stored as different philosophers, the exclusion list would split in two.
-const PHILOSOPHER_ALIASES = {
-  'socrates': 'Socrates',
-  'plato': 'Plato',
-  'aristotle': 'Aristotle',
-  'nietzsche': 'Friedrich Nietzsche',
-  'friedrich nietzsche': 'Friedrich Nietzsche',
-  'marcus aurelius': 'Marcus Aurelius',
-  'jung': 'Carl Jung',
-  'carl jung': 'Carl Jung',
-};
-
-// Normalizes whatever the app sends ("Nietzsche", "nietzsche",
-// "Friedrich Nietzsche") to the canonical name, or null if unknown.
-function resolvePhilosopher(input) {
-  if (typeof input !== 'string') return null;
-  return PHILOSOPHER_ALIASES[input.trim().toLowerCase()] || null;
+function readQuestions() {
+    try {
+        if (!fs.existsSync(QUESTIONS_PATH)) return [];
+        const data = JSON.parse(fs.readFileSync(QUESTIONS_PATH, 'utf8'));
+        return Array.isArray(data) ? data : [];
+    } catch (err) {
+        console.error('[Questions] JSON read error:', err.message);
+        return [];
+    }
 }
 
-// Themes injected into the AI prompt so questions stay on-brand for each
-// philosopher — same guardrail philosophy as your validateChallenge().
+function writeQuestions(questions) {
+    try {
+        const capped = questions.slice(0, MAX_STORED_QUESTIONS);
+        fs.writeFileSync(QUESTIONS_PATH, JSON.stringify(capped, null, 2), 'utf8');
+        return true;
+    } catch (err) {
+        console.error('[Questions] JSON write error:', err.message);
+        return false;
+    }
+}
+
+// ─── Philosopher normalization ───────────────────────────────────────────────
+// Accepts Swift display names ("Nietzsche", "Marcus Aurelius", "Carl Jung"),
+// full names ("Friedrich Nietzsche"), AND backend ids ("aurelius", "jung"),
+// so it works whether the app sends philosopher.name or philosopher.id.
+//
+// The canonical name is what gets STORED — keeping storage canonical is what
+// makes duplicate prevention work. If "Nietzsche" and "Friedrich Nietzsche"
+// were stored as different philosophers, the exclusion list would split.
+
+const PHILOSOPHER_ALIASES = {
+    'socrates': 'Socrates',
+    'plato': 'Plato',
+    'aristotle': 'Aristotle',
+    'nietzsche': 'Nietzsche',
+    'friedrich nietzsche': 'Nietzsche',
+    'marcus aurelius': 'Marcus Aurelius',
+    'aurelius': 'Marcus Aurelius',
+    'marcus': 'Marcus Aurelius',
+    'jung': 'Carl Jung',
+    'carl jung': 'Carl Jung',
+};
+
+function resolvePhilosopher(input) {
+    if (typeof input !== 'string') return null;
+    return PHILOSOPHER_ALIASES[input.trim().toLowerCase()] || null;
+}
+
+// Themes injected into the prompt so questions stay on-brand —
+// same guardrail philosophy as validateChallenge() in dailyChallenge.js.
 const PHILOSOPHER_THEMES = {
-  'Socrates':
-    'self-examination, virtue, knowledge vs ignorance, truth, justice, the examined life, moral confidence, questioning assumptions, admitting what you do not know',
-  'Plato':
-    'truth vs illusion, the soul, justice, the Forms, the Allegory of the Cave, the ideal society, education, appearance vs reality, who should rule',
-  'Aristotle':
-    'virtue, habit, excellence, eudaimonia (flourishing), friendship, purpose, moderation and the golden mean, practical wisdom, character built through action',
-  'Friedrich Nietzsche':
-    'values, suffering as fuel, herd morality, self-overcoming, "God is dead", the Ubermensch, comfort vs greatness, weakness, creating your own meaning, resentment',
-  'Marcus Aurelius':
-    'what is in your control, discipline, duty, mortality and memento mori, adversity, emotional restraint, acceptance, responsibility, fate, the opinions of others',
-  'Carl Jung':
-    'the shadow, individuation, dreams, projection, archetypes, the unconscious, identity, inner conflict, the persona vs the true self, integrating what you deny',
+    'Socrates':
+        'self-examination, virtue, knowledge vs ignorance, truth, justice, the examined life, moral confidence, questioning assumptions, admitting what you do not know',
+    'Plato':
+        'truth vs illusion, the soul, justice, the Forms, the Allegory of the Cave, the ideal society, education, appearance vs reality, who should rule',
+    'Aristotle':
+        'virtue, habit, excellence, eudaimonia (flourishing), friendship, purpose, moderation and the golden mean, practical wisdom, character built through action',
+    'Nietzsche':
+        'values, suffering as fuel, herd morality, self-overcoming, "God is dead", the Ubermensch, comfort vs greatness, weakness, creating your own meaning, resentment',
+    'Marcus Aurelius':
+        'what is in your control, discipline, duty, mortality and memento mori, adversity, emotional restraint, acceptance, responsibility, fate, the opinions of others',
+    'Carl Jung':
+        'the shadow, individuation, dreams, projection, archetypes, the unconscious, identity, inner conflict, the persona vs the true self, integrating what you deny',
 };
 
 // How many recent questions to feed the AI as "do not repeat" context.
 const RECENT_EXCLUSION_COUNT = 20;
 
-// ---------------------------------------------------------------------
-// 2. HELPERS
-// ---------------------------------------------------------------------
+// ─── Duplicate helpers ───────────────────────────────────────────────────────
 
-// Normalize question text for duplicate comparison:
+// Normalize question text for comparison:
 // lowercase, strip punctuation, collapse whitespace.
-function normalize(text) {
-  return text
-    .toLowerCase()
-    .replace(/[^\w\s]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+function normalizeText(text) {
+    return text
+        .toLowerCase()
+        .replace(/[^\w\s]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
 }
 
 // Simple similarity check (no embeddings): duplicate if exact match, one
 // contains the other, or they share > 80% of the shorter question's words.
 function tooSimilar(a, b) {
-  if (a === b) return true;
-  if (a.includes(b) || b.includes(a)) return true;
-  const wordsA = new Set(a.split(' '));
-  const wordsB = new Set(b.split(' '));
-  let shared = 0;
-  for (const w of wordsA) if (wordsB.has(w)) shared++;
-  const overlap = shared / Math.min(wordsA.size, wordsB.size);
-  return overlap > 0.8;
+    if (a === b) return true;
+    if (a.includes(b) || b.includes(a)) return true;
+    const wordsA = new Set(a.split(' '));
+    const wordsB = new Set(b.split(' '));
+    let shared = 0;
+    for (const w of wordsA) if (wordsB.has(w)) shared++;
+    const overlap = shared / Math.min(wordsA.size, wordsB.size);
+    return overlap > 0.8;
 }
 
-// Build the exact AI prompt.
-function buildPrompt(philosopher, themes, recentQuestions, count) {
-  const exclusionBlock = recentQuestions.length > 0
-    ? `Do NOT repeat or closely paraphrase any of these recent questions:\n${recentQuestions.map(q => `- ${q}`).join('\n')}`
-    : 'There are no recent questions to avoid.';
+function getRecentQuestions(allQuestions, userId, philosopher) {
+    return allQuestions
+        .filter(q => q.userId === userId && q.philosopher === philosopher)
+        .slice(0, RECENT_EXCLUSION_COUNT); // file is newest-first
+}
 
-  return `You are generating debate questions for "The Agora", an iOS app where users debate history's greatest philosophers in real-time conversation.
+// ─── Claude generation ───────────────────────────────────────────────────────
+
+function buildPrompt(philosopher, themes, recentQuestions, count) {
+    const exclusionBlock = recentQuestions.length > 0
+        ? `Do NOT repeat or closely paraphrase any of these recent questions:\n${recentQuestions.map(q => `- ${q}`).join('\n')}`
+        : 'There are no recent questions to avoid.';
+
+    return `You are generating debate questions for "The Agora", an iOS app where users debate history's greatest philosophers in real-time conversation. Tagline: "For centuries, you could only read the philosophers. Now you can debate them."
 
 Philosopher: ${philosopher}
 Core themes for this philosopher: ${themes}
@@ -169,155 +170,153 @@ Return ONLY valid JSON with no markdown, no backticks, and no text before or aft
 {"questions":[{"question":"string","theme":"string","difficulty":"beginner | intermediate | advanced"}]}`;
 }
 
-// Call Claude and safely parse the JSON response.
-async function callClaudeForQuestions(philosopher, recentQuestions, count) {
-  const prompt = buildPrompt(
-    philosopher,
-    PHILOSOPHER_THEMES[philosopher],
-    recentQuestions,
-    count
-  );
+async function callClaudeForQuestions(philosopher, recentQuestionTexts, count) {
+    const prompt = buildPrompt(
+        philosopher,
+        PHILOSOPHER_THEMES[philosopher],
+        recentQuestionTexts,
+        count
+    );
 
-  const response = await anthropic.messages.create({
-    model: CLAUDE_MODEL,
-    max_tokens: 600,
-    messages: [{ role: 'user', content: prompt }],
-  });
+    // Same model + call shape as generateChallenge() in dailyChallenge.js.
+    const message = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 600,
+        messages: [{ role: 'user', content: prompt }],
+    });
 
-  const raw = response.content
-    .filter(block => block.type === 'text')
-    .map(block => block.text)
-    .join('');
+    const raw = message.content?.find(b => b.type === 'text')?.text ?? '';
+    const clean = raw.replace(/```json|```/g, '').trim();
 
-  // Strip markdown fences if the model added them despite instructions.
-  const cleaned = raw.replace(/```json|```/g, '').trim();
+    const parsed = JSON.parse(clean); // throws if invalid -> caught by route handler
+    if (!Array.isArray(parsed.questions)) {
+        throw new Error('AI response missing questions array');
+    }
 
-  const parsed = JSON.parse(cleaned); // throws if invalid -> caught by caller
-  if (!Array.isArray(parsed.questions)) {
-    throw new Error('AI response missing questions array');
-  }
-
-  // Validate and sanitize each question.
-  return parsed.questions
-    .filter(q => typeof q.question === 'string' && q.question.trim().length > 0)
-    .map(q => ({
-      question: q.question.trim(),
-      theme: typeof q.theme === 'string' ? q.theme.trim() : 'general',
-      difficulty: ['beginner', 'intermediate', 'advanced'].includes(q.difficulty)
-        ? q.difficulty
-        : 'intermediate',
-    }));
+    return parsed.questions
+        .filter(q => typeof q.question === 'string' && q.question.trim().length > 0)
+        .map(q => ({
+            question: q.question.trim(),
+            theme: typeof q.theme === 'string' ? q.theme.trim() : 'general',
+            difficulty: ['beginner', 'intermediate', 'advanced'].includes(q.difficulty)
+                ? q.difficulty
+                : 'intermediate',
+        }));
 }
 
-// ---------------------------------------------------------------------
-// 3. POST /api/questions/generate
-//    Unlimited generation — no daily limits, no pro checks.
-// ---------------------------------------------------------------------
+// ─── POST /api/questions/generate ────────────────────────────────────────────
+// Unlimited generation — no daily limits, no pro checks.
 
-router.post('/generate', async (req, res) => {
-  try {
-    const { userId, count = 3 } = req.body;
+router.post('/api/questions/generate', async (req, res) => {
+    try {
+        const { userId, count = 3 } = req.body;
 
-    // --- Validation ---
-    if (!userId || typeof userId !== 'string') {
-      return res.status(400).json({ success: false, error: 'userId is required' });
-    }
-
-    // Normalize "Nietzsche" -> "Friedrich Nietzsche", "Jung" -> "Carl Jung", etc.
-    const philosopher = resolvePhilosopher(req.body.philosopher);
-    if (!philosopher) {
-      return res.status(400).json({ success: false, error: 'Invalid philosopher' });
-    }
-
-    const safeCount = Math.min(Math.max(parseInt(count, 10) || 3, 1), 3);
-
-    // --- Fetch recent questions for the exclusion list (canonical name) ---
-    const recent = await pool.query(
-      `SELECT question_text, question_normalized
-       FROM generated_questions
-       WHERE user_id = $1 AND philosopher = $2
-       ORDER BY generated_at DESC
-       LIMIT $3`,
-      [userId, philosopher, RECENT_EXCLUSION_COUNT]
-    );
-    const recentTexts = recent.rows.map(r => r.question_text);
-    const recentNormalized = recent.rows.map(r => r.question_normalized);
-
-    // --- Generate, with ONE retry if duplicates slip through ---
-    let accepted = [];
-    for (let attempt = 0; attempt < 2 && accepted.length < safeCount; attempt++) {
-      const generated = await callClaudeForQuestions(
-        philosopher,
-        // On retry, also exclude what we already accepted this round
-        [...recentTexts, ...accepted.map(q => q.question)],
-        safeCount - accepted.length
-      );
-
-      for (const q of generated) {
-        const norm = normalize(q.question);
-        const dupAgainstRecent = recentNormalized.some(r => tooSimilar(norm, r));
-        const dupAgainstBatch = accepted.some(a => tooSimilar(norm, normalize(a.question)));
-        if (!dupAgainstRecent && !dupAgainstBatch) {
-          accepted.push(q);
+        if (!userId || typeof userId !== 'string') {
+            return res.status(400).json({ success: false, error: 'userId is required' });
         }
-        if (accepted.length >= safeCount) break;
-      }
+
+        // "Nietzsche" / "Friedrich Nietzsche" / "aurelius" / "Carl Jung" all resolve.
+        const philosopher = resolvePhilosopher(req.body.philosopher);
+        if (!philosopher) {
+            return res.status(400).json({ success: false, error: 'Invalid philosopher' });
+        }
+
+        const safeCount = Math.min(Math.max(parseInt(count, 10) || 3, 1), 3);
+
+        // Recent questions for this user + philosopher (exclusion list).
+        const allQuestions = readQuestions();
+        const recent = getRecentQuestions(allQuestions, userId, philosopher);
+        const recentTexts = recent.map(q => q.questionText);
+        const recentNormalized = recent.map(q => q.questionNormalized);
+
+        // Generate, with ONE retry if duplicates slip through.
+        let accepted = [];
+        for (let attempt = 0; attempt < 2 && accepted.length < safeCount; attempt++) {
+            const generated = await callClaudeForQuestions(
+                philosopher,
+                // On retry, also exclude what we already accepted this round
+                [...recentTexts, ...accepted.map(q => q.question)],
+                safeCount - accepted.length
+            );
+
+            for (const q of generated) {
+                const norm = normalizeText(q.question);
+                const dupAgainstRecent = recentNormalized.some(r => tooSimilar(norm, r));
+                const dupAgainstBatch = accepted.some(a => tooSimilar(norm, normalizeText(a.question)));
+                if (!dupAgainstRecent && !dupAgainstBatch) {
+                    accepted.push(q);
+                }
+                if (accepted.length >= safeCount) break;
+            }
+        }
+
+        if (accepted.length === 0) {
+            return res.status(502).json({
+                success: false,
+                error: 'Could not generate fresh questions. Please try again.',
+            });
+        }
+
+        // Save with ONE shared generationId for the whole batch
+        // (one button tap = one generation = up to 3 rows).
+        const generationId = crypto.randomUUID();
+        const nowIso = new Date().toISOString();
+
+        const savedEntries = accepted.map(q => ({
+            id: crypto.randomUUID(),
+            generationId,
+            userId,
+            philosopher,
+            questionText: q.question,
+            questionNormalized: normalizeText(q.question),
+            theme: q.theme,
+            difficulty: q.difficulty,
+            source: 'ai_generated',
+            generatedAt: nowIso,
+            usedAt: null,
+        }));
+
+        // Newest-first, like daily_challenge_history.json.
+        const saved = writeQuestions([...savedEntries, ...allQuestions]);
+        console.log(`[Questions] Generated ${savedEntries.length} for ${philosopher} (user ${userId.slice(0, 8)}…) | save: ${saved ? 'SUCCESS' : 'FAILED'}`);
+
+        return res.json({
+            success: true,
+            questions: savedEntries.map(e => ({
+                id: e.id,
+                question: e.questionText,
+                theme: e.theme,
+                difficulty: e.difficulty,
+            })),
+        });
+    } catch (err) {
+        console.error('[Questions] generate error:', err.message);
+        return res.status(500).json({
+            success: false,
+            error: 'Question generation failed. Please try again.',
+        });
     }
-
-    if (accepted.length === 0) {
-      return res.status(502).json({
-        success: false,
-        error: 'Could not generate fresh questions. Please try again.',
-      });
-    }
-
-    // --- Save to database with ONE shared generation_id for the batch ---
-    const generationId = crypto.randomUUID();
-
-    const saved = [];
-    for (const q of accepted) {
-      const insert = await pool.query(
-        `INSERT INTO generated_questions
-           (generation_id, user_id, philosopher, question_text, question_normalized, theme, difficulty, source)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, 'ai_generated')
-         RETURNING id`,
-        [generationId, userId, philosopher, q.question, normalize(q.question), q.theme, q.difficulty]
-      );
-      saved.push({
-        id: insert.rows[0].id,
-        question: q.question,
-        theme: q.theme,
-        difficulty: q.difficulty,
-      });
-    }
-
-    return res.json({ success: true, questions: saved });
-  } catch (err) {
-    console.error('[questions/generate] error:', err.message);
-    return res.status(500).json({
-      success: false,
-      error: 'Question generation failed. Please try again.',
-    });
-  }
 });
 
-// ---------------------------------------------------------------------
-// 4. PATCH /api/questions/:id/used
-//    Fire-and-forget from the app when the user starts a debate with a
-//    generated question. Failure here must NEVER block the debate.
-// ---------------------------------------------------------------------
+// ─── PATCH /api/questions/:id/used ───────────────────────────────────────────
+// Fire-and-forget from the app when the user enters a debate with a
+// generated question. Failure here must NEVER block the debate.
 
-router.patch('/:id/used', async (req, res) => {
-  try {
-    await pool.query(
-      `UPDATE generated_questions SET used_at = now() WHERE id = $1 AND used_at IS NULL`,
-      [req.params.id]
-    );
-    return res.json({ success: true });
-  } catch (err) {
-    console.error('[questions/used] error:', err.message);
-    return res.status(500).json({ success: false });
-  }
+router.patch('/api/questions/:id/used', (req, res) => {
+    try {
+        const allQuestions = readQuestions();
+        const target = allQuestions.find(q => q.id === req.params.id);
+
+        if (target && !target.usedAt) {
+            target.usedAt = new Date().toISOString();
+            writeQuestions(allQuestions);
+        }
+
+        return res.json({ success: true });
+    } catch (err) {
+        console.error('[Questions] used error:', err.message);
+        return res.status(500).json({ success: false });
+    }
 });
 
-module.exports = router;
+export default router;
