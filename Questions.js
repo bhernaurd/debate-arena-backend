@@ -3,61 +3,53 @@
 //
 // Question Generator for The Agora.
 //   POST  /api/questions/generate   -> 3 philosopher-specific debate questions
-//   PATCH /api/questions/:id/used   -> marks a question used when a debate starts
+//   PATCH /api/questions/:id/used   -> sets used_at when a debate starts
 //
-// Storage matches the dailyChallenge.js pattern: a local JSON file
-// (generated_questions.json) instead of a database, since this backend
-// has no Postgres. Duplicate prevention only needs the recent ~20
-// questions per user+philosopher, so a capped JSON file is plenty for v1.
+// Storage: Railway Postgres, using the existing generated_questions table
+// (id, generation_id, user_id, philosopher, question_text,
+//  question_normalized, theme, difficulty, source, generated_at, used_at).
 //
 // Model: same one the Daily Challenge already uses successfully
-// (claude-haiku-4-5-20251001) — proven to work with this API key,
-// and cheap, which matters since generation is unlimited for now.
+// (claude-haiku-4-5-20251001) — proven with this API key, and cheap,
+// which matters since generation is unlimited for now.
+//
+// Unlimited generation: no daily limits, no pro checks, no limitReached.
+// Duplicate prevention is fully active: recent-question exclusion list in
+// the prompt, normalized comparison, similarity check, one retry.
+//
+// REQUIRES: npm install pg   (dailyChallenge.js doesn't use a database,
+// so pg is likely not in package.json yet — install it before deploying.)
 //
 // Wiring in server.js (same style as dailyChallenge):
 //   import questionsRouter from './questions.js';
 //   app.use(questionsRouter);
 
 import express from 'express';
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import crypto from 'crypto';
+import pg from 'pg';
 import Anthropic from '@anthropic-ai/sdk';
 
 const router = express.Router();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ─── Storage (same pattern as dailyChallenge.js) ─────────────────────────────
+// ─── Postgres pool ───────────────────────────────────────────────────────────
+// Railway gives you two kinds of DATABASE_URL:
+//   - internal  (host ends in .railway.internal) -> no SSL
+//   - public proxy (host like xxxx.proxy.rlwy.net) -> SSL required
+// This handles both automatically.
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const QUESTIONS_PATH = path.join(__dirname, 'generated_questions.json');
+const { Pool } = pg;
 
-// Keep the file from growing forever. 5000 entries is years of headroom
-// at current scale and the file stays well under 2 MB.
-const MAX_STORED_QUESTIONS = 5000;
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_URL?.includes('railway.internal')
+        ? false
+        : { rejectUnauthorized: false },
+});
 
-function readQuestions() {
-    try {
-        if (!fs.existsSync(QUESTIONS_PATH)) return [];
-        const data = JSON.parse(fs.readFileSync(QUESTIONS_PATH, 'utf8'));
-        return Array.isArray(data) ? data : [];
-    } catch (err) {
-        console.error('[Questions] JSON read error:', err.message);
-        return [];
-    }
-}
-
-function writeQuestions(questions) {
-    try {
-        const capped = questions.slice(0, MAX_STORED_QUESTIONS);
-        fs.writeFileSync(QUESTIONS_PATH, JSON.stringify(capped, null, 2), 'utf8');
-        return true;
-    } catch (err) {
-        console.error('[Questions] JSON write error:', err.message);
-        return false;
-    }
-}
+pool.on('error', (err) => {
+    console.error('[Questions] Postgres pool error:', err.message);
+});
 
 // ─── Philosopher normalization ───────────────────────────────────────────────
 // Accepts Swift display names ("Nietzsche", "Marcus Aurelius", "Carl Jung"),
@@ -129,12 +121,6 @@ function tooSimilar(a, b) {
     for (const w of wordsA) if (wordsB.has(w)) shared++;
     const overlap = shared / Math.min(wordsA.size, wordsB.size);
     return overlap > 0.8;
-}
-
-function getRecentQuestions(allQuestions, userId, philosopher) {
-    return allQuestions
-        .filter(q => q.userId === userId && q.philosopher === philosopher)
-        .slice(0, RECENT_EXCLUSION_COUNT); // file is newest-first
 }
 
 // ─── Claude generation ───────────────────────────────────────────────────────
@@ -224,10 +210,16 @@ router.post('/api/questions/generate', async (req, res) => {
         const safeCount = Math.min(Math.max(parseInt(count, 10) || 3, 1), 3);
 
         // Recent questions for this user + philosopher (exclusion list).
-        const allQuestions = readQuestions();
-        const recent = getRecentQuestions(allQuestions, userId, philosopher);
-        const recentTexts = recent.map(q => q.questionText);
-        const recentNormalized = recent.map(q => q.questionNormalized);
+        const recent = await pool.query(
+            `SELECT question_text, question_normalized
+             FROM generated_questions
+             WHERE user_id = $1 AND philosopher = $2
+             ORDER BY generated_at DESC
+             LIMIT $3`,
+            [userId, philosopher, RECENT_EXCLUSION_COUNT]
+        );
+        const recentTexts = recent.rows.map(r => r.question_text);
+        const recentNormalized = recent.rows.map(r => r.question_normalized);
 
         // Generate, with ONE retry if duplicates slip through.
         let accepted = [];
@@ -257,38 +249,31 @@ router.post('/api/questions/generate', async (req, res) => {
             });
         }
 
-        // Save with ONE shared generationId for the whole batch
+        // Save with ONE shared generation_id for the whole batch
         // (one button tap = one generation = up to 3 rows).
         const generationId = crypto.randomUUID();
-        const nowIso = new Date().toISOString();
 
-        const savedEntries = accepted.map(q => ({
-            id: crypto.randomUUID(),
-            generationId,
-            userId,
-            philosopher,
-            questionText: q.question,
-            questionNormalized: normalizeText(q.question),
-            theme: q.theme,
-            difficulty: q.difficulty,
-            source: 'ai_generated',
-            generatedAt: nowIso,
-            usedAt: null,
-        }));
+        const saved = [];
+        for (const q of accepted) {
+            const insert = await pool.query(
+                `INSERT INTO generated_questions
+                     (generation_id, user_id, philosopher, question_text,
+                      question_normalized, theme, difficulty, source, generated_at)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'ai_generated', now())
+                 RETURNING id`,
+                [generationId, userId, philosopher, q.question, normalizeText(q.question), q.theme, q.difficulty]
+            );
+            saved.push({
+                id: insert.rows[0].id,
+                question: q.question,
+                theme: q.theme,
+                difficulty: q.difficulty,
+            });
+        }
 
-        // Newest-first, like daily_challenge_history.json.
-        const saved = writeQuestions([...savedEntries, ...allQuestions]);
-        console.log(`[Questions] Generated ${savedEntries.length} for ${philosopher} (user ${userId.slice(0, 8)}…) | save: ${saved ? 'SUCCESS' : 'FAILED'}`);
+        console.log(`[Questions] Generated ${saved.length} for ${philosopher} (user ${userId.slice(0, 8)}…) | generation_id: ${generationId}`);
 
-        return res.json({
-            success: true,
-            questions: savedEntries.map(e => ({
-                id: e.id,
-                question: e.questionText,
-                theme: e.theme,
-                difficulty: e.difficulty,
-            })),
-        });
+        return res.json({ success: true, questions: saved });
     } catch (err) {
         console.error('[Questions] generate error:', err.message);
         return res.status(500).json({
@@ -302,16 +287,14 @@ router.post('/api/questions/generate', async (req, res) => {
 // Fire-and-forget from the app when the user enters a debate with a
 // generated question. Failure here must NEVER block the debate.
 
-router.patch('/api/questions/:id/used', (req, res) => {
+router.patch('/api/questions/:id/used', async (req, res) => {
     try {
-        const allQuestions = readQuestions();
-        const target = allQuestions.find(q => q.id === req.params.id);
-
-        if (target && !target.usedAt) {
-            target.usedAt = new Date().toISOString();
-            writeQuestions(allQuestions);
-        }
-
+        await pool.query(
+            `UPDATE generated_questions
+             SET used_at = now()
+             WHERE id = $1 AND used_at IS NULL`,
+            [req.params.id]
+        );
         return res.json({ success: true });
     } catch (err) {
         console.error('[Questions] used error:', err.message);
