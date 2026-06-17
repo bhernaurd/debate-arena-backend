@@ -5,17 +5,29 @@ import express from 'express';
 import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
 import rateLimit from 'express-rate-limit';
+import pg from 'pg';
 
 import dailyChallengeRouter from './dailyChallenge.js';
 import pushRouter from './pushRoutes.js';
 import questionsRouter from './questions.js';
+import { createAnalyticsRouter } from './analytics.js';
 import './pushScheduler.js';  // registers cron jobs on startup
+
+const { Pool } = pg;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY
+});
+
+// Postgres pool for analytics
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: process.env.DATABASE_URL?.includes('railway')
+    ? { rejectUnauthorized: false }
+    : false
 });
 
 // Required for Railway proxy + express-rate-limit.
@@ -40,6 +52,11 @@ app.use('/debate', limiter);
 app.use(dailyChallengeRouter);
 app.use(pushRouter);
 app.use(questionsRouter);
+
+// Analytics routes
+app.use('/analytics', createAnalyticsRouter(pool, {
+  adminKey: process.env.ANALYTICS_ADMIN_KEY
+}));
 
 // Summarize older messages using Haiku
 async function summarizeMessages(messages) {
