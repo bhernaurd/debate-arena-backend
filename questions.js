@@ -9,20 +9,11 @@
 // (id, generation_id, user_id, philosopher, question_text,
 //  question_normalized, theme, difficulty, source, generated_at, used_at).
 //
-// Model: same one the Daily Challenge already uses successfully
-// (claude-haiku-4-5-20251001) — proven with this API key, and cheap,
-// which matters since generation is unlimited for now.
+// This version hard-enforces exactly one question per difficulty:
+// Beginner → Intermediate → Advanced
 //
-// Unlimited generation: no daily limits, no pro checks, no limitReached.
-// Duplicate prevention is fully active: recent-question exclusion list in
-// the prompt, normalized comparison, similarity check, one retry.
-//
-// REQUIRES: npm install pg   (dailyChallenge.js doesn't use a database,
-// so pg is likely not in package.json yet — install it before deploying.)
-//
-// Wiring in server.js (same style as dailyChallenge):
-//   import questionsRouter from './questions.js';
-//   app.use(questionsRouter);
+// Even if Claude returns duplicate difficulties, the backend repairs/retries
+// and only sends the app one beginner, one intermediate, and one advanced.
 
 import express from 'express';
 import crypto from 'crypto';
@@ -31,12 +22,6 @@ import Anthropic from '@anthropic-ai/sdk';
 
 const router = express.Router();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-
-// ─── Postgres pool ───────────────────────────────────────────────────────────
-// Railway gives you two kinds of DATABASE_URL:
-//   - internal  (host ends in .railway.internal) -> no SSL
-//   - public proxy (host like xxxx.proxy.rlwy.net) -> SSL required
-// This handles both automatically.
 
 const { Pool } = pg;
 
@@ -51,14 +36,15 @@ pool.on('error', (err) => {
     console.error('[Questions] Postgres pool error:', err.message);
 });
 
-// ─── Philosopher normalization ───────────────────────────────────────────────
-// Accepts Swift display names ("Nietzsche", "Marcus Aurelius", "Carl Jung"),
-// full names ("Friedrich Nietzsche"), AND backend ids ("aurelius", "jung"),
-// so it works whether the app sends philosopher.name or philosopher.id.
-//
-// The canonical name is what gets STORED — keeping storage canonical is what
-// makes duplicate prevention work. If "Nietzsche" and "Friedrich Nietzsche"
-// were stored as different philosophers, the exclusion list would split.
+// ─── Constants ───────────────────────────────────────────────────────────────
+
+const REQUIRED_DIFFICULTIES = ['beginner', 'intermediate', 'advanced'];
+
+const DIFFICULTY_LABELS = {
+    beginner: 'Beginner',
+    intermediate: 'Intermediate',
+    advanced: 'Advanced',
+};
 
 const PHILOSOPHER_ALIASES = {
     'socrates': 'Socrates',
@@ -73,13 +59,6 @@ const PHILOSOPHER_ALIASES = {
     'carl jung': 'Carl Jung',
 };
 
-function resolvePhilosopher(input) {
-    if (typeof input !== 'string') return null;
-    return PHILOSOPHER_ALIASES[input.trim().toLowerCase()] || null;
-}
-
-// Themes injected into the prompt so questions stay on-brand —
-// same guardrail philosophy as validateChallenge() in dailyChallenge.js.
 const PHILOSOPHER_THEMES = {
     'Socrates':
         'self-examination, virtue, knowledge vs ignorance, truth, justice, the examined life, moral confidence, questioning assumptions, admitting what you do not know',
@@ -95,121 +74,247 @@ const PHILOSOPHER_THEMES = {
         'the shadow, individuation, dreams, projection, archetypes, the unconscious, identity, inner conflict, the persona vs the true self, integrating what you deny',
 };
 
-// How many recent questions to feed the AI as "do not repeat" context.
 const RECENT_EXCLUSION_COUNT = 20;
 
-// ─── Duplicate helpers ───────────────────────────────────────────────────────
+// ─── Helpers ────────────────────────────────────────────────────────────────
 
-// Normalize question text for comparison:
-// lowercase, strip punctuation, collapse whitespace.
+function resolvePhilosopher(input) {
+    if (typeof input !== 'string') return null;
+    return PHILOSOPHER_ALIASES[input.trim().toLowerCase()] || null;
+}
+
 function normalizeText(text) {
-    return text
+    return String(text || '')
         .toLowerCase()
         .replace(/[^\w\s]/g, '')
         .replace(/\s+/g, ' ')
         .trim();
 }
 
-// Simple similarity check (no embeddings): duplicate if exact match, one
-// contains the other, or they share > 80% of the shorter question's words.
+function normalizeDifficulty(value) {
+    if (typeof value !== 'string') return null;
+
+    const difficulty = value.trim().toLowerCase();
+
+    if (difficulty === 'beginner') return 'beginner';
+    if (difficulty === 'intermediate') return 'intermediate';
+    if (difficulty === 'advanced') return 'advanced';
+
+    return null;
+}
+
 function tooSimilar(a, b) {
+    if (!a || !b) return false;
     if (a === b) return true;
     if (a.includes(b) || b.includes(a)) return true;
-    const wordsA = new Set(a.split(' '));
-    const wordsB = new Set(b.split(' '));
+
+    const wordsA = new Set(a.split(' ').filter(Boolean));
+    const wordsB = new Set(b.split(' ').filter(Boolean));
+
+    if (wordsA.size === 0 || wordsB.size === 0) return false;
+
     let shared = 0;
-    for (const w of wordsA) if (wordsB.has(w)) shared++;
+    for (const w of wordsA) {
+        if (wordsB.has(w)) shared++;
+    }
+
     const overlap = shared / Math.min(wordsA.size, wordsB.size);
     return overlap > 0.8;
 }
 
-// ─── Claude generation ───────────────────────────────────────────────────────
+function sortByRequiredDifficulty(questions) {
+    return [...questions].sort((a, b) => {
+        return REQUIRED_DIFFICULTIES.indexOf(a.difficulty) - REQUIRED_DIFFICULTIES.indexOf(b.difficulty);
+    });
+}
 
-function buildPrompt(philosopher, themes, recentQuestions, count) {
+function sanitizeQuestion(raw) {
+    if (!raw || typeof raw !== 'object') return null;
+
+    const question = typeof raw.question === 'string' ? raw.question.trim() : '';
+    const theme = typeof raw.theme === 'string' && raw.theme.trim().length > 0
+        ? raw.theme.trim()
+        : 'general';
+
+    const difficulty = normalizeDifficulty(raw.difficulty);
+
+    if (!question || !difficulty) return null;
+
+    return {
+        question,
+        theme,
+        difficulty,
+    };
+}
+
+function selectOnePerDifficulty(generated, neededDifficulties, recentNormalized, accepted) {
+    const selected = [];
+
+    for (const difficulty of neededDifficulties) {
+        const candidates = generated.filter(q => q.difficulty === difficulty);
+
+        for (const candidate of candidates) {
+            const norm = normalizeText(candidate.question);
+
+            const dupAgainstRecent = recentNormalized.some(r => tooSimilar(norm, r));
+            const dupAgainstAccepted = accepted.some(a => tooSimilar(norm, normalizeText(a.question)));
+            const dupAgainstSelected = selected.some(s => tooSimilar(norm, normalizeText(s.question)));
+
+            if (!dupAgainstRecent && !dupAgainstAccepted && !dupAgainstSelected) {
+                selected.push(candidate);
+                break;
+            }
+        }
+    }
+
+    return selected;
+}
+
+// ─── Claude generation ──────────────────────────────────────────────────────
+
+function buildPrompt(philosopher, themes, recentQuestions, neededDifficulties) {
+    const difficultyList = neededDifficulties.join(', ');
+
     const exclusionBlock = recentQuestions.length > 0
         ? `Do NOT repeat or closely paraphrase any of these recent questions:\n${recentQuestions.map(q => `- ${q}`).join('\n')}`
         : 'There are no recent questions to avoid.';
 
-    return `You are generating debate questions for "The Agora", an iOS app where users debate history's greatest philosophers in real-time conversation. Tagline: "For centuries, you could only read the philosophers. Now you can debate them."
+    return `You are generating debate questions for "The Agora", an iOS app where users debate history's greatest philosophers in real-time conversation.
 
-Philosopher: ${philosopher}
-Core themes for this philosopher: ${themes}
+Tagline:
+"For centuries, you could only read the philosophers. Now you can debate them."
 
-Generate exactly ${count} debate questions.
+Philosopher:
+${philosopher}
+
+Core themes for this philosopher:
+${themes}
+
+Generate exactly ${neededDifficulties.length} debate question(s).
+
+You must generate exactly ONE question for each of these difficulty levels:
+${difficultyList}
+
+The final JSON array must be ordered exactly like this:
+${neededDifficulties.map(d => DIFFICULTY_LABELS[d]).join(' → ')}
 
 Rules for every question:
-- One sentence. Under 140 characters whenever possible. Never a paragraph.
-- It must create tension and invite real disagreement. It should be arguable, never a definition, trivia, or "explain X" question.
-- It must feel like ${philosopher} is challenging the user personally and directly, not like a school essay prompt.
-- It must be philosophically accurate to ${philosopher}'s actual ideas and concerns. Never invent quotes. Never attribute claims this philosopher did not make.
-- No generic self-help phrasing. No academic jargon.
-- Each of the ${count} questions must cover a DIFFERENT theme.
-
-${exclusionBlock}
+- One sentence.
+- Under 140 characters whenever possible.
+- It must create tension and invite real disagreement.
+- It should be arguable, never a definition, trivia, or "explain X" question.
+- It must feel like ${philosopher} is challenging the user personally and directly.
+- It must be philosophically accurate to ${philosopher}'s actual ideas and concerns.
+- Never invent quotes.
+- Never attribute claims this philosopher did not make.
+- No generic self-help phrasing.
+- No academic jargon.
+- Each question must cover a different theme.
 
 Difficulty guide:
 - beginner: requires no philosophy background, purely intuitive
-- intermediate: touches a named concept (e.g. herd morality, the Cave) in plain language
+- intermediate: touches a named concept or recognizable idea in plain language
 - advanced: forces the user to defend a position against the philosopher's strongest idea
 
-Return ONLY valid JSON with no markdown, no backticks, and no text before or after it, in exactly this shape:
-{"questions":[{"question":"string","theme":"string","difficulty":"beginner | intermediate | advanced"}]}`;
+${exclusionBlock}
+
+Return ONLY valid JSON with no markdown, no backticks, and no text before or after it.
+
+Return exactly this shape:
+{"questions":[{"question":"string","theme":"string","difficulty":"beginner"}]}
+
+Important:
+- difficulty must be exactly one of: beginner, intermediate, advanced
+- Do not return two questions with the same difficulty.
+- Do not omit any requested difficulty.`;
 }
 
-async function callClaudeForQuestions(philosopher, recentQuestionTexts, count) {
+async function callClaudeForQuestions(philosopher, recentQuestionTexts, neededDifficulties) {
     const prompt = buildPrompt(
         philosopher,
         PHILOSOPHER_THEMES[philosopher],
         recentQuestionTexts,
-        count
+        neededDifficulties
     );
 
-    // Same model + call shape as generateChallenge() in dailyChallenge.js.
     const message = await client.messages.create({
         model: 'claude-haiku-4-5-20251001',
-        max_tokens: 600,
+        max_tokens: 700,
         messages: [{ role: 'user', content: prompt }],
     });
 
     const raw = message.content?.find(b => b.type === 'text')?.text ?? '';
     const clean = raw.replace(/```json|```/g, '').trim();
 
-    const parsed = JSON.parse(clean); // throws if invalid -> caught by route handler
+    const parsed = JSON.parse(clean);
+
     if (!Array.isArray(parsed.questions)) {
         throw new Error('AI response missing questions array');
     }
 
     return parsed.questions
-        .filter(q => typeof q.question === 'string' && q.question.trim().length > 0)
-        .map(q => ({
-            question: q.question.trim(),
-            theme: typeof q.theme === 'string' ? q.theme.trim() : 'general',
-            difficulty: ['beginner', 'intermediate', 'advanced'].includes(q.difficulty)
-                ? q.difficulty
-                : 'intermediate',
-        }));
+        .map(sanitizeQuestion)
+        .filter(Boolean);
 }
 
-// ─── POST /api/questions/generate ────────────────────────────────────────────
-// Unlimited generation — no daily limits, no pro checks.
+async function generateDifficultyLockedQuestions(philosopher, recentTexts, recentNormalized) {
+    let accepted = [];
+
+    for (let attempt = 0; attempt < 3; attempt++) {
+        const acceptedDifficulties = new Set(accepted.map(q => q.difficulty));
+        const neededDifficulties = REQUIRED_DIFFICULTIES.filter(d => !acceptedDifficulties.has(d));
+
+        if (neededDifficulties.length === 0) break;
+
+        const generated = await callClaudeForQuestions(
+            philosopher,
+            [...recentTexts, ...accepted.map(q => q.question)],
+            neededDifficulties
+        );
+
+        const selected = selectOnePerDifficulty(
+            generated,
+            neededDifficulties,
+            recentNormalized,
+            accepted
+        );
+
+        accepted.push(...selected);
+        accepted = sortByRequiredDifficulty(accepted);
+    }
+
+    const finalDifficulties = new Set(accepted.map(q => q.difficulty));
+    const hasAllDifficulties = REQUIRED_DIFFICULTIES.every(d => finalDifficulties.has(d));
+
+    if (!hasAllDifficulties) {
+        throw new Error('Could not generate one fresh question per difficulty');
+    }
+
+    return sortByRequiredDifficulty(accepted);
+}
+
+// ─── POST /api/questions/generate ───────────────────────────────────────────
 
 router.post('/api/questions/generate', async (req, res) => {
     try {
-        const { userId, count = 3 } = req.body;
+        const { userId } = req.body;
 
         if (!userId || typeof userId !== 'string') {
-            return res.status(400).json({ success: false, error: 'userId is required' });
+            return res.status(400).json({
+                success: false,
+                error: 'userId is required',
+            });
         }
 
-        // "Nietzsche" / "Friedrich Nietzsche" / "aurelius" / "Carl Jung" all resolve.
         const philosopher = resolvePhilosopher(req.body.philosopher);
+
         if (!philosopher) {
-            return res.status(400).json({ success: false, error: 'Invalid philosopher' });
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid philosopher',
+            });
         }
 
-        const safeCount = Math.min(Math.max(parseInt(count, 10) || 3, 1), 3);
-
-        // Recent questions for this user + philosopher (exclusion list).
         const recent = await pool.query(
             `SELECT question_text, question_normalized
              FROM generated_questions
@@ -218,42 +323,20 @@ router.post('/api/questions/generate', async (req, res) => {
              LIMIT $3`,
             [userId, philosopher, RECENT_EXCLUSION_COUNT]
         );
-        const recentTexts = recent.rows.map(r => r.question_text);
-        const recentNormalized = recent.rows.map(r => r.question_normalized);
 
-        // Generate, with ONE retry if duplicates slip through.
-        let accepted = [];
-        for (let attempt = 0; attempt < 2 && accepted.length < safeCount; attempt++) {
-            const generated = await callClaudeForQuestions(
-                philosopher,
-                // On retry, also exclude what we already accepted this round
-                [...recentTexts, ...accepted.map(q => q.question)],
-                safeCount - accepted.length
-            );
+        const recentTexts = recent.rows.map(r => r.question_text).filter(Boolean);
+        const recentNormalized = recent.rows.map(r => r.question_normalized).filter(Boolean);
 
-            for (const q of generated) {
-                const norm = normalizeText(q.question);
-                const dupAgainstRecent = recentNormalized.some(r => tooSimilar(norm, r));
-                const dupAgainstBatch = accepted.some(a => tooSimilar(norm, normalizeText(a.question)));
-                if (!dupAgainstRecent && !dupAgainstBatch) {
-                    accepted.push(q);
-                }
-                if (accepted.length >= safeCount) break;
-            }
-        }
+        const accepted = await generateDifficultyLockedQuestions(
+            philosopher,
+            recentTexts,
+            recentNormalized
+        );
 
-        if (accepted.length === 0) {
-            return res.status(502).json({
-                success: false,
-                error: 'Could not generate fresh questions. Please try again.',
-            });
-        }
-
-        // Save with ONE shared generation_id for the whole batch
-        // (one button tap = one generation = up to 3 rows).
         const generationId = crypto.randomUUID();
 
         const saved = [];
+
         for (const q of accepted) {
             const insert = await pool.query(
                 `INSERT INTO generated_questions
@@ -261,8 +344,17 @@ router.post('/api/questions/generate', async (req, res) => {
                       question_normalized, theme, difficulty, source, generated_at)
                  VALUES ($1, $2, $3, $4, $5, $6, $7, 'ai_generated', now())
                  RETURNING id`,
-                [generationId, userId, philosopher, q.question, normalizeText(q.question), q.theme, q.difficulty]
+                [
+                    generationId,
+                    userId,
+                    philosopher,
+                    q.question,
+                    normalizeText(q.question),
+                    q.theme,
+                    q.difficulty,
+                ]
             );
+
             saved.push({
                 id: insert.rows[0].id,
                 question: q.question,
@@ -271,11 +363,20 @@ router.post('/api/questions/generate', async (req, res) => {
             });
         }
 
-        console.log(`[Questions] Generated ${saved.length} for ${philosopher} (user ${userId.slice(0, 8)}…) | generation_id: ${generationId}`);
+        const orderedSaved = sortByRequiredDifficulty(saved);
 
-        return res.json({ success: true, questions: saved });
+        console.log(
+            `[Questions] Generated Beginner → Intermediate → Advanced for ${philosopher} ` +
+            `(user ${userId.slice(0, 8)}…) | generation_id: ${generationId}`
+        );
+
+        return res.json({
+            success: true,
+            questions: orderedSaved,
+        });
     } catch (err) {
         console.error('[Questions] generate error:', err.message);
+
         return res.status(500).json({
             success: false,
             error: 'Question generation failed. Please try again.',
@@ -284,8 +385,6 @@ router.post('/api/questions/generate', async (req, res) => {
 });
 
 // ─── PATCH /api/questions/:id/used ───────────────────────────────────────────
-// Fire-and-forget from the app when the user enters a debate with a
-// generated question. Failure here must NEVER block the debate.
 
 router.patch('/api/questions/:id/used', async (req, res) => {
     try {
@@ -295,6 +394,7 @@ router.patch('/api/questions/:id/used', async (req, res) => {
              WHERE id = $1 AND used_at IS NULL`,
             [req.params.id]
         );
+
         return res.json({ success: true });
     } catch (err) {
         console.error('[Questions] used error:', err.message);
