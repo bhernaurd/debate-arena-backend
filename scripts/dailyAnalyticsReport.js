@@ -261,6 +261,61 @@ async function main() {
         ON activity_summary.report_date = event_summary.report_date;
     `);
 
+    const sevenDayResult = await client.query(`
+      WITH params AS (
+        SELECT 
+          ((NOW() AT TIME ZONE 'America/Chicago')::date - INTERVAL '1 day')::date AS end_date,
+          ((NOW() AT TIME ZONE 'America/Chicago')::date - INTERVAL '7 days')::date AS start_date
+      ),
+      days AS (
+        SELECT 
+          generate_series(
+            params.start_date,
+            params.end_date,
+            INTERVAL '1 day'
+          )::date AS active_date
+        FROM params
+      ),
+      first_seen AS (
+        SELECT
+          user_id,
+          MIN(active_date) AS first_active_date
+        FROM user_activity_days
+        WHERE user_id NOT IN (
+          SELECT user_id FROM excluded_analytics_users
+        )
+        GROUP BY user_id
+      ),
+      daily_active AS (
+        SELECT 
+          active_date,
+          COUNT(DISTINCT user_id) AS daily_active_users
+        FROM user_activity_days
+        WHERE user_id NOT IN (
+          SELECT user_id FROM excluded_analytics_users
+        )
+        GROUP BY active_date
+      ),
+      daily_new AS (
+        SELECT 
+          first_active_date AS active_date,
+          COUNT(DISTINCT user_id) AS new_users
+        FROM first_seen
+        GROUP BY first_active_date
+      )
+      SELECT 
+        TO_CHAR(days.active_date, 'MM-DD-YYYY Dy') AS report_date,
+        COALESCE(daily_active.daily_active_users, 0) AS daily_active_users,
+        COALESCE(daily_new.new_users, 0) AS new_users,
+        COALESCE(daily_active.daily_active_users, 0) - COALESCE(daily_new.new_users, 0) AS returning_users
+      FROM days
+      LEFT JOIN daily_active
+        ON days.active_date = daily_active.active_date
+      LEFT JOIN daily_new
+        ON days.active_date = daily_new.active_date
+      ORDER BY days.active_date DESC;
+    `);
+
     const row = result.rows[0];
 
     if (!row) {
@@ -366,7 +421,25 @@ async function main() {
       `<b>One recommended action:</b> ${recommendedAction}`,
     ].join("\n");
 
+    const sevenDayLines = sevenDayResult.rows.map((day) => {
+      return [
+        `<b>${day.report_date}</b>`,
+        `Daily Active Users: ${toNumber(day.daily_active_users)}`,
+        `New users: ${toNumber(day.new_users)}`,
+        `Returning users: ${toNumber(day.returning_users)}`,
+      ].join("\n");
+    });
+
+    const sevenDayMessage = [
+      `📊 <b>7-Day User Activity Report</b>`,
+      ``,
+      `<b>Last 7 completed Central-time days</b>`,
+      ``,
+      sevenDayLines.join("\n\n"),
+    ].join("\n");
+
     await sendTelegramMessage(message);
+    await sendTelegramMessage(sevenDayMessage);
 
     console.log("Daily analytics report sent successfully.");
   } catch (error) {
