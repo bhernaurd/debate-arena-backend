@@ -7,7 +7,8 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "daily-analytics-report": "node scripts/dailyAnalyticsReport.js"
+    "daily-analytics-report": "node scripts/dailyAnalyticsReport.js",
+    "monthly-analytics-report": "node scripts/monthlyAnalyticsReport.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
