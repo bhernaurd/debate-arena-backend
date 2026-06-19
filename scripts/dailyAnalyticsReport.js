@@ -1,4 +1,6 @@
-const { Pool } = require("pg");
+import pg from "pg";
+
+const { Pool } = pg;
 
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
@@ -155,6 +157,18 @@ async function main() {
           ) AS daily_challenge_completed,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
+            WHERE event_name = 'philosopher_selected'
+          ) AS philosopher_selected,
+
+          COUNT(DISTINCT user_events.user_id) FILTER (
+            WHERE event_name = 'topic_selected'
+          ) AS topic_selected,
+
+          COUNT(DISTINCT user_events.user_id) FILTER (
+            WHERE event_name = 'difficulty_selected'
+          ) AS difficulty_selected,
+
+          COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'debate_started'
           ) AS debate_starters,
 
@@ -232,6 +246,10 @@ async function main() {
         event_summary.daily_challenge_started,
         event_summary.daily_challenge_completed,
 
+        event_summary.philosopher_selected,
+        event_summary.topic_selected,
+        event_summary.difficulty_selected,
+
         event_summary.debate_starters,
         event_summary.debate_completers,
 
@@ -257,6 +275,10 @@ async function main() {
     const dailyChallengeStarted = toNumber(row.daily_challenge_started);
     const dailyChallengeCompleted = toNumber(row.daily_challenge_completed);
 
+    const philosopherSelected = toNumber(row.philosopher_selected);
+    const topicSelected = toNumber(row.topic_selected);
+    const difficultySelected = toNumber(row.difficulty_selected);
+
     const debateStarters = toNumber(row.debate_starters);
     const debateCompleters = toNumber(row.debate_completers);
 
@@ -271,6 +293,26 @@ async function main() {
     const dailyChallengeCompletionRate = percent(
       dailyChallengeCompleted,
       dailyChallengeStarted
+    );
+
+    const openedToPhilosopherRate = percent(
+      philosopherSelected,
+      dailyActiveUsers
+    );
+
+    const philosopherToTopicRate = percent(
+      topicSelected,
+      philosopherSelected
+    );
+
+    const topicToDifficultyRate = percent(
+      difficultySelected,
+      topicSelected
+    );
+
+    const difficultyToDebateRate = percent(
+      debateStarters,
+      difficultySelected
     );
 
     const debateCompletionRate = percent(debateCompleters, debateStarters);
@@ -303,8 +345,17 @@ async function main() {
       `<b>Daily Challenge start rate:</b> ${dailyChallengeStartRate}`,
       `<b>Daily Challenge completion rate:</b> ${dailyChallengeCompletionRate}`,
       ``,
+      `<b>Debate funnel:</b>`,
+      `<b>Philosopher selected:</b> ${philosopherSelected}`,
+      `<b>Topic selected:</b> ${topicSelected}`,
+      `<b>Difficulty selected:</b> ${difficultySelected}`,
       `<b>Debate starters:</b> ${debateStarters}`,
       `<b>Debate completers:</b> ${debateCompleters}`,
+      ``,
+      `<b>Opened → philosopher rate:</b> ${openedToPhilosopherRate}`,
+      `<b>Philosopher → topic rate:</b> ${philosopherToTopicRate}`,
+      `<b>Topic → difficulty rate:</b> ${topicToDifficultyRate}`,
+      `<b>Difficulty → debate rate:</b> ${difficultyToDebateRate}`,
       `<b>Debate completion rate:</b> ${debateCompletionRate}`,
       ``,
       `<b>Reports viewed:</b> ${reportViewers}`,
