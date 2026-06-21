@@ -5,11 +5,16 @@
 //   - Same official challenge for everyone by challenge date.
 //   - Challenge unlocks at 5:00 AM in the user's local timezone.
 //   - Backend replenishes a rolling calendar at 4:00 AM America/Chicago.
-//   - Calendar stores today through the next 7 days.
+//   - Postgres stores today through the next 7 days.
 //   - Notification copy is generated ahead of time with each challenge.
 //
+// Why Postgres:
+//   - Backend deploys/restarts will NOT regenerate existing challenge dates.
+//   - challenge_date is the source of truth.
+//   - Existing dates are skipped.
+//   - A Postgres advisory lock prevents duplicate Claude generation during concurrent deploys.
+//
 // Compatibility:
-//   - daily_challenge_calendar.json is the new source of truth.
 //   - daily_challenge_cache.json is still written for the current Chicago window
 //     so the existing pushScheduler.js does not break yet.
 
@@ -21,30 +26,17 @@ import Anthropic from '@anthropic-ai/sdk';
 import { DateTime } from 'luxon';
 import cron from 'node-cron';
 
-const router = express.Router();
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ─── Storage ──────────────────────────────────────────────────────────────────
+// ─── Storage compatibility for current pushScheduler.js ───────────────────────
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const CACHE_PATH = path.join(__dirname, 'daily_challenge_cache.json');
-const CALENDAR_PATH = path.join(__dirname, 'daily_challenge_calendar.json');
-const HISTORY_PATH = path.join(__dirname, 'daily_challenge_history.json');
 
 const CHICAGO_ZONE = 'America/Chicago';
 const DAILY_UNLOCK_HOUR = 5;
 const ROLLING_DAYS_AHEAD = 7;
-
-function readJsonFile(filePath, fallback) {
-    try {
-        if (!fs.existsSync(filePath)) return fallback;
-        return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    } catch (err) {
-        console.error(`[DailyChallenge] JSON read error for ${path.basename(filePath)}:`, err.message);
-        return fallback;
-    }
-}
 
 function writeJsonFile(filePath, data) {
     try {
@@ -56,84 +48,8 @@ function writeJsonFile(filePath, data) {
     }
 }
 
-function readCache() {
-    return readJsonFile(CACHE_PATH, null);
-}
-
 function writeCache(data) {
     return writeJsonFile(CACHE_PATH, data);
-}
-
-function readCalendar() {
-    const raw = readJsonFile(CALENDAR_PATH, null);
-
-    if (!raw || typeof raw !== 'object') {
-        return {
-            version: 1,
-            updatedAt: new Date().toISOString(),
-            challenges: {},
-        };
-    }
-
-    if (!raw.challenges || typeof raw.challenges !== 'object') {
-        return {
-            version: 1,
-            updatedAt: new Date().toISOString(),
-            challenges: {},
-        };
-    }
-
-    return raw;
-}
-
-function writeCalendar(calendar) {
-    const data = {
-        version: 1,
-        updatedAt: new Date().toISOString(),
-        challenges: calendar.challenges || {},
-    };
-
-    return writeJsonFile(CALENDAR_PATH, data);
-}
-
-function readHistory() {
-    const history = readJsonFile(HISTORY_PATH, []);
-    return Array.isArray(history) ? history : [];
-}
-
-function writeHistory(history) {
-    return writeJsonFile(HISTORY_PATH, history);
-}
-
-function saveChallengeToHistory(challenge) {
-    const history = readHistory();
-
-    const alreadyExists = history.some(item => item.id === challenge.id);
-    if (alreadyExists) return;
-
-    const entry = {
-        id: challenge.id,
-        date: challenge.date,
-        philosopherId: challenge.philosopherId,
-        philosopherName: challenge.philosopherName,
-
-        sourceKey: challenge.sourceKey,
-        sourceWork: challenge.sourceWork,
-        sourceReference: challenge.sourceReference,
-        sourceConcept: challenge.sourceConcept,
-        sourceIdea: challenge.sourceIdea,
-        debateAngle: challenge.debateAngle,
-
-        title: challenge.title,
-        challengeQuestion: challenge.challengeQuestion,
-        createdAt: new Date().toISOString(),
-    };
-
-    const updated = [entry, ...history].slice(0, 300);
-    const saved = writeHistory(updated);
-
-    console.log(`[DailyChallengeHistory] Saved: ${saved ? 'SUCCESS' : 'FAILED'}`);
-    console.log(`[DailyChallengeHistory] Stored entries: ${updated.length}`);
 }
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
@@ -188,6 +104,20 @@ function getRollingCalendarDates(daysAhead = ROLLING_DAYS_AHEAD) {
     }
 
     return dates;
+}
+
+function normalizeDateValue(value) {
+    if (!value) return null;
+
+    if (typeof value === 'string') {
+        return value.slice(0, 10);
+    }
+
+    if (value instanceof Date) {
+        return value.toISOString().slice(0, 10);
+    }
+
+    return String(value).slice(0, 10);
 }
 
 // ─── Philosopher rotation ─────────────────────────────────────────────────────
@@ -1055,14 +985,164 @@ function stripRuntimeWindowFields(challenge) {
     return copy;
 }
 
+// ─── Postgres mapping ─────────────────────────────────────────────────────────
+
+function rowToChallenge(row) {
+    if (!row) return null;
+
+    return {
+        id: row.id,
+        date: normalizeDateValue(row.challenge_date),
+
+        philosopherId: row.philosopher_id,
+        philosopherName: row.philosopher_name,
+
+        sourceKey: row.source_key,
+        sourceWork: row.source_work,
+        sourceReference: row.source_reference,
+        sourceConcept: row.source_concept,
+        sourceIdea: row.source_idea,
+        debateAngle: row.debate_angle,
+
+        theme: row.theme,
+        title: row.title,
+        challengeQuestion: row.challenge_question,
+        userPositionPrompt: row.user_position_prompt,
+        opposingAngle: row.opposing_angle,
+        difficulty: row.difficulty,
+        shareHook: row.share_hook,
+        educationalNote: row.educational_note,
+
+        morningNotification: row.morning_notification,
+        afternoonNotification: row.afternoon_notification,
+        eveningNotification: row.evening_notification,
+    };
+}
+
+async function getChallengeFromDb(db, dateString) {
+    const result = await db.query(
+        `SELECT *
+         FROM daily_challenges
+         WHERE challenge_date = $1::date
+         LIMIT 1`,
+        [dateString]
+    );
+
+    return rowToChallenge(result.rows[0]);
+}
+
+async function getRecentChallengesForPhilosopher(db, philosopherId, limit = 8) {
+    const result = await db.query(
+        `SELECT *
+         FROM daily_challenges
+         WHERE philosopher_id = $1
+         ORDER BY challenge_date DESC
+         LIMIT $2`,
+        [philosopherId, limit]
+    );
+
+    return result.rows.map(rowToChallenge).filter(Boolean);
+}
+
+async function insertChallengeIntoDb(db, challenge) {
+    const clean = stripRuntimeWindowFields(challenge);
+
+    const result = await db.query(
+        `INSERT INTO daily_challenges (
+            challenge_date,
+            id,
+            philosopher_id,
+            philosopher_name,
+            source_key,
+            source_work,
+            source_reference,
+            source_concept,
+            source_idea,
+            debate_angle,
+            theme,
+            title,
+            challenge_question,
+            user_position_prompt,
+            opposing_angle,
+            difficulty,
+            share_hook,
+            educational_note,
+            morning_notification,
+            afternoon_notification,
+            evening_notification
+         )
+         VALUES (
+            $1::date,
+            $2,
+            $3,
+            $4,
+            $5,
+            $6,
+            $7,
+            $8,
+            $9,
+            $10,
+            $11,
+            $12,
+            $13,
+            $14,
+            $15,
+            $16,
+            $17,
+            $18,
+            $19,
+            $20,
+            $21
+         )
+         ON CONFLICT (challenge_date) DO NOTHING
+         RETURNING *`,
+        [
+            clean.date,
+            clean.id,
+            clean.philosopherId,
+            clean.philosopherName,
+            clean.sourceKey,
+            clean.sourceWork,
+            clean.sourceReference || null,
+            clean.sourceConcept,
+            clean.sourceIdea,
+            clean.debateAngle,
+            clean.theme,
+            clean.title,
+            clean.challengeQuestion,
+            clean.userPositionPrompt,
+            clean.opposingAngle,
+            clean.difficulty,
+            clean.shareHook,
+            clean.educationalNote,
+            clean.morningNotification,
+            clean.afternoonNotification,
+            clean.eveningNotification,
+        ]
+    );
+
+    return rowToChallenge(result.rows[0]);
+}
+
+async function getUpcomingChallengesFromDb(db, limit = 21) {
+    const result = await db.query(
+        `SELECT *
+         FROM daily_challenges
+         ORDER BY challenge_date ASC
+         LIMIT $1`,
+        [limit]
+    );
+
+    return result.rows.map(rowToChallenge).filter(Boolean);
+}
+
 // ─── Calendar generation ─────────────────────────────────────────────────────
 
-async function generateChallengeForDate(dateString) {
-    const history = readHistory();
-
+async function generateChallengeForDate(db, dateString) {
     const philosopher = getPhilosopherForDate(dateString);
-    const recentQuestions = getRecentForPhilosopher(history, philosopher.id, 5);
-    const source = pickSourceIdea(philosopher.id, history);
+    const recentQuestions = await getRecentChallengesForPhilosopher(db, philosopher.id, 5);
+    const historyForSourceSelection = await getRecentChallengesForPhilosopher(db, philosopher.id, 8);
+    const source = pickSourceIdea(philosopher.id, historyForSourceSelection);
 
     let challengeData;
 
@@ -1141,47 +1221,69 @@ async function generateChallengeForDate(dateString) {
     return stripRuntimeWindowFields(challengeData);
 }
 
-export async function ensureChallengeForDate(dateString) {
+async function ensureChallengeForDate(pool, dateString) {
     if (!dateString || typeof dateString !== 'string') {
         throw new Error('dateString is required.');
     }
 
-    const calendar = readCalendar();
-    const existing = calendar.challenges[dateString];
+    const db = await pool.connect();
+    const lockKey = `daily_challenge:${dateString}`;
 
-    if (existing && existing.id && existing.challengeQuestion) {
-        return existing;
+    try {
+        // Prevent duplicate Claude calls if Railway starts multiple instances or redeploys concurrently.
+        await db.query('SELECT pg_advisory_lock(hashtext($1))', [lockKey]);
+
+        const existing = await getChallengeFromDb(db, dateString);
+
+        if (existing && existing.id && existing.challengeQuestion) {
+            return existing;
+        }
+
+        const generated = await generateChallengeForDate(db, dateString);
+        const inserted = await insertChallengeIntoDb(db, generated);
+
+        if (inserted) {
+            console.log(`[DailyChallengeDB] Inserted ${dateString} — ${inserted.philosopherName}`);
+            return inserted;
+        }
+
+        // If another process inserted between generation and insert, read it back.
+        const afterConflict = await getChallengeFromDb(db, dateString);
+
+        if (afterConflict) {
+            console.log(`[DailyChallengeDB] Conflict resolved by existing row for ${dateString}`);
+            return afterConflict;
+        }
+
+        throw new Error(`Failed to insert or read challenge for ${dateString}`);
+    } finally {
+        try {
+            await db.query('SELECT pg_advisory_unlock(hashtext($1))', [lockKey]);
+        } catch (unlockErr) {
+            console.error(`[DailyChallengeDB] Advisory unlock failed for ${dateString}:`, unlockErr.message);
+        }
+
+        db.release();
     }
-
-    const challenge = await generateChallengeForDate(dateString);
-
-    calendar.challenges[dateString] = challenge;
-
-    const saved = writeCalendar(calendar);
-    console.log(`[DailyChallengeCalendar] Saved ${dateString}: ${saved ? 'SUCCESS' : 'FAILED'}`);
-
-    saveChallengeToHistory(challenge);
-
-    return challenge;
 }
 
-export async function ensureChallengeCalendar(daysAhead = ROLLING_DAYS_AHEAD) {
+async function ensureChallengeCalendar(pool, daysAhead = ROLLING_DAYS_AHEAD) {
     const dates = getRollingCalendarDates(daysAhead);
     const created = [];
     const existing = [];
     const failed = [];
 
     console.log('──────────────────────────────────────────────');
-    console.log('[DailyChallengeCalendar] Ensuring rolling calendar');
+    console.log('[DailyChallengeCalendar] Ensuring Postgres rolling calendar');
     console.log(`[DailyChallengeCalendar] Window: ${dates[0]} through ${dates[dates.length - 1]}`);
     console.log('──────────────────────────────────────────────');
 
     for (const dateString of dates) {
         try {
-            const calendarBefore = readCalendar();
-            const alreadyExists = Boolean(calendarBefore.challenges[dateString]);
+            const before = await getChallengeFromDb(pool, dateString);
+            const alreadyExists = Boolean(before);
 
-            const challenge = await ensureChallengeForDate(dateString);
+            const challenge = await ensureChallengeForDate(pool, dateString);
 
             if (alreadyExists) {
                 existing.push(dateString);
@@ -1198,7 +1300,7 @@ export async function ensureChallengeCalendar(daysAhead = ROLLING_DAYS_AHEAD) {
         }
     }
 
-    await syncCompatibilityCache();
+    await syncCompatibilityCache(pool);
 
     console.log('──────────────────────────────────────────────');
     console.log('[DailyChallengeCalendar] Complete');
@@ -1220,9 +1322,9 @@ export async function ensureChallengeCalendar(daysAhead = ROLLING_DAYS_AHEAD) {
 // This keeps that file populated with the current Chicago-window challenge
 // until we update pushScheduler.js to use user-local timezone delivery.
 
-export async function syncCompatibilityCache() {
+async function syncCompatibilityCache(pool) {
     const chicagoWindow = getChicagoChallengeWindow();
-    const challenge = await ensureChallengeForDate(chicagoWindow.date);
+    const challenge = await ensureChallengeForDate(pool, chicagoWindow.date);
 
     const cachedChallenge = challengeWithWindow(challenge, chicagoWindow);
 
@@ -1235,137 +1337,127 @@ export async function syncCompatibilityCache() {
     return cachedChallenge;
 }
 
-// ─── Public compatibility function ────────────────────────────────────────────
-// Kept so any existing imports calling ensureTodaysChallenge() do not break.
+// ─── Router factory ───────────────────────────────────────────────────────────
 
-export async function ensureTodaysChallenge() {
-    const chicagoWindow = getChicagoChallengeWindow();
-    const challenge = await ensureChallengeForDate(chicagoWindow.date);
+export function createDailyChallengeRouter(pool) {
+    const router = express.Router();
 
-    await syncCompatibilityCache();
+    // ─── 4 AM Chicago rolling generation cron ─────────────────────────────────
 
-    return challengeWithWindow(challenge, chicagoWindow);
-}
+    cron.schedule(
+        '0 4 * * *',
+        async () => {
+            console.log('[DailyChallengeScheduler] 4 AM Chicago Postgres rolling generation triggered');
 
-// ─── 4 AM Chicago rolling generation cron ─────────────────────────────────────
+            try {
+                const result = await ensureChallengeCalendar(pool, ROLLING_DAYS_AHEAD);
 
-cron.schedule(
-    '0 4 * * *',
-    async () => {
-        console.log('[DailyChallengeScheduler] 4 AM Chicago rolling generation triggered');
+                console.log('[DailyChallengeScheduler] Calendar ensured');
+                console.log(`[DailyChallengeScheduler] Created: ${result.created.length}`);
+                console.log(`[DailyChallengeScheduler] Existing: ${result.existing.length}`);
+                console.log(`[DailyChallengeScheduler] Failed: ${result.failed.length}`);
 
+            } catch (err) {
+                console.error('[DailyChallengeScheduler] 4 AM rolling generation error:', err.message);
+            }
+        },
+        { timezone: CHICAGO_ZONE }
+    );
+
+    console.log('[DailyChallengeScheduler] 4 AM Postgres rolling calendar cron registered (America/Chicago)');
+
+    // ─── Startup calendar safety check ────────────────────────────────────────
+
+    ensureChallengeCalendar(pool, ROLLING_DAYS_AHEAD)
+        .then((result) => {
+            console.log('[DailyChallengeStartup] Postgres rolling calendar checked on startup');
+            console.log(`[DailyChallengeStartup] Created: ${result.created.length}`);
+            console.log(`[DailyChallengeStartup] Existing: ${result.existing.length}`);
+            console.log(`[DailyChallengeStartup] Failed: ${result.failed.length}`);
+        })
+        .catch((err) => {
+            console.error('[DailyChallengeStartup] Rolling calendar check failed:', err.message);
+        });
+
+    // ─── Routes ───────────────────────────────────────────────────────────────
+
+    router.get('/api/daily-challenge', async (req, res) => {
         try {
-            const result = await ensureChallengeCalendar(ROLLING_DAYS_AHEAD);
+            const requestedZone =
+                req.query.timezone ||
+                req.query.tz ||
+                req.headers['x-timezone'] ||
+                CHICAGO_ZONE;
 
-            console.log('[DailyChallengeScheduler] Calendar ensured');
-            console.log(`[DailyChallengeScheduler] Created: ${result.created.length}`);
-            console.log(`[DailyChallengeScheduler] Existing: ${result.existing.length}`);
-            console.log(`[DailyChallengeScheduler] Failed: ${result.failed.length}`);
+            const windowInfo = getChallengeWindowForZone(requestedZone);
+            const challenge = await ensureChallengeForDate(pool, windowInfo.date);
 
+            return res.json(challengeWithWindow(challenge, windowInfo));
         } catch (err) {
-            console.error('[DailyChallengeScheduler] 4 AM rolling generation error:', err.message);
+            console.error('[DailyChallenge] Endpoint error:', err.message);
+
+            const requestedZone =
+                req.query.timezone ||
+                req.query.tz ||
+                req.headers['x-timezone'] ||
+                CHICAGO_ZONE;
+
+            const windowInfo = getChallengeWindowForZone(requestedZone);
+            const philosopher = getPhilosopherForDate(windowInfo.date);
+            const fallback = getFallback(philosopher, windowInfo.date, windowInfo.expiresAt);
+
+            return res.json(challengeWithWindow(fallback, windowInfo));
         }
-    },
-    { timezone: CHICAGO_ZONE }
-);
-
-console.log('[DailyChallengeScheduler] 4 AM rolling calendar cron registered (America/Chicago)');
-
-// ─── Startup calendar safety check ────────────────────────────────────────────
-
-ensureChallengeCalendar(ROLLING_DAYS_AHEAD)
-    .then((result) => {
-        console.log('[DailyChallengeStartup] Rolling calendar checked on startup');
-        console.log(`[DailyChallengeStartup] Created: ${result.created.length}`);
-        console.log(`[DailyChallengeStartup] Existing: ${result.existing.length}`);
-        console.log(`[DailyChallengeStartup] Failed: ${result.failed.length}`);
-    })
-    .catch((err) => {
-        console.error('[DailyChallengeStartup] Rolling calendar check failed:', err.message);
     });
 
-// ─── Routes ───────────────────────────────────────────────────────────────────
+    // Simple admin/helper route so you can view upcoming challenges.
+    // Use:
+    // /api/daily-challenges/upcoming
+    // Or if ANALYTICS_ADMIN_KEY exists:
+    // /api/daily-challenges/upcoming?adminKey=YOUR_ANALYTICS_ADMIN_KEY
 
-router.get('/api/daily-challenge', async (req, res) => {
-    try {
-        const requestedZone =
-            req.query.timezone ||
-            req.query.tz ||
-            req.headers['x-timezone'] ||
-            CHICAGO_ZONE;
+    router.get('/api/daily-challenges/upcoming', async (req, res) => {
+        try {
+            const configuredAdminKey = process.env.ANALYTICS_ADMIN_KEY;
+            const suppliedAdminKey =
+                req.query.adminKey ||
+                req.headers['x-admin-key'];
 
-        const windowInfo = getChallengeWindowForZone(requestedZone);
-        const challenge = await ensureChallengeForDate(windowInfo.date);
+            if (configuredAdminKey && suppliedAdminKey !== configuredAdminKey) {
+                return res.status(401).json({ error: 'Unauthorized.' });
+            }
 
-        return res.json(challengeWithWindow(challenge, windowInfo));
-    } catch (err) {
-        console.error('[DailyChallenge] Endpoint error:', err.message);
+            await ensureChallengeCalendar(pool, ROLLING_DAYS_AHEAD);
 
-        const requestedZone =
-            req.query.timezone ||
-            req.query.tz ||
-            req.headers['x-timezone'] ||
-            CHICAGO_ZONE;
+            const upcoming = await getUpcomingChallengesFromDb(pool, 21);
 
-        const windowInfo = getChallengeWindowForZone(requestedZone);
-        const philosopher = getPhilosopherForDate(windowInfo.date);
-        const fallback = getFallback(philosopher, windowInfo.date, windowInfo.expiresAt);
-
-        return res.json(challengeWithWindow(fallback, windowInfo));
-    }
-});
-
-// Simple admin/helper route so you can view upcoming challenges.
-// Use:
-// /api/daily-challenges/upcoming?adminKey=YOUR_ANALYTICS_ADMIN_KEY
-
-router.get('/api/daily-challenges/upcoming', async (req, res) => {
-    try {
-        const configuredAdminKey = process.env.ANALYTICS_ADMIN_KEY;
-        const suppliedAdminKey =
-            req.query.adminKey ||
-            req.headers['x-admin-key'];
-
-        if (configuredAdminKey && suppliedAdminKey !== configuredAdminKey) {
-            return res.status(401).json({ error: 'Unauthorized.' });
+            return res.json({
+                count: upcoming.length,
+                rollingDaysAhead: ROLLING_DAYS_AHEAD,
+                generatedAt: new Date().toISOString(),
+                upcoming: upcoming.map(challenge => {
+                    return {
+                        date: challenge.date,
+                        id: challenge.id,
+                        philosopherId: challenge.philosopherId,
+                        philosopherName: challenge.philosopherName,
+                        sourceWork: challenge.sourceWork,
+                        sourceConcept: challenge.sourceConcept,
+                        title: challenge.title,
+                        challengeQuestion: challenge.challengeQuestion,
+                        morningNotification: challenge.morningNotification,
+                        afternoonNotification: challenge.afternoonNotification,
+                        eveningNotification: challenge.eveningNotification,
+                    };
+                }),
+            });
+        } catch (err) {
+            console.error('[DailyChallengeUpcoming] Endpoint error:', err.message);
+            return res.status(500).json({ error: 'Failed to read upcoming challenges.' });
         }
+    });
 
-        await ensureChallengeCalendar(ROLLING_DAYS_AHEAD);
+    return router;
+}
 
-        const calendar = readCalendar();
-
-        const upcomingDates = Object.keys(calendar.challenges)
-            .sort()
-            .slice(0, 21);
-
-        const upcoming = upcomingDates.map(date => {
-            const challenge = calendar.challenges[date];
-
-            return {
-                date,
-                id: challenge.id,
-                philosopherId: challenge.philosopherId,
-                philosopherName: challenge.philosopherName,
-                sourceWork: challenge.sourceWork,
-                sourceConcept: challenge.sourceConcept,
-                title: challenge.title,
-                challengeQuestion: challenge.challengeQuestion,
-                morningNotification: challenge.morningNotification,
-                afternoonNotification: challenge.afternoonNotification,
-                eveningNotification: challenge.eveningNotification,
-            };
-        });
-
-        return res.json({
-            count: upcoming.length,
-            rollingDaysAhead: ROLLING_DAYS_AHEAD,
-            generatedAt: new Date().toISOString(),
-            upcoming,
-        });
-    } catch (err) {
-        console.error('[DailyChallengeUpcoming] Endpoint error:', err.message);
-        return res.status(500).json({ error: 'Failed to read upcoming challenges.' });
-    }
-});
-
-export default router;
+export default createDailyChallengeRouter;
