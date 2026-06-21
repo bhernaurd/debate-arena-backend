@@ -25,11 +25,17 @@ function percent(numerator, denominator) {
 
 function chooseBiggestDropOff(data) {
   const dailyActiveUsers = toNumber(data.daily_active_users);
+
   const dailyChallengeViewed = toNumber(data.daily_challenge_viewed);
   const dailyChallengeStarted = toNumber(data.daily_challenge_started);
   const dailyChallengeCompleted = toNumber(data.daily_challenge_completed);
-  const debateStarters = toNumber(data.debate_starters);
-  const debateCompleters = toNumber(data.debate_completers);
+
+  const normalPhilosopherSelected = toNumber(data.normal_philosopher_selected);
+  const normalTopicSelected = toNumber(data.normal_topic_selected);
+  const normalDifficultySelected = toNumber(data.normal_difficulty_selected);
+  const normalDebateStarted = toNumber(data.normal_debate_started);
+  const normalDebateCompleted = toNumber(data.normal_debate_completed);
+
   const reportViewers = toNumber(data.report_viewers);
   const shareCardUsers = toNumber(data.share_card_users);
 
@@ -61,14 +67,38 @@ function chooseBiggestDropOff(data) {
     };
   }
 
-  if (debateStarters > 0 && debateCompleters === 0) {
+  if (normalPhilosopherSelected > 0 && normalTopicSelected === 0) {
     return {
-      biggestDropOff: "Users started debates but did not complete them.",
-      recommendedAction: "Check whether the debate flow feels too long, unclear, or difficult.",
+      biggestDropOff: "Users selected a philosopher but did not select a topic.",
+      recommendedAction: "Review the topic picker clarity, topic choices, and generated-question CTA.",
     };
   }
 
-  if (debateCompleters > 0 && reportViewers === 0) {
+  if (normalTopicSelected > 0 && normalDifficultySelected === 0) {
+    return {
+      biggestDropOff: "Users selected a topic but did not choose a difficulty.",
+      recommendedAction: "Review the difficulty-mode screen and make the choice feel easier.",
+    };
+  }
+
+  if (normalDifficultySelected > 0 && normalDebateStarted === 0) {
+    return {
+      biggestDropOff: "Users chose a difficulty but did not start a normal debate.",
+      recommendedAction: "Check navigation from Difficulty Mode into DebateView.",
+    };
+  }
+
+  if (normalDebateStarted > 0 && normalDebateCompleted === 0) {
+    return {
+      biggestDropOff: "Users started normal debates but did not complete them.",
+      recommendedAction: "Review debate length, difficulty, finish-button placement, and loading states.",
+    };
+  }
+
+  if (
+    (dailyChallengeCompleted > 0 || normalDebateCompleted > 0) &&
+    reportViewers === 0
+  ) {
     return {
       biggestDropOff: "Users completed debates but did not view reports.",
       recommendedAction: "Check report generation, report navigation, and loading states.",
@@ -141,10 +171,6 @@ async function main() {
           bounds.report_date,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
-            WHERE event_name = 'app_opened'
-          ) AS daily_active_users_from_events,
-
-          COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'daily_challenge_viewed'
           ) AS daily_challenge_viewed,
 
@@ -158,31 +184,33 @@ async function main() {
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'philosopher_selected'
-          ) AS philosopher_selected,
+          ) AS normal_philosopher_selected,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'topic_selected'
-          ) AS topic_selected,
+          ) AS normal_topic_selected,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'difficulty_selected'
-          ) AS difficulty_selected,
+          ) AS normal_difficulty_selected,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'debate_started'
-          ) AS debate_starters,
+              AND COALESCE(user_events.metadata->>'isDailyChallenge', 'false') <> 'true'
+          ) AS normal_debate_started,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'debate_completed'
-          ) AS debate_completers,
+              AND COALESCE(user_events.metadata->>'isDailyChallenge', 'false') <> 'true'
+          ) AS normal_debate_completed,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'report_viewed'
-          ) AS report_viewers,
+          ) AS reports_viewed_all_paths,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'share_card_created'
-          ) AS share_card_users
+          ) AS share_cards_created_all_paths
 
         FROM bounds
         LEFT JOIN user_events
@@ -246,15 +274,14 @@ async function main() {
         event_summary.daily_challenge_started,
         event_summary.daily_challenge_completed,
 
-        event_summary.philosopher_selected,
-        event_summary.topic_selected,
-        event_summary.difficulty_selected,
+        event_summary.normal_philosopher_selected,
+        event_summary.normal_topic_selected,
+        event_summary.normal_difficulty_selected,
+        event_summary.normal_debate_started,
+        event_summary.normal_debate_completed,
 
-        event_summary.debate_starters,
-        event_summary.debate_completers,
-
-        event_summary.report_viewers,
-        event_summary.share_card_users
+        event_summary.reports_viewed_all_paths,
+        event_summary.share_cards_created_all_paths
 
       FROM activity_summary
       JOIN event_summary
@@ -330,15 +357,14 @@ async function main() {
     const dailyChallengeStarted = toNumber(row.daily_challenge_started);
     const dailyChallengeCompleted = toNumber(row.daily_challenge_completed);
 
-    const philosopherSelected = toNumber(row.philosopher_selected);
-    const topicSelected = toNumber(row.topic_selected);
-    const difficultySelected = toNumber(row.difficulty_selected);
+    const normalPhilosopherSelected = toNumber(row.normal_philosopher_selected);
+    const normalTopicSelected = toNumber(row.normal_topic_selected);
+    const normalDifficultySelected = toNumber(row.normal_difficulty_selected);
+    const normalDebateStarted = toNumber(row.normal_debate_started);
+    const normalDebateCompleted = toNumber(row.normal_debate_completed);
 
-    const debateStarters = toNumber(row.debate_starters);
-    const debateCompleters = toNumber(row.debate_completers);
-
-    const reportViewers = toNumber(row.report_viewers);
-    const shareCardUsers = toNumber(row.share_card_users);
+    const reportsViewedAllPaths = toNumber(row.reports_viewed_all_paths);
+    const shareCardsCreatedAllPaths = toNumber(row.share_cards_created_all_paths);
 
     const dailyChallengeStartRate = percent(
       dailyChallengeStarted,
@@ -351,37 +377,47 @@ async function main() {
     );
 
     const openedToPhilosopherRate = percent(
-      philosopherSelected,
+      normalPhilosopherSelected,
       dailyActiveUsers
     );
 
     const philosopherToTopicRate = percent(
-      topicSelected,
-      philosopherSelected
+      normalTopicSelected,
+      normalPhilosopherSelected
     );
 
     const topicToDifficultyRate = percent(
-      difficultySelected,
-      topicSelected
+      normalDifficultySelected,
+      normalTopicSelected
     );
 
-    const difficultyToDebateRate = percent(
-      debateStarters,
-      difficultySelected
+    const difficultyToNormalDebateRate = percent(
+      normalDebateStarted,
+      normalDifficultySelected
     );
 
-    const debateCompletionRate = percent(debateCompleters, debateStarters);
-    const reportToShareRate = percent(shareCardUsers, reportViewers);
+    const normalDebateCompletionRate = percent(
+      normalDebateCompleted,
+      normalDebateStarted
+    );
+
+    const reportToShareRate = percent(
+      shareCardsCreatedAllPaths,
+      reportsViewedAllPaths
+    );
 
     const { biggestDropOff, recommendedAction } = chooseBiggestDropOff({
       daily_active_users: dailyActiveUsers,
       daily_challenge_viewed: dailyChallengeViewed,
       daily_challenge_started: dailyChallengeStarted,
       daily_challenge_completed: dailyChallengeCompleted,
-      debate_starters: debateStarters,
-      debate_completers: debateCompleters,
-      report_viewers: reportViewers,
-      share_card_users: shareCardUsers,
+      normal_philosopher_selected: normalPhilosopherSelected,
+      normal_topic_selected: normalTopicSelected,
+      normal_difficulty_selected: normalDifficultySelected,
+      normal_debate_started: normalDebateStarted,
+      normal_debate_completed: normalDebateCompleted,
+      report_viewers: reportsViewedAllPaths,
+      share_card_users: shareCardsCreatedAllPaths,
     });
 
     const message = [
@@ -394,27 +430,29 @@ async function main() {
       `<b>New users:</b> ${newUsers}`,
       `<b>Returning users:</b> ${returningUsers}`,
       ``,
+      `<b>Daily Challenge Funnel</b>`,
       `<b>Daily Challenge viewed:</b> ${dailyChallengeViewed}`,
       `<b>Daily Challenge started:</b> ${dailyChallengeStarted}`,
       `<b>Daily Challenge completed:</b> ${dailyChallengeCompleted}`,
       `<b>Daily Challenge start rate:</b> ${dailyChallengeStartRate}`,
       `<b>Daily Challenge completion rate:</b> ${dailyChallengeCompletionRate}`,
       ``,
-      `<b>Debate funnel:</b>`,
-      `<b>Philosopher selected:</b> ${philosopherSelected}`,
-      `<b>Topic selected:</b> ${topicSelected}`,
-      `<b>Difficulty selected:</b> ${difficultySelected}`,
-      `<b>Debate starters:</b> ${debateStarters}`,
-      `<b>Debate completers:</b> ${debateCompleters}`,
+      `<b>Normal Debate Funnel</b>`,
+      `<b>Philosopher selected:</b> ${normalPhilosopherSelected}`,
+      `<b>Topic selected:</b> ${normalTopicSelected}`,
+      `<b>Difficulty selected:</b> ${normalDifficultySelected}`,
+      `<b>Normal debate started:</b> ${normalDebateStarted}`,
+      `<b>Normal debate completed:</b> ${normalDebateCompleted}`,
       ``,
       `<b>Opened → philosopher rate:</b> ${openedToPhilosopherRate}`,
       `<b>Philosopher → topic rate:</b> ${philosopherToTopicRate}`,
       `<b>Topic → difficulty rate:</b> ${topicToDifficultyRate}`,
-      `<b>Difficulty → debate rate:</b> ${difficultyToDebateRate}`,
-      `<b>Debate completion rate:</b> ${debateCompletionRate}`,
+      `<b>Difficulty → normal debate rate:</b> ${difficultyToNormalDebateRate}`,
+      `<b>Normal debate completion rate:</b> ${normalDebateCompletionRate}`,
       ``,
-      `<b>Reports viewed:</b> ${reportViewers}`,
-      `<b>Share cards created:</b> ${shareCardUsers}`,
+      `<b>Reports / Sharing</b>`,
+      `<b>Reports viewed, all paths:</b> ${reportsViewedAllPaths}`,
+      `<b>Share cards created, all paths:</b> ${shareCardsCreatedAllPaths}`,
       `<b>Report-to-share rate:</b> ${reportToShareRate}`,
       ``,
       `<b>Biggest funnel drop-off:</b> ${biggestDropOff}`,
