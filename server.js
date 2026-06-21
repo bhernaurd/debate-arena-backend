@@ -8,7 +8,7 @@ import rateLimit from 'express-rate-limit';
 import pg from 'pg';
 
 import { createDailyChallengeRouter } from './dailyChallenge.js';
-import pushRouter from './pushRoutes.js';
+import { createPushRouter } from './pushRoutes.js';
 import questionsRouter from './questions.js';
 import { createAnalyticsRouter } from './analytics.js';
 import './pushScheduler.js';  // registers cron jobs on startup
@@ -50,7 +50,7 @@ app.use('/debate', limiter);
 
 // Routes
 app.use(createDailyChallengeRouter(pool));
-app.use(pushRouter);
+app.use(createPushRouter(pool));
 app.use(questionsRouter);
 
 // Analytics routes
