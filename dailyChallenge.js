@@ -1,4 +1,4 @@
-// dailyChallenge.js
+// dailyChallenge.jss
 // ES module — matches the import/export style of server.js
 //
 // Daily Challenge system:
