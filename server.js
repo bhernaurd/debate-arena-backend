@@ -7,7 +7,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import rateLimit from 'express-rate-limit';
 import pg from 'pg';
 
-import dailyChallengeRouter from './dailyChallenge.js';
+import { createDailyChallengeRouter } from './dailyChallenge.js';
 import pushRouter from './pushRoutes.js';
 import questionsRouter from './questions.js';
 import { createAnalyticsRouter } from './analytics.js';
@@ -22,7 +22,7 @@ const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY
 });
 
-// Postgres pool for analytics
+// Shared Postgres pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL?.includes('railway')
@@ -49,7 +49,7 @@ const limiter = rateLimit({
 app.use('/debate', limiter);
 
 // Routes
-app.use(dailyChallengeRouter);
+app.use(createDailyChallengeRouter(pool));
 app.use(pushRouter);
 app.use(questionsRouter);
 
