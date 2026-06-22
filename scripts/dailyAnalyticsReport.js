@@ -23,19 +23,30 @@ function percent(numerator, denominator) {
   return `${((n / d) * 100).toFixed(1)}%`;
 }
 
+function formatSeconds(value) {
+  if (value === null || value === undefined) {
+    return "—";
+  }
+
+  const number = Number(value);
+
+  if (!Number.isFinite(number)) {
+    return "—";
+  }
+
+  return `${number.toFixed(1)}s`;
+}
+
 function chooseBiggestDropOff(data) {
   const dailyActiveUsers = toNumber(data.daily_active_users);
-
   const dailyChallengeViewed = toNumber(data.daily_challenge_viewed);
   const dailyChallengeStarted = toNumber(data.daily_challenge_started);
   const dailyChallengeCompleted = toNumber(data.daily_challenge_completed);
-
   const normalPhilosopherSelected = toNumber(data.normal_philosopher_selected);
   const normalTopicSelected = toNumber(data.normal_topic_selected);
   const normalDifficultySelected = toNumber(data.normal_difficulty_selected);
   const normalDebateStarted = toNumber(data.normal_debate_started);
   const normalDebateCompleted = toNumber(data.normal_debate_completed);
-
   const reportViewers = toNumber(data.report_viewers);
   const shareCardUsers = toNumber(data.share_card_users);
 
@@ -156,7 +167,7 @@ async function main() {
   try {
     const result = await client.query(`
       WITH params AS (
-        SELECT 
+        SELECT
           ((NOW() AT TIME ZONE 'America/Chicago')::date - INTERVAL '1 day')::date AS report_date
       ),
       bounds AS (
@@ -210,15 +221,43 @@ async function main() {
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'share_card_created'
-          ) AS share_cards_created_all_paths
+          ) AS share_cards_created_all_paths,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'report_generation_completed'
+          ) AS report_generation_completed,
+
+          ROUND(
+            AVG((user_events.metadata->>'durationMs')::numeric) FILTER (
+              WHERE event_name = 'report_generation_completed'
+                AND user_events.metadata ? 'durationMs'
+            ) / 1000,
+            1
+          ) AS avg_report_load_seconds,
+
+          ROUND(
+            MIN((user_events.metadata->>'durationMs')::numeric) FILTER (
+              WHERE event_name = 'report_generation_completed'
+                AND user_events.metadata ? 'durationMs'
+            ) / 1000,
+            1
+          ) AS fastest_report_seconds,
+
+          ROUND(
+            MAX((user_events.metadata->>'durationMs')::numeric) FILTER (
+              WHERE event_name = 'report_generation_completed'
+                AND user_events.metadata ? 'durationMs'
+            ) / 1000,
+            1
+          ) AS slowest_report_seconds
 
         FROM bounds
         LEFT JOIN user_events
           ON user_events.created_at >= bounds.start_time
-          AND user_events.created_at < bounds.end_time
-          AND user_events.user_id NOT IN (
-            SELECT user_id FROM excluded_analytics_users
-          )
+         AND user_events.created_at < bounds.end_time
+         AND user_events.user_id NOT IN (
+           SELECT user_id FROM excluded_analytics_users
+         )
         GROUP BY bounds.report_date
       ),
       first_seen AS (
@@ -245,44 +284,37 @@ async function main() {
       activity_summary AS (
         SELECT
           params.report_date,
-
           COUNT(report_day_users.user_id) AS daily_active_users,
-
           COUNT(report_day_users.user_id) FILTER (
             WHERE first_seen.first_active_date = params.report_date
           ) AS new_users,
-
           COUNT(report_day_users.user_id) FILTER (
             WHERE first_seen.first_active_date < params.report_date
           ) AS returning_users
-
         FROM params
-        LEFT JOIN report_day_users
-          ON true
-        LEFT JOIN first_seen
-          ON report_day_users.user_id = first_seen.user_id
+        LEFT JOIN report_day_users ON true
+        LEFT JOIN first_seen ON report_day_users.user_id = first_seen.user_id
         GROUP BY params.report_date
       )
       SELECT
         TO_CHAR(activity_summary.report_date, 'YYYY-MM-DD') AS report_date,
-
         activity_summary.daily_active_users,
         activity_summary.new_users,
         activity_summary.returning_users,
-
         event_summary.daily_challenge_viewed,
         event_summary.daily_challenge_started,
         event_summary.daily_challenge_completed,
-
         event_summary.normal_philosopher_selected,
         event_summary.normal_topic_selected,
         event_summary.normal_difficulty_selected,
         event_summary.normal_debate_started,
         event_summary.normal_debate_completed,
-
         event_summary.reports_viewed_all_paths,
-        event_summary.share_cards_created_all_paths
-
+        event_summary.share_cards_created_all_paths,
+        event_summary.report_generation_completed,
+        event_summary.avg_report_load_seconds,
+        event_summary.fastest_report_seconds,
+        event_summary.slowest_report_seconds
       FROM activity_summary
       JOIN event_summary
         ON activity_summary.report_date = event_summary.report_date;
@@ -290,12 +322,12 @@ async function main() {
 
     const sevenDayResult = await client.query(`
       WITH params AS (
-        SELECT 
+        SELECT
           ((NOW() AT TIME ZONE 'America/Chicago')::date - INTERVAL '1 day')::date AS end_date,
           ((NOW() AT TIME ZONE 'America/Chicago')::date - INTERVAL '7 days')::date AS start_date
       ),
       days AS (
-        SELECT 
+        SELECT
           generate_series(
             params.start_date,
             params.end_date,
@@ -314,7 +346,7 @@ async function main() {
         GROUP BY user_id
       ),
       daily_active AS (
-        SELECT 
+        SELECT
           active_date,
           COUNT(DISTINCT user_id) AS daily_active_users
         FROM user_activity_days
@@ -324,13 +356,13 @@ async function main() {
         GROUP BY active_date
       ),
       daily_new AS (
-        SELECT 
+        SELECT
           first_active_date AS active_date,
           COUNT(DISTINCT user_id) AS new_users
         FROM first_seen
         GROUP BY first_active_date
       )
-      SELECT 
+      SELECT
         TO_CHAR(days.active_date, 'MM-DD-YYYY Dy') AS report_date,
         COALESCE(daily_active.daily_active_users, 0) AS daily_active_users,
         COALESCE(daily_new.new_users, 0) AS new_users,
@@ -365,6 +397,14 @@ async function main() {
 
     const reportsViewedAllPaths = toNumber(row.reports_viewed_all_paths);
     const shareCardsCreatedAllPaths = toNumber(row.share_cards_created_all_paths);
+
+    const reportGenerationCompleted = toNumber(row.report_generation_completed);
+    const avgReportLoadTime =
+      reportGenerationCompleted > 0 ? formatSeconds(row.avg_report_load_seconds) : "—";
+    const fastestReportLoadTime =
+      reportGenerationCompleted > 0 ? formatSeconds(row.fastest_report_seconds) : "—";
+    const slowestReportLoadTime =
+      reportGenerationCompleted > 0 ? formatSeconds(row.slowest_report_seconds) : "—";
 
     const dailyChallengeStartRate = percent(
       dailyChallengeStarted,
@@ -421,47 +461,50 @@ async function main() {
     });
 
     const message = [
-      `🏛️ <b>The Oracle has spoken.</b>`,
+      `🔮 The Oracle has spoken.`,
       ``,
-      `<b>The Agora Daily Report</b>`,
-      `For: <b>${row.report_date}</b>`,
+      `The Agora Daily Report`,
+      `For: ${row.report_date}`,
       ``,
-      `<b>Daily Active Users:</b> ${dailyActiveUsers}`,
-      `<b>New users:</b> ${newUsers}`,
-      `<b>Returning users:</b> ${returningUsers}`,
+      `Daily Active Users: ${dailyActiveUsers}`,
+      `New users: ${newUsers}`,
+      `Returning users: ${returningUsers}`,
       ``,
-      `<b>Daily Challenge Funnel</b>`,
-      `<b>Daily Challenge viewed:</b> ${dailyChallengeViewed}`,
-      `<b>Daily Challenge started:</b> ${dailyChallengeStarted}`,
-      `<b>Daily Challenge completed:</b> ${dailyChallengeCompleted}`,
-      `<b>Daily Challenge start rate:</b> ${dailyChallengeStartRate}`,
-      `<b>Daily Challenge completion rate:</b> ${dailyChallengeCompletionRate}`,
+      `Daily Challenge Funnel`,
+      `Daily Challenge viewed: ${dailyChallengeViewed}`,
+      `Daily Challenge started: ${dailyChallengeStarted}`,
+      `Daily Challenge completed: ${dailyChallengeCompleted}`,
+      `Daily Challenge start rate: ${dailyChallengeStartRate}`,
+      `Daily Challenge completion rate: ${dailyChallengeCompletionRate}`,
       ``,
-      `<b>Normal Debate Funnel</b>`,
-      `<b>Philosopher selected:</b> ${normalPhilosopherSelected}`,
-      `<b>Topic selected:</b> ${normalTopicSelected}`,
-      `<b>Difficulty selected:</b> ${normalDifficultySelected}`,
-      `<b>Normal debate started:</b> ${normalDebateStarted}`,
-      `<b>Normal debate completed:</b> ${normalDebateCompleted}`,
+      `Normal Debate Funnel`,
+      `Philosopher selected: ${normalPhilosopherSelected}`,
+      `Topic selected: ${normalTopicSelected}`,
+      `Difficulty selected: ${normalDifficultySelected}`,
+      `Normal debate started: ${normalDebateStarted}`,
+      `Normal debate completed: ${normalDebateCompleted}`,
       ``,
-      `<b>Opened → philosopher rate:</b> ${openedToPhilosopherRate}`,
-      `<b>Philosopher → topic rate:</b> ${philosopherToTopicRate}`,
-      `<b>Topic → difficulty rate:</b> ${topicToDifficultyRate}`,
-      `<b>Difficulty → normal debate rate:</b> ${difficultyToNormalDebateRate}`,
-      `<b>Normal debate completion rate:</b> ${normalDebateCompletionRate}`,
+      `Opened → philosopher rate: ${openedToPhilosopherRate}`,
+      `Philosopher → topic rate: ${philosopherToTopicRate}`,
+      `Topic → difficulty rate: ${topicToDifficultyRate}`,
+      `Difficulty → normal debate rate: ${difficultyToNormalDebateRate}`,
+      `Normal debate completion rate: ${normalDebateCompletionRate}`,
       ``,
-      `<b>Reports / Sharing</b>`,
-      `<b>Reports viewed, all paths:</b> ${reportsViewedAllPaths}`,
-      `<b>Share cards created, all paths:</b> ${shareCardsCreatedAllPaths}`,
-      `<b>Report-to-share rate:</b> ${reportToShareRate}`,
+      `Reports / Sharing`,
+      `Reports viewed, all paths: ${reportsViewedAllPaths}`,
+      `Debate reports completed: ${reportGenerationCompleted}`,
+      `Avg report load time: ${avgReportLoadTime}`,
+      `Fastest / slowest report: ${fastestReportLoadTime} / ${slowestReportLoadTime}`,
+      `Share cards created, all paths: ${shareCardsCreatedAllPaths}`,
+      `Report-to-share rate: ${reportToShareRate}`,
       ``,
-      `<b>Biggest funnel drop-off:</b> ${biggestDropOff}`,
-      `<b>One recommended action:</b> ${recommendedAction}`,
+      `Biggest funnel drop-off: ${biggestDropOff}`,
+      `One recommended action: ${recommendedAction}`,
     ].join("\n");
 
     const sevenDayLines = sevenDayResult.rows.map((day) => {
       return [
-        `<b>${day.report_date}</b>`,
+        `${day.report_date}`,
         `Daily Active Users: ${toNumber(day.daily_active_users)}`,
         `New users: ${toNumber(day.new_users)}`,
         `Returning users: ${toNumber(day.returning_users)}`,
@@ -469,9 +512,9 @@ async function main() {
     });
 
     const sevenDayMessage = [
-      `📊 <b>7-Day User Activity Report</b>`,
+      `📊 7-Day User Activity Report`,
       ``,
-      `<b>Last 7 completed Central-time days</b>`,
+      `Last 7 completed Central-time days`,
       ``,
       sevenDayLines.join("\n\n"),
     ].join("\n");
