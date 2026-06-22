@@ -20,6 +20,11 @@ const ALLOWED_EVENTS = new Set([
   'report_viewed',
   'difficulty_selected',
   'share_card_created',
+
+  // Debate Report performance measurement
+  'report_generation_started',
+  'report_generation_completed',
+  'report_generation_failed',
 ]);
 
 const USER_ID_RE = /^[A-Za-z0-9-]{8,128}$/;   // UUIDs pass; garbage doesn't
@@ -82,18 +87,24 @@ export function createAnalyticsRouter(pool, options = {}) {
   router.post('/event', async (req, res) => {
     try {
       const { userId, eventName, metadata } = req.body || {};
+
       if (!isValidUserId(userId)) {
         return res.status(400).json({ success: false, error: 'invalid userId' });
       }
+
       if (typeof eventName !== 'string' || !ALLOWED_EVENTS.has(eventName)) {
         return res.status(400).json({ success: false, error: 'invalid eventName' });
       }
+
       const cleanMeta = sanitizeMetadata(metadata);
+
       if (cleanMeta === undefined) {
         return res.status(400).json({ success: false, error: 'invalid metadata' });
       }
+
       await recordEvent(userId, eventName, cleanMeta);
       await recordActiveDay(userId);          // any event ⇒ active today
+
       return res.json({ success: true });
     } catch (err) {
       console.error('[analytics] event:', err.message);
@@ -106,6 +117,7 @@ export function createAnalyticsRouter(pool, options = {}) {
     if (!adminKey || req.get('x-admin-key') !== adminKey) {
       return res.status(401).json({ success: false, error: 'unauthorized' });
     }
+
     try {
       const tz = APP_TIMEZONE;
 
@@ -122,10 +134,13 @@ export function createAnalyticsRouter(pool, options = {}) {
 
       const todayQ = pool.query(
         `SELECT
-           COUNT(*) FILTER (WHERE event_name = 'app_opened')                 AS app_opens_today,
-           COUNT(*) FILTER (WHERE event_name = 'debate_started')             AS debate_starts_today,
-           COUNT(*) FILTER (WHERE event_name = 'debate_completed')           AS debate_completions_today,
-           COUNT(*) FILTER (WHERE event_name = 'daily_challenge_completed')  AS daily_challenge_completions_today
+           COUNT(*) FILTER (WHERE event_name = 'app_opened')                    AS app_opens_today,
+           COUNT(*) FILTER (WHERE event_name = 'debate_started')                AS debate_starts_today,
+           COUNT(*) FILTER (WHERE event_name = 'debate_completed')              AS debate_completions_today,
+           COUNT(*) FILTER (WHERE event_name = 'daily_challenge_completed')     AS daily_challenge_completions_today,
+           COUNT(*) FILTER (WHERE event_name = 'report_generation_started')     AS report_generation_started_today,
+           COUNT(*) FILTER (WHERE event_name = 'report_generation_completed')   AS report_generation_completed_today,
+           COUNT(*) FILTER (WHERE event_name = 'report_generation_failed')      AS report_generation_failed_today
          FROM user_events
          WHERE (created_at AT TIME ZONE $1)::date = (now() AT TIME ZONE $1)::date`,
         [tz]
@@ -153,6 +168,7 @@ export function createAnalyticsRouter(pool, options = {}) {
       );
 
       const [users, today, retention] = await Promise.all([usersQ, todayQ, retentionQ]);
+
       return res.json({
         success: true,
         timezone: tz,
