@@ -18,109 +18,189 @@ function percent(numerator, denominator) {
   const n = Number(numerator || 0);
   const d = Number(denominator || 0);
 
-  if (d === 0) return "0.0%";
+  if (d === 0) return "—";
 
   return `${((n / d) * 100).toFixed(1)}%`;
 }
 
 function formatSeconds(value) {
   if (value === null || value === undefined) return "—";
-  return `${Number(value).toFixed(2)}s`;
+
+  const numberValue = Number(value);
+
+  if (Number.isNaN(numberValue)) return "—";
+
+  return `${numberValue.toFixed(2)}s`;
 }
 
 function chooseBiggestDropOff(data) {
-  const dailyActiveUsers = toNumber(data.daily_active_users);
+  const candidates = [];
 
-  const dailyChallengeViewed = toNumber(data.daily_challenge_viewed);
-  const dailyChallengeStarted = toNumber(data.daily_challenge_started);
-  const dailyChallengeCompleted = toNumber(data.daily_challenge_completed);
+  function addCandidate({
+    key,
+    label,
+    from,
+    to,
+    fromLabel,
+    toLabel,
+    action,
+  }) {
+    const start = Number(from || 0);
+    const end = Number(to || 0);
 
-  const normalPhilosopherSelected = toNumber(data.normal_philosopher_selected);
-  const normalTopicSelected = toNumber(data.normal_topic_selected);
-  const normalDifficultySelected = toNumber(data.normal_difficulty_selected);
-  const normalDebateStarted = toNumber(data.normal_debate_started);
-  const normalDebateCompleted = toNumber(data.normal_debate_completed);
+    if (start <= 0) return;
 
-  const reportViewers = toNumber(data.report_viewers);
-  const shareCardUsers = toNumber(data.share_card_users);
+    const dropRate = Math.max(0, (start - end) / start);
 
-  if (dailyActiveUsers === 0) {
+    candidates.push({
+      key,
+      label,
+      from: start,
+      to: end,
+      fromLabel,
+      toLabel,
+      dropRate,
+      action,
+    });
+  }
+
+  addCandidate({
+    key: "daily_challenge_visibility",
+    label: "Daily Active Users → Daily Challenge viewers",
+    from: data.dailyActiveUsers,
+    to: data.dailyChallengeViewers,
+    fromLabel: "active users",
+    toLabel: "viewers",
+    action:
+      "Review Daily Challenge presentation logic and onboarding eligibility. Make sure every eligible user sees the Daily Challenge when they reach the app.",
+  });
+
+  addCandidate({
+    key: "daily_challenge_start",
+    label: "Daily Challenge viewers → starters",
+    from: data.dailyChallengeViewers,
+    to: data.dailyChallengeStarters,
+    fromLabel: "viewers",
+    toLabel: "starters",
+    action:
+      "Improve the Daily Challenge intro. Make the prompt more compelling and make the Enter the Agora button feel like the obvious next step.",
+  });
+
+  addCandidate({
+    key: "daily_challenge_completion",
+    label: "Daily Challenge starters → completions",
+    from: data.dailyChallengeStarters,
+    to: data.dailyChallengeCompletions,
+    fromLabel: "starters",
+    toLabel: "completions",
+    action:
+      "Review the Daily Challenge debate flow. Make the Finish Debate button more obvious once the user has exchanged at least one round, and make the report payoff feel immediate.",
+  });
+
+  addCandidate({
+    key: "philosopher_to_topic",
+    label: "Philosopher selectors → topic selectors",
+    from: data.philosopherSelectors,
+    to: data.topicSelectors,
+    fromLabel: "users",
+    toLabel: "users",
+    action:
+      "Improve the topic selection step. Make the questions more immediately compelling after a user selects a philosopher, and consider making generated topics more prominent.",
+  });
+
+  addCandidate({
+    key: "topic_to_difficulty",
+    label: "Topic selectors → difficulty selectors",
+    from: data.topicSelectors,
+    to: data.difficultySelectors,
+    fromLabel: "users",
+    toLabel: "users",
+    action:
+      "Review the difficulty selection screen. Make the difference between Guided, Balanced, and Relentless instantly clear and reduce hesitation before starting.",
+  });
+
+  addCandidate({
+    key: "difficulty_to_normal_start",
+    label: "Difficulty selectors → normal debate starters",
+    from: data.difficultySelectors,
+    to: data.uniqueNormalDebateStarters,
+    fromLabel: "users",
+    toLabel: "users",
+    action:
+      "Check the handoff from difficulty selection into the debate screen. Make sure the debate starts quickly and the opening loading state feels intentional.",
+  });
+
+  addCandidate({
+    key: "normal_start_to_completion",
+    label: "Normal debate starts → normal debate completions",
+    from: data.normalDebateStarts,
+    to: data.normalDebateCompletions,
+    fromLabel: "debates",
+    toLabel: "debates",
+    action:
+      "Review normal debate completion. Make the Finish Debate button visible after a real exchange and make the report feel like the reward for finishing.",
+  });
+
+  addCandidate({
+    key: "report_to_share",
+    label: "Report views → share cards created",
+    from: data.reportViews,
+    to: data.shareCardsCreated,
+    fromLabel: "report views",
+    toLabel: "share cards",
+    action:
+      "Improve the share-card CTA. Show it immediately after the report score and make the generated card feel worth saving or posting.",
+  });
+
+  if (candidates.length === 0) {
     return {
-      biggestDropOff: "No user activity for this day.",
-      recommendedAction: "No action needed yet. Keep watching tomorrow's report.",
+      biggestDropOff: "No usable funnel data for this day.",
+      recommendedAction:
+        "No action needed yet. Keep collecting data and check tomorrow's report.",
     };
   }
 
-  if (dailyChallengeViewed === 0) {
-    return {
-      biggestDropOff: "Users opened the app but did not view the Daily Challenge.",
-      recommendedAction: "Check Daily Challenge display logic and first-open behavior.",
-    };
-  }
-
-  if (dailyChallengeViewed > 0 && dailyChallengeStarted === 0) {
-    return {
-      biggestDropOff: "Users viewed the Daily Challenge but did not start it.",
-      recommendedAction: "Review the Daily Challenge topic, CTA, and first-screen motivation.",
-    };
-  }
-
-  if (dailyChallengeStarted > 0 && dailyChallengeCompleted === 0) {
-    return {
-      biggestDropOff: "Users started the Daily Challenge but did not complete it.",
-      recommendedAction: "Review debate length, difficulty, and visibility of the Finish button.",
-    };
-  }
-
-  if (normalPhilosopherSelected > 0 && normalTopicSelected === 0) {
-    return {
-      biggestDropOff: "Users selected a philosopher but did not select a topic.",
-      recommendedAction: "Review the topic picker clarity, topic choices, and generated-question CTA.",
-    };
-  }
-
-  if (normalTopicSelected > 0 && normalDifficultySelected === 0) {
-    return {
-      biggestDropOff: "Users selected a topic but did not choose a difficulty.",
-      recommendedAction: "Review the difficulty-mode screen and make the choice feel easier.",
-    };
-  }
-
-  if (normalDifficultySelected > 0 && normalDebateStarted === 0) {
-    return {
-      biggestDropOff: "Users chose a difficulty but did not start a normal debate.",
-      recommendedAction: "Check navigation from Difficulty Mode into DebateView.",
-    };
-  }
-
-  if (normalDebateStarted > 0 && normalDebateCompleted === 0) {
-    return {
-      biggestDropOff: "Users started normal debates but did not complete them.",
-      recommendedAction: "Review debate length, difficulty, finish-button placement, and loading states.",
-    };
-  }
-
-  if (
-    (dailyChallengeCompleted > 0 || normalDebateCompleted > 0) &&
-    reportViewers === 0
-  ) {
-    return {
-      biggestDropOff: "Users completed debates but did not view reports.",
-      recommendedAction: "Check report generation, report navigation, and loading states.",
-    };
-  }
-
-  if (reportViewers > 0 && shareCardUsers === 0) {
-    return {
-      biggestDropOff: "Users viewed reports but did not create share cards.",
-      recommendedAction: "Improve the share-card CTA, quote, or visual payoff.",
-    };
-  }
+  const biggest = candidates.sort((a, b) => b.dropRate - a.dropRate)[0];
 
   return {
-    biggestDropOff: "No obvious funnel issue from yesterday's data.",
-    recommendedAction: "Keep monitoring. Wait for a larger sample before changing the product.",
+    biggestDropOff: `${biggest.label} dropped from ${biggest.from} ${biggest.fromLabel} to ${biggest.to} ${biggest.toLabel}.`,
+    recommendedAction: biggest.action,
   };
+}
+
+function chooseReportLoadingNote({
+  reportsTimed,
+  reportViews,
+  averageReportLoadSeconds,
+  slowestReportLoadSeconds,
+}) {
+  const timed = toNumber(reportsTimed);
+  const views = toNumber(reportViews);
+
+  if (views === 0) {
+    return "No report views recorded.";
+  }
+
+  if (timed === 0) {
+    return "No report load-time data yet. This is expected until users are on the updated app version.";
+  }
+
+  const average = Number(averageReportLoadSeconds || 0);
+  const slowest = Number(slowestReportLoadSeconds || 0);
+
+  if (average >= 10) {
+    return "Average report loading time is high. Prioritize reducing report generation latency.";
+  }
+
+  if (slowest >= 20) {
+    return "One or more reports loaded very slowly. Check slowest report cases and backend latency.";
+  }
+
+  if (timed < views) {
+    return "Some report views are missing timing data, likely from older app versions or reopened reports.";
+  }
+
+  return "Report loading looks healthy based on timed reports.";
 }
 
 async function sendTelegramMessage(text) {
@@ -177,45 +257,75 @@ async function main() {
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'daily_challenge_viewed'
-          ) AS daily_challenge_viewed,
+          ) AS daily_challenge_viewers,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'daily_challenge_started'
-          ) AS daily_challenge_started,
+          ) AS daily_challenge_starters,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'daily_challenge_completed'
-          ) AS daily_challenge_completed,
+          ) AS daily_challenge_completions,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'philosopher_selected'
-          ) AS normal_philosopher_selected,
+          ) AS philosopher_selectors,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'philosopher_selected'
+          ) AS philosopher_selections,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'topic_selected'
-          ) AS normal_topic_selected,
+          ) AS topic_selectors,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'topic_selected'
+          ) AS topic_selections,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'difficulty_selected'
-          ) AS normal_difficulty_selected,
+          ) AS difficulty_selectors,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'difficulty_selected'
+          ) AS difficulty_selections,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'debate_started'
               AND user_events.metadata->>'isDailyChallenge' = 'false'
-          ) AS normal_debate_started_events,
+          ) AS unique_normal_debate_starters,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'debate_started'
+              AND user_events.metadata->>'isDailyChallenge' = 'false'
+          ) AS normal_debate_starts,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'debate_completed'
               AND user_events.metadata->>'isDailyChallenge' = 'false'
-          ) AS normal_debate_completed,
+          ) AS unique_normal_debate_completers,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'debate_completed'
+              AND user_events.metadata->>'isDailyChallenge' = 'false'
+          ) AS normal_debate_completions,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'report_viewed'
-          ) AS reports_viewed_all_paths,
+          ) AS unique_report_viewers,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'report_viewed'
+          ) AS report_views,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'share_card_created'
-          ) AS share_cards_created_all_paths
+          ) AS unique_share_card_creators,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'share_card_created'
+          ) AS share_cards_created
 
         FROM bounds
         LEFT JOIN user_events
@@ -229,6 +339,8 @@ async function main() {
       report_timing_events AS (
         SELECT
           bounds.report_date,
+          user_events.user_id,
+          user_events.event_name,
           CASE
             WHEN user_events.metadata->>'reportLoadSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
               THEN (user_events.metadata->>'reportLoadSeconds')::numeric
@@ -241,6 +353,15 @@ async function main() {
 
             WHEN user_events.metadata->>'elapsedSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
               THEN (user_events.metadata->>'elapsedSeconds')::numeric
+
+            WHEN user_events.metadata->>'reportGenerationSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'reportGenerationSeconds')::numeric
+
+            WHEN user_events.metadata->>'reportGenerationTimeSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'reportGenerationTimeSeconds')::numeric
+
+            WHEN user_events.metadata->>'generationSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'generationSeconds')::numeric
 
             WHEN user_events.metadata->>'reportLoadMs' ~ '^[0-9]+(\\.[0-9]+)?$'
               THEN (user_events.metadata->>'reportLoadMs')::numeric / 1000.0
@@ -263,13 +384,19 @@ async function main() {
             WHEN user_events.metadata->>'reportGenerationTimeMs' ~ '^[0-9]+(\\.[0-9]+)?$'
               THEN (user_events.metadata->>'reportGenerationTimeMs')::numeric / 1000.0
 
+            WHEN user_events.metadata->>'generationMs' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'generationMs')::numeric / 1000.0
+
             ELSE NULL
           END AS report_load_seconds
         FROM bounds
         JOIN user_events
           ON user_events.created_at >= bounds.start_time
           AND user_events.created_at < bounds.end_time
-          AND user_events.event_name = 'report_viewed'
+          AND user_events.event_name IN (
+            'report_viewed',
+            'report_generation_completed'
+          )
           AND user_events.user_id NOT IN (
             SELECT user_id FROM excluded_analytics_users
           )
@@ -277,7 +404,7 @@ async function main() {
       report_timing_summary AS (
         SELECT
           bounds.report_date,
-          COUNT(report_timing_events.report_load_seconds) AS debate_reports_completed,
+          COUNT(report_timing_events.report_load_seconds) AS reports_timed,
           ROUND(AVG(report_timing_events.report_load_seconds), 2) AS average_report_load_seconds,
           ROUND(MIN(report_timing_events.report_load_seconds), 2) AS fastest_report_load_seconds,
           ROUND(MAX(report_timing_events.report_load_seconds), 2) AS slowest_report_load_seconds
@@ -335,20 +462,28 @@ async function main() {
         activity_summary.new_users,
         activity_summary.returning_users,
 
-        event_summary.daily_challenge_viewed,
-        event_summary.daily_challenge_started,
-        event_summary.daily_challenge_completed,
+        event_summary.daily_challenge_viewers,
+        event_summary.daily_challenge_starters,
+        event_summary.daily_challenge_completions,
 
-        event_summary.normal_philosopher_selected,
-        event_summary.normal_topic_selected,
-        event_summary.normal_difficulty_selected,
-        event_summary.normal_debate_started_events,
-        event_summary.normal_debate_completed,
+        event_summary.philosopher_selectors,
+        event_summary.philosopher_selections,
+        event_summary.topic_selectors,
+        event_summary.topic_selections,
+        event_summary.difficulty_selectors,
+        event_summary.difficulty_selections,
 
-        event_summary.reports_viewed_all_paths,
-        event_summary.share_cards_created_all_paths,
+        event_summary.unique_normal_debate_starters,
+        event_summary.normal_debate_starts,
+        event_summary.unique_normal_debate_completers,
+        event_summary.normal_debate_completions,
 
-        report_timing_summary.debate_reports_completed,
+        event_summary.unique_report_viewers,
+        event_summary.report_views,
+        event_summary.unique_share_card_creators,
+        event_summary.share_cards_created,
+
+        report_timing_summary.reports_timed,
         report_timing_summary.average_report_load_seconds,
         report_timing_summary.fastest_report_load_seconds,
         report_timing_summary.slowest_report_load_seconds
@@ -425,82 +560,102 @@ async function main() {
     const newUsers = toNumber(row.new_users);
     const returningUsers = toNumber(row.returning_users);
 
-    const dailyChallengeViewed = toNumber(row.daily_challenge_viewed);
-    const dailyChallengeStarted = toNumber(row.daily_challenge_started);
-    const dailyChallengeCompleted = toNumber(row.daily_challenge_completed);
+    const dailyChallengeViewers = toNumber(row.daily_challenge_viewers);
+    const dailyChallengeStarters = toNumber(row.daily_challenge_starters);
+    const dailyChallengeCompletions = toNumber(row.daily_challenge_completions);
 
-    const normalPhilosopherSelected = toNumber(row.normal_philosopher_selected);
-    const normalTopicSelected = toNumber(row.normal_topic_selected);
-    const normalDifficultySelected = toNumber(row.normal_difficulty_selected);
+    const philosopherSelectors = toNumber(row.philosopher_selectors);
+    const philosopherSelections = toNumber(row.philosopher_selections);
+    const topicSelectors = toNumber(row.topic_selectors);
+    const topicSelections = toNumber(row.topic_selections);
+    const difficultySelectors = toNumber(row.difficulty_selectors);
+    const difficultySelections = toNumber(row.difficulty_selections);
 
-    const normalDebateStartedEvents = toNumber(row.normal_debate_started_events);
-    const normalDebateCompleted = toNumber(row.normal_debate_completed);
+    const uniqueNormalDebateStarters = toNumber(row.unique_normal_debate_starters);
+    const normalDebateStarts = toNumber(row.normal_debate_starts);
+    const uniqueNormalDebateCompleters = toNumber(row.unique_normal_debate_completers);
+    const normalDebateCompletions = toNumber(row.normal_debate_completions);
 
-    const normalDebateStarted = Math.max(
-      normalDebateStartedEvents,
-      normalDebateCompleted
-    );
+    const uniqueReportViewers = toNumber(row.unique_report_viewers);
+    const reportViews = toNumber(row.report_views);
+    const uniqueShareCardCreators = toNumber(row.unique_share_card_creators);
+    const shareCardsCreated = toNumber(row.share_cards_created);
 
-    const reportsViewedAllPaths = toNumber(row.reports_viewed_all_paths);
-    const shareCardsCreatedAllPaths = toNumber(row.share_cards_created_all_paths);
-
-    const debateReportsCompleted = toNumber(row.debate_reports_completed);
+    const reportsTimed = toNumber(row.reports_timed);
     const averageReportLoadSeconds = row.average_report_load_seconds;
     const fastestReportLoadSeconds = row.fastest_report_load_seconds;
     const slowestReportLoadSeconds = row.slowest_report_load_seconds;
 
-    const dailyChallengeStartRate = percent(
-      dailyChallengeStarted,
-      dailyChallengeViewed
-    );
-
-    const dailyChallengeCompletionRate = percent(
-      dailyChallengeCompleted,
-      dailyChallengeStarted
-    );
-
-    const openedToPhilosopherRate = percent(
-      normalPhilosopherSelected,
+    const dailyChallengeVisibilityRate = percent(
+      dailyChallengeViewers,
       dailyActiveUsers
     );
 
+    const dailyChallengeViewerToStarterRate = percent(
+      dailyChallengeStarters,
+      dailyChallengeViewers
+    );
+
+    const dailyChallengeStarterToCompletionRate = percent(
+      dailyChallengeCompletions,
+      dailyChallengeStarters
+    );
+
+    const dailyChallengeViewerToCompletionRate = percent(
+      dailyChallengeCompletions,
+      dailyChallengeViewers
+    );
+
     const philosopherToTopicRate = percent(
-      normalTopicSelected,
-      normalPhilosopherSelected
+      topicSelectors,
+      philosopherSelectors
     );
 
     const topicToDifficultyRate = percent(
-      normalDifficultySelected,
-      normalTopicSelected
+      difficultySelectors,
+      topicSelectors
     );
 
-    const difficultyToNormalDebateRate = percent(
-      normalDebateStarted,
-      normalDifficultySelected
+    const difficultyToNormalDebateStartRate = percent(
+      uniqueNormalDebateStarters,
+      difficultySelectors
     );
 
     const normalDebateCompletionRate = percent(
-      normalDebateCompleted,
-      normalDebateStarted
+      normalDebateCompletions,
+      normalDebateStarts
     );
 
-    const reportToShareRate = percent(
-      shareCardsCreatedAllPaths,
-      reportsViewedAllPaths
+    const totalReportToShareRate = percent(
+      shareCardsCreated,
+      reportViews
+    );
+
+    const uniqueReportToShareRate = percent(
+      uniqueShareCardCreators,
+      uniqueReportViewers
     );
 
     const { biggestDropOff, recommendedAction } = chooseBiggestDropOff({
-      daily_active_users: dailyActiveUsers,
-      daily_challenge_viewed: dailyChallengeViewed,
-      daily_challenge_started: dailyChallengeStarted,
-      daily_challenge_completed: dailyChallengeCompleted,
-      normal_philosopher_selected: normalPhilosopherSelected,
-      normal_topic_selected: normalTopicSelected,
-      normal_difficulty_selected: normalDifficultySelected,
-      normal_debate_started: normalDebateStarted,
-      normal_debate_completed: normalDebateCompleted,
-      report_viewers: reportsViewedAllPaths,
-      share_card_users: shareCardsCreatedAllPaths,
+      dailyActiveUsers,
+      dailyChallengeViewers,
+      dailyChallengeStarters,
+      dailyChallengeCompletions,
+      philosopherSelectors,
+      topicSelectors,
+      difficultySelectors,
+      uniqueNormalDebateStarters,
+      normalDebateStarts,
+      normalDebateCompletions,
+      reportViews,
+      shareCardsCreated,
+    });
+
+    const reportLoadingNote = chooseReportLoadingNote({
+      reportsTimed,
+      reportViews,
+      averageReportLoadSeconds,
+      slowestReportLoadSeconds,
     });
 
     const message = [
@@ -514,34 +669,46 @@ async function main() {
       `<b>Returning users:</b> ${returningUsers}`,
       ``,
       `<b>Daily Challenge Funnel</b>`,
-      `<b>Daily Challenge viewed:</b> ${dailyChallengeViewed}`,
-      `<b>Daily Challenge started:</b> ${dailyChallengeStarted}`,
-      `<b>Daily Challenge completed:</b> ${dailyChallengeCompleted}`,
-      `<b>Daily Challenge start rate:</b> ${dailyChallengeStartRate}`,
-      `<b>Daily Challenge completion rate:</b> ${dailyChallengeCompletionRate}`,
+      `<b>Daily Challenge viewers:</b> ${dailyChallengeViewers} / ${dailyActiveUsers} active users`,
+      `<b>Daily Challenge visibility rate:</b> ${dailyChallengeVisibilityRate}`,
+      `<b>Daily Challenge starters:</b> ${dailyChallengeStarters}`,
+      `<b>Daily Challenge completions:</b> ${dailyChallengeCompletions}`,
+      `<b>Viewer → starter rate:</b> ${dailyChallengeViewerToStarterRate}`,
+      `<b>Starter → completion rate:</b> ${dailyChallengeStarterToCompletionRate}`,
+      `<b>Viewer → completion rate:</b> ${dailyChallengeViewerToCompletionRate}`,
       ``,
       `<b>Normal Debate Funnel</b>`,
-      `<b>Philosopher selected:</b> ${normalPhilosopherSelected}`,
-      `<b>Topic selected:</b> ${normalTopicSelected}`,
-      `<b>Difficulty selected:</b> ${normalDifficultySelected}`,
-      `<b>Normal debate started:</b> ${normalDebateStarted}`,
-      `<b>Normal debate completed:</b> ${normalDebateCompleted}`,
+      `<b>Philosopher selectors:</b> ${philosopherSelectors} users`,
+      `<b>Philosopher selections:</b> ${philosopherSelections} total`,
+      `<b>Topic selectors:</b> ${topicSelectors} users`,
+      `<b>Topic selections:</b> ${topicSelections} total`,
+      `<b>Difficulty selectors:</b> ${difficultySelectors} users`,
+      `<b>Difficulty selections:</b> ${difficultySelections} total`,
       ``,
-      `<b>Opened → philosopher rate:</b> ${openedToPhilosopherRate}`,
+      `<b>Normal debate starts:</b> ${normalDebateStarts} debates`,
+      `<b>Unique normal debate starters:</b> ${uniqueNormalDebateStarters} users`,
+      `<b>Normal debate completions:</b> ${normalDebateCompletions} debates`,
+      `<b>Unique normal debate completers:</b> ${uniqueNormalDebateCompleters} users`,
+      ``,
       `<b>Philosopher → topic rate:</b> ${philosopherToTopicRate}`,
       `<b>Topic → difficulty rate:</b> ${topicToDifficultyRate}`,
-      `<b>Difficulty → normal debate rate:</b> ${difficultyToNormalDebateRate}`,
+      `<b>Difficulty → normal debate start rate:</b> ${difficultyToNormalDebateStartRate}`,
       `<b>Normal debate completion rate:</b> ${normalDebateCompletionRate}`,
       ``,
       `<b>Reports / Sharing</b>`,
-      `<b>Reports viewed, all paths:</b> ${reportsViewedAllPaths}`,
-      `<b>Share cards created, all paths:</b> ${shareCardsCreatedAllPaths}`,
-      `<b>Report-to-share rate:</b> ${reportToShareRate}`,
+      `<b>Reports viewed:</b> ${reportViews} total`,
+      `<b>Unique report viewers:</b> ${uniqueReportViewers} users`,
+      `<b>Share cards created:</b> ${shareCardsCreated} total`,
+      `<b>Unique share-card creators:</b> ${uniqueShareCardCreators} users`,
+      `<b>Total report-to-share rate:</b> ${totalReportToShareRate}`,
+      `<b>Unique report-to-share rate:</b> ${uniqueReportToShareRate}`,
       ``,
       `<b>Report Loading</b>`,
-      `<b>Debate reports completed:</b> ${debateReportsCompleted}`,
+      `<b>Report views:</b> ${reportViews} total`,
+      `<b>Reports timed:</b> ${reportsTimed} / ${reportViews}`,
       `<b>Average report load time:</b> ${formatSeconds(averageReportLoadSeconds)}`,
       `<b>Fastest / slowest report:</b> ${formatSeconds(fastestReportLoadSeconds)} / ${formatSeconds(slowestReportLoadSeconds)}`,
+      `<b>Report loading note:</b> ${reportLoadingNote}`,
       ``,
       `<b>Biggest funnel drop-off:</b> ${biggestDropOff}`,
       `<b>One recommended action:</b> ${recommendedAction}`,
