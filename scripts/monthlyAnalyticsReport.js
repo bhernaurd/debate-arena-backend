@@ -54,6 +54,28 @@ function formatSeconds(value) {
   return `${numberValue.toFixed(2)}s`;
 }
 
+function pluralize(count, singular, plural = `${singular}s`) {
+  return Number(count || 0) === 1 ? singular : plural;
+}
+
+function normalDebateCompletionRateLabel({
+  normalDebateStarts,
+  normalDebateCompletions,
+}) {
+  const starts = toNumber(normalDebateStarts);
+  const completions = toNumber(normalDebateCompletions);
+
+  if (completions > 0 && starts === 0) {
+    return "tracking rollout in progress";
+  }
+
+  if (starts > 0 && completions > starts * 2) {
+    return "tracking rollout in progress";
+  }
+
+  return percent(completions, starts);
+}
+
 function chooseBiggestDropOff(data) {
   const candidates = [];
 
@@ -744,10 +766,10 @@ async function main() {
       difficultySelectors
     );
 
-    const monthlyNormalDebateCompletionRate = percent(
+    const monthlyNormalDebateCompletionRate = normalDebateCompletionRateLabel({
+      normalDebateStarts,
       normalDebateCompletions,
-      normalDebateStarts
-    );
+    });
 
     const totalReportToShareRate = percent(
       shareCardsCreated,
@@ -813,28 +835,28 @@ async function main() {
       `<b>Lost users from last month:</b> ${lostUsersFromLastMonth}`,
       ``,
       `<b>Daily Challenge Monthly Funnel</b>`,
-      `<b>Daily Challenge viewers:</b> ${dailyChallengeViewers} users`,
+      `<b>Daily Challenge viewers:</b> ${dailyChallengeViewers} ${pluralize(dailyChallengeViewers, "user")}`,
       `<b>Daily Challenge views:</b> ${dailyChallengeViews} total`,
-      `<b>Daily Challenge starters:</b> ${dailyChallengeStarters} users`,
+      `<b>Daily Challenge starters:</b> ${dailyChallengeStarters} ${pluralize(dailyChallengeStarters, "user")}`,
       `<b>Daily Challenge starts:</b> ${dailyChallengeStarts} total`,
-      `<b>Daily Challenge completers:</b> ${dailyChallengeCompleters} users`,
+      `<b>Daily Challenge completers:</b> ${dailyChallengeCompleters} ${pluralize(dailyChallengeCompleters, "user")}`,
       `<b>Daily Challenge completions:</b> ${dailyChallengeCompletions} total`,
       `<b>View → start rate:</b> ${monthlyViewToStartRate}`,
       `<b>Start → completion rate:</b> ${monthlyStartToCompletionRate}`,
       `<b>View → completion rate:</b> ${monthlyViewToCompletionRate}`,
       ``,
       `<b>Normal Debate Monthly Funnel</b>`,
-      `<b>Philosopher selectors:</b> ${philosopherSelectors} users`,
+      `<b>Philosopher selectors:</b> ${philosopherSelectors} ${pluralize(philosopherSelectors, "user")}`,
       `<b>Philosopher selections:</b> ${philosopherSelections} total`,
-      `<b>Topic selectors:</b> ${topicSelectors} users`,
+      `<b>Topic selectors:</b> ${topicSelectors} ${pluralize(topicSelectors, "user")}`,
       `<b>Topic selections:</b> ${topicSelections} total`,
-      `<b>Difficulty selectors:</b> ${difficultySelectors} users`,
+      `<b>Difficulty selectors:</b> ${difficultySelectors} ${pluralize(difficultySelectors, "user")}`,
       `<b>Difficulty selections:</b> ${difficultySelections} total`,
       ``,
       `<b>Normal debate starts:</b> ${normalDebateStarts} total`,
-      `<b>Unique normal debate starters:</b> ${uniqueNormalDebateStarters} users`,
+      `<b>Unique normal debate starters:</b> ${uniqueNormalDebateStarters} ${pluralize(uniqueNormalDebateStarters, "user")}`,
       `<b>Normal debate completions:</b> ${normalDebateCompletions} total`,
-      `<b>Unique normal debate completers:</b> ${uniqueNormalDebateCompleters} users`,
+      `<b>Unique normal debate completers:</b> ${uniqueNormalDebateCompleters} ${pluralize(uniqueNormalDebateCompleters, "user")}`,
       ``,
       `<b>Philosopher → topic rate:</b> ${monthlyPhilosopherToTopicRate}`,
       `<b>Topic → difficulty rate:</b> ${monthlyTopicToDifficultyRate}`,
@@ -843,9 +865,9 @@ async function main() {
       ``,
       `<b>Reports / Sharing</b>`,
       `<b>Reports viewed:</b> ${reportViews} total`,
-      `<b>Unique report viewers:</b> ${uniqueReportViewers} users`,
+      `<b>Unique report viewers:</b> ${uniqueReportViewers} ${pluralize(uniqueReportViewers, "user")}`,
       `<b>Share cards created:</b> ${shareCardsCreated} total`,
-      `<b>Unique share-card creators:</b> ${uniqueShareCardCreators} users`,
+      `<b>Unique share-card creators:</b> ${uniqueShareCardCreators} ${pluralize(uniqueShareCardCreators, "user")}`,
       `<b>Total report-to-share rate:</b> ${totalReportToShareRate}`,
       `<b>Unique report-to-share rate:</b> ${uniqueReportToShareRate}`,
       ``,
