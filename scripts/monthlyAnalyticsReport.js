@@ -10,6 +10,11 @@ const pool = new Pool({
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 
+// Optional manual testing override.
+// Example:
+// REPORT_MONTH=2026-06 npm run monthly-analytics-report
+const REPORT_MONTH = process.env.REPORT_MONTH || null;
+
 function toNumber(value) {
   return Number(value || 0);
 }
@@ -18,95 +23,266 @@ function percent(numerator, denominator) {
   const n = Number(numerator || 0);
   const d = Number(denominator || 0);
 
-  if (d === 0) return "0.0%";
+  if (d === 0) return "—";
 
   return `${((n / d) * 100).toFixed(1)}%`;
 }
 
 function formatNetChange(value) {
-  const number = toNumber(value);
+  const n = Number(value || 0);
 
-  if (number > 0) return `+${number}`;
-  return `${number}`;
+  if (n > 0) return `+${n}`;
+  return `${n}`;
 }
 
-function formatGrowthRate(value) {
-  if (value === null || value === undefined) return "N/A";
-  return `${Number(value).toFixed(1)}%`;
+function formatGrowthRate(currentMonthActiveUsers, previousMonthActiveUsers) {
+  const current = Number(currentMonthActiveUsers || 0);
+  const previous = Number(previousMonthActiveUsers || 0);
+
+  if (previous === 0) return "—";
+
+  return `${(((current - previous) / previous) * 100).toFixed(1)}%`;
 }
 
-function chooseMonthlySummary(data) {
-  const monthlyActiveUsers = toNumber(data.monthly_active_users);
-  const previousMonthActiveUsers = toNumber(data.previous_month_active_users);
-  const netUserChange = toNumber(data.net_user_change);
-  const newUsersThisMonth = toNumber(data.new_users_this_month);
-  const returningUsersThisMonth = toNumber(data.returning_users_this_month);
-  const retainedUsersFromLastMonth = toNumber(data.retained_users_from_last_month);
-  const lostUsersFromLastMonth = toNumber(data.lost_users_from_last_month);
-  const debatesStarted = toNumber(data.debates_started);
-  const debatesCompleted = toNumber(data.debates_completed);
-  const shareCardsCreated = toNumber(data.share_cards_created);
+function formatSeconds(value) {
+  if (value === null || value === undefined) return "—";
 
-  if (monthlyActiveUsers === 0) {
+  const numberValue = Number(value);
+
+  if (Number.isNaN(numberValue)) return "—";
+
+  return `${numberValue.toFixed(2)}s`;
+}
+
+function chooseBiggestDropOff(data) {
+  const candidates = [];
+
+  function addCandidate({
+    key,
+    label,
+    from,
+    to,
+    fromLabel,
+    toLabel,
+    action,
+  }) {
+    const start = Number(from || 0);
+    const end = Number(to || 0);
+
+    if (start <= 0) return;
+
+    const dropRate = Math.max(0, (start - end) / start);
+
+    candidates.push({
+      key,
+      label,
+      from: start,
+      to: end,
+      fromLabel,
+      toLabel,
+      dropRate,
+      action,
+    });
+  }
+
+  addCandidate({
+    key: "daily_challenge_start",
+    label: "Daily Challenge views → starts",
+    from: data.dailyChallengeViews,
+    to: data.dailyChallengeStarts,
+    fromLabel: "views",
+    toLabel: "starts",
+    action:
+      "Improve the Daily Challenge intro and CTA. Make the prompt feel more urgent and make Enter the Agora the obvious next step.",
+  });
+
+  addCandidate({
+    key: "daily_challenge_completion",
+    label: "Daily Challenge starts → completions",
+    from: data.dailyChallengeStarts,
+    to: data.dailyChallengeCompletions,
+    fromLabel: "starts",
+    toLabel: "completions",
+    action:
+      "Improve Daily Challenge completion. Make the Finish Debate button more obvious and make the report payoff feel immediate.",
+  });
+
+  addCandidate({
+    key: "philosopher_to_topic",
+    label: "Philosopher selectors → topic selectors",
+    from: data.philosopherSelectors,
+    to: data.topicSelectors,
+    fromLabel: "users",
+    toLabel: "users",
+    action:
+      "Improve the topic selection step. Make the questions more immediately compelling after a user selects a philosopher, and make generated topics more prominent.",
+  });
+
+  addCandidate({
+    key: "topic_to_difficulty",
+    label: "Topic selectors → difficulty selectors",
+    from: data.topicSelectors,
+    to: data.difficultySelectors,
+    fromLabel: "users",
+    toLabel: "users",
+    action:
+      "Review the difficulty selection screen. Make Guided, Balanced, and Relentless instantly clear and reduce hesitation before starting.",
+  });
+
+  addCandidate({
+    key: "difficulty_to_normal_start",
+    label: "Difficulty selectors → normal debate starters",
+    from: data.difficultySelectors,
+    to: data.uniqueNormalDebateStarters,
+    fromLabel: "users",
+    toLabel: "users",
+    action:
+      "Check the handoff from difficulty selection into the debate screen. Make sure the debate starts quickly and the loading state feels intentional.",
+  });
+
+  addCandidate({
+    key: "normal_start_to_completion",
+    label: "Normal debate starts → normal debate completions",
+    from: data.normalDebateStarts,
+    to: data.normalDebateCompletions,
+    fromLabel: "starts",
+    toLabel: "completions",
+    action:
+      "Review normal debate completion. Make the Finish Debate button visible after a real exchange and make the report feel like the reward for finishing.",
+  });
+
+  addCandidate({
+    key: "report_to_share",
+    label: "Report views → share cards created",
+    from: data.reportViews,
+    to: data.shareCardsCreated,
+    fromLabel: "report views",
+    toLabel: "share cards",
+    action:
+      "Improve the share-card CTA. Show it immediately after the report score and make the card feel worth saving or posting.",
+  });
+
+  if (candidates.length === 0) {
     return {
-      monthlySummary: "No user activity was recorded for the month.",
-      recommendedFocus: "No action needed yet. Keep watching after launch or after marketing begins.",
+      biggestDropOff: "No usable monthly funnel data yet.",
+      recommendedAction:
+        "No action needed yet. Keep collecting data and review the next monthly report.",
     };
   }
 
-  if (previousMonthActiveUsers === 0 && monthlyActiveUsers > 0) {
-    return {
-      monthlySummary: `The Agora had ${monthlyActiveUsers} active users this month. Since last month had no active users, this is a fresh baseline month.`,
-      recommendedFocus: "Focus on getting users to complete debates and return the next day.",
-    };
-  }
-
-  if (netUserChange > 0) {
-    return {
-      monthlySummary: `The Agora grew by ${netUserChange} active users compared to last month.`,
-      recommendedFocus: "Double down on the channels, posts, and features that brought users back.",
-    };
-  }
-
-  if (netUserChange < 0) {
-    return {
-      monthlySummary: `The Agora lost ${Math.abs(netUserChange)} active users compared to last month.`,
-      recommendedFocus: "Investigate retention, Daily Challenge completion, and whether users are reaching the debate report.",
-    };
-  }
-
-  if (lostUsersFromLastMonth > retainedUsersFromLastMonth) {
-    return {
-      monthlySummary: "User activity was flat overall, but more last-month users were lost than retained.",
-      recommendedFocus: "Focus on retention: stronger Daily Challenge hooks, better notifications, and faster path to debate completion.",
-    };
-  }
-
-  if (newUsersThisMonth > returningUsersThisMonth) {
-    return {
-      monthlySummary: "This month was driven more by new users than returning users.",
-      recommendedFocus: "Watch next month closely to see whether these new users come back.",
-    };
-  }
-
-  if (debatesStarted > 0 && debatesCompleted === 0) {
-    return {
-      monthlySummary: "Users started debates, but completions were weak.",
-      recommendedFocus: "Review debate length, difficulty, finish-button placement, and report loading speed.",
-    };
-  }
-
-  if (debatesCompleted > 0 && shareCardsCreated === 0) {
-    return {
-      monthlySummary: "Users completed debates, but share-card creation was weak.",
-      recommendedFocus: "Improve the share-card CTA and make the final report feel more worth sharing.",
-    };
-  }
+  const biggest = candidates.sort((a, b) => b.dropRate - a.dropRate)[0];
 
   return {
-    monthlySummary: "The month looks stable with no obvious major issue.",
-    recommendedFocus: "Keep monitoring growth, retention, debate completion, and share-card creation.",
+    biggestDropOff: `${biggest.label} dropped from ${biggest.from} ${biggest.fromLabel} to ${biggest.to} ${biggest.toLabel}.`,
+    recommendedAction: biggest.action,
   };
+}
+
+function chooseStrongestArea(data) {
+  const dailyChallengeCompletions = toNumber(data.dailyChallengeCompletions);
+  const normalDebateCompletions = toNumber(data.normalDebateCompletions);
+  const reportViews = toNumber(data.reportViews);
+  const shareCardsCreated = toNumber(data.shareCardsCreated);
+
+  if (dailyChallengeCompletions > 0 && dailyChallengeCompletions >= normalDebateCompletions) {
+    return `Daily Challenge usage is the strongest signal. Users completed ${dailyChallengeCompletions} Daily Challenges this month.`;
+  }
+
+  if (normalDebateCompletions > 0) {
+    return `Normal debate usage is the strongest signal. Users completed ${normalDebateCompletions} normal debates this month.`;
+  }
+
+  if (reportViews > 0) {
+    return `Users are reaching reports. There were ${reportViews} total report views this month.`;
+  }
+
+  if (shareCardsCreated > 0) {
+    return `Sharing showed activity. Users created ${shareCardsCreated} share cards this month.`;
+  }
+
+  return "No clear strongest area yet. The month needs more user activity.";
+}
+
+function chooseReportLoadingNote({
+  reportsTimed,
+  reportViews,
+  averageReportLoadSeconds,
+  slowestReportLoadSeconds,
+}) {
+  const timed = toNumber(reportsTimed);
+  const views = toNumber(reportViews);
+
+  if (views === 0) {
+    return "No report views recorded this month.";
+  }
+
+  if (timed === 0) {
+    return "No report load-time data yet. This is expected until users are on the updated app version.";
+  }
+
+  const average = Number(averageReportLoadSeconds || 0);
+  const slowest = Number(slowestReportLoadSeconds || 0);
+
+  if (average >= 10) {
+    return "Average report loading time is high. Prioritize reducing report generation latency.";
+  }
+
+  if (slowest >= 20) {
+    return "One or more reports loaded very slowly. Check slowest report cases and backend latency.";
+  }
+
+  if (timed < views) {
+    return "Some report views are missing timing data, likely from older app versions or reopened reports.";
+  }
+
+  return "Report loading looks healthy based on timed reports.";
+}
+
+function chooseTrackingNote({
+  reportMonth,
+  normalDebateStarts,
+  normalDebateCompletions,
+  reportsTimed,
+  reportViews,
+}) {
+  const notes = [];
+
+  const starts = toNumber(normalDebateStarts);
+  const completions = toNumber(normalDebateCompletions);
+  const timed = toNumber(reportsTimed);
+  const views = toNumber(reportViews);
+
+  if (completions > 0 && starts === 0) {
+    notes.push(
+      "Normal debate starts may be undercounted because debate-start tracking was improved near the end of the month."
+    );
+  } else if (starts > 0 && completions > starts * 2) {
+    notes.push(
+      "Normal debate completion rate may be inflated because older app versions undercounted debate starts."
+    );
+  }
+
+  if (views > 0 && timed === 0) {
+    notes.push(
+      "Report load times may be missing because report timing was added near the end of the month."
+    );
+  } else if (views > 0 && timed < views) {
+    notes.push(
+      "Report load-time coverage is partial because some report views came from older app versions or reopened reports."
+    );
+  }
+
+  if (String(reportMonth || "").includes("June 2026")) {
+    notes.push(
+      "June should be treated as a transition month because analytics tracking was actively improved during the month."
+    );
+  }
+
+  if (notes.length === 0) {
+    return "No major tracking caveats for this month.";
+  }
+
+  return notes.join(" ");
 }
 
 async function sendTelegramMessage(text) {
@@ -141,22 +317,46 @@ async function sendTelegramMessage(text) {
   }
 }
 
+function validateReportMonth(value) {
+  if (!value) return null;
+
+  if (!/^\d{4}-\d{2}$/.test(value)) {
+    throw new Error("REPORT_MONTH must use YYYY-MM format, for example 2026-06.");
+  }
+
+  return value;
+}
+
 async function main() {
   const client = await pool.connect();
 
   try {
-    const result = await client.query(`
-      WITH params AS (
+    const reportMonthOverride = validateReportMonth(REPORT_MONTH);
+
+    const result = await client.query(
+      `
+      WITH runtime AS (
         SELECT
-          date_trunc('month', (NOW() AT TIME ZONE 'America/Chicago'))::date AS current_month_start
+          CASE
+            WHEN $1::text IS NOT NULL
+              THEN ($1::text || '-01')::date
+            ELSE
+              (
+                date_trunc('month', NOW() AT TIME ZONE 'America/Chicago')::date
+                - INTERVAL '1 month'
+              )::date
+          END AS report_month_start
       ),
-      month_bounds AS (
+      bounds AS (
         SELECT
-          (current_month_start - INTERVAL '1 month')::date AS report_month_start,
-          current_month_start::date AS report_month_end,
-          (current_month_start - INTERVAL '2 months')::date AS previous_month_start,
-          (current_month_start - INTERVAL '1 month')::date AS previous_month_end
-        FROM params
+          report_month_start,
+          (report_month_start + INTERVAL '1 month')::date AS report_month_end,
+          (report_month_start - INTERVAL '1 month')::date AS previous_month_start,
+          report_month_start AS previous_month_end,
+
+          report_month_start::timestamp AT TIME ZONE 'America/Chicago' AS start_time,
+          (report_month_start + INTERVAL '1 month')::timestamp AT TIME ZONE 'America/Chicago' AS end_time
+        FROM runtime
       ),
       first_seen AS (
         SELECT
@@ -168,13 +368,13 @@ async function main() {
         )
         GROUP BY user_id
       ),
-      report_month_users AS (
+      current_month_users AS (
         SELECT DISTINCT
           user_activity_days.user_id
         FROM user_activity_days
-        CROSS JOIN month_bounds
-        WHERE user_activity_days.active_date >= month_bounds.report_month_start
-          AND user_activity_days.active_date < month_bounds.report_month_end
+        CROSS JOIN bounds
+        WHERE user_activity_days.active_date >= bounds.report_month_start
+          AND user_activity_days.active_date < bounds.report_month_end
           AND user_activity_days.user_id NOT IN (
             SELECT user_id FROM excluded_analytics_users
           )
@@ -183,161 +383,288 @@ async function main() {
         SELECT DISTINCT
           user_activity_days.user_id
         FROM user_activity_days
-        CROSS JOIN month_bounds
-        WHERE user_activity_days.active_date >= month_bounds.previous_month_start
-          AND user_activity_days.active_date < month_bounds.previous_month_end
+        CROSS JOIN bounds
+        WHERE user_activity_days.active_date >= bounds.previous_month_start
+          AND user_activity_days.active_date < bounds.previous_month_end
           AND user_activity_days.user_id NOT IN (
             SELECT user_id FROM excluded_analytics_users
           )
       ),
+      activity_summary AS (
+        SELECT
+          bounds.report_month_start,
+          bounds.report_month_end,
+
+          COUNT(DISTINCT current_month_users.user_id) AS monthly_active_users,
+
+          (
+            SELECT COUNT(DISTINCT previous_month_users.user_id)
+            FROM previous_month_users
+          ) AS previous_month_active_users,
+
+          COUNT(DISTINCT current_month_users.user_id)
+          -
+          (
+            SELECT COUNT(DISTINCT previous_month_users.user_id)
+            FROM previous_month_users
+          ) AS net_user_change,
+
+          COUNT(DISTINCT current_month_users.user_id) FILTER (
+            WHERE first_seen.first_active_date >= bounds.report_month_start
+              AND first_seen.first_active_date < bounds.report_month_end
+          ) AS new_users_this_month,
+
+          COUNT(DISTINCT current_month_users.user_id) FILTER (
+            WHERE first_seen.first_active_date < bounds.report_month_start
+          ) AS returning_users_this_month,
+
+          COUNT(DISTINCT current_month_users.user_id) FILTER (
+            WHERE current_month_users.user_id IN (
+              SELECT user_id FROM previous_month_users
+            )
+          ) AS retained_users_from_last_month,
+
+          (
+            SELECT COUNT(DISTINCT previous_month_users.user_id)
+            FROM previous_month_users
+            WHERE previous_month_users.user_id NOT IN (
+              SELECT user_id FROM current_month_users
+            )
+          ) AS lost_users_from_last_month
+
+        FROM bounds
+        LEFT JOIN current_month_users
+          ON true
+        LEFT JOIN first_seen
+          ON current_month_users.user_id = first_seen.user_id
+        GROUP BY
+          bounds.report_month_start,
+          bounds.report_month_end
+      ),
       event_summary AS (
         SELECT
+          bounds.report_month_start,
+
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'daily_challenge_viewed'
-          ) AS daily_challenge_viewed,
+          ) AS daily_challenge_viewers,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'daily_challenge_viewed'
+          ) AS daily_challenge_views,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'daily_challenge_started'
-          ) AS daily_challenge_started,
+          ) AS daily_challenge_starters,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'daily_challenge_started'
+          ) AS daily_challenge_starts,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'daily_challenge_completed'
-          ) AS daily_challenge_completed,
+          ) AS daily_challenge_completers,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'daily_challenge_completed'
+          ) AS daily_challenge_completions,
+
+          COUNT(DISTINCT user_events.user_id) FILTER (
+            WHERE event_name = 'philosopher_selected'
+          ) AS philosopher_selectors,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'philosopher_selected'
+          ) AS philosopher_selections,
+
+          COUNT(DISTINCT user_events.user_id) FILTER (
+            WHERE event_name = 'topic_selected'
+          ) AS topic_selectors,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'topic_selected'
+          ) AS topic_selections,
+
+          COUNT(DISTINCT user_events.user_id) FILTER (
+            WHERE event_name = 'difficulty_selected'
+          ) AS difficulty_selectors,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'difficulty_selected'
+          ) AS difficulty_selections,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'debate_started'
-          ) AS debates_started,
+              AND user_events.metadata->>'isDailyChallenge' = 'false'
+          ) AS unique_normal_debate_starters,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'debate_started'
+              AND user_events.metadata->>'isDailyChallenge' = 'false'
+          ) AS normal_debate_starts,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'debate_completed'
-          ) AS debates_completed,
+              AND user_events.metadata->>'isDailyChallenge' = 'false'
+          ) AS unique_normal_debate_completers,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'debate_completed'
+              AND user_events.metadata->>'isDailyChallenge' = 'false'
+          ) AS normal_debate_completions,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'report_viewed'
-          ) AS reports_viewed,
+          ) AS unique_report_viewers,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'report_viewed'
+          ) AS report_views,
 
           COUNT(DISTINCT user_events.user_id) FILTER (
             WHERE event_name = 'share_card_created'
+          ) AS unique_share_card_creators,
+
+          COUNT(*) FILTER (
+            WHERE event_name = 'share_card_created'
           ) AS share_cards_created
 
-        FROM user_events
-        CROSS JOIN month_bounds
-        WHERE user_events.created_at >= month_bounds.report_month_start::timestamp AT TIME ZONE 'America/Chicago'
-          AND user_events.created_at < month_bounds.report_month_end::timestamp AT TIME ZONE 'America/Chicago'
+        FROM bounds
+        LEFT JOIN user_events
+          ON user_events.created_at >= bounds.start_time
+          AND user_events.created_at < bounds.end_time
           AND user_events.user_id NOT IN (
             SELECT user_id FROM excluded_analytics_users
           )
+        GROUP BY bounds.report_month_start
+      ),
+      report_timing_events AS (
+        SELECT
+          bounds.report_month_start,
+          user_events.user_id,
+          user_events.event_name,
+          CASE
+            WHEN user_events.metadata->>'reportLoadSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'reportLoadSeconds')::numeric
+
+            WHEN user_events.metadata->>'reportLoadTimeSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'reportLoadTimeSeconds')::numeric
+
+            WHEN user_events.metadata->>'loadTimeSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'loadTimeSeconds')::numeric
+
+            WHEN user_events.metadata->>'elapsedSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'elapsedSeconds')::numeric
+
+            WHEN user_events.metadata->>'reportGenerationSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'reportGenerationSeconds')::numeric
+
+            WHEN user_events.metadata->>'reportGenerationTimeSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'reportGenerationTimeSeconds')::numeric
+
+            WHEN user_events.metadata->>'generationSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'generationSeconds')::numeric
+
+            WHEN user_events.metadata->>'reportLoadMs' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'reportLoadMs')::numeric / 1000.0
+
+            WHEN user_events.metadata->>'reportLoadTimeMs' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'reportLoadTimeMs')::numeric / 1000.0
+
+            WHEN user_events.metadata->>'loadTimeMs' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'loadTimeMs')::numeric / 1000.0
+
+            WHEN user_events.metadata->>'durationMs' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'durationMs')::numeric / 1000.0
+
+            WHEN user_events.metadata->>'elapsedMs' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'elapsedMs')::numeric / 1000.0
+
+            WHEN user_events.metadata->>'reportGenerationMs' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'reportGenerationMs')::numeric / 1000.0
+
+            WHEN user_events.metadata->>'reportGenerationTimeMs' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'reportGenerationTimeMs')::numeric / 1000.0
+
+            WHEN user_events.metadata->>'generationMs' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (user_events.metadata->>'generationMs')::numeric / 1000.0
+
+            ELSE NULL
+          END AS report_load_seconds
+        FROM bounds
+        JOIN user_events
+          ON user_events.created_at >= bounds.start_time
+          AND user_events.created_at < bounds.end_time
+          AND user_events.event_name IN (
+            'report_viewed',
+            'report_generation_completed'
+          )
+          AND user_events.user_id NOT IN (
+            SELECT user_id FROM excluded_analytics_users
+          )
+      ),
+      report_timing_summary AS (
+        SELECT
+          bounds.report_month_start,
+          COUNT(report_timing_events.report_load_seconds) AS reports_timed,
+          ROUND(AVG(report_timing_events.report_load_seconds), 2) AS average_report_load_seconds,
+          ROUND(MIN(report_timing_events.report_load_seconds), 2) AS fastest_report_load_seconds,
+          ROUND(MAX(report_timing_events.report_load_seconds), 2) AS slowest_report_load_seconds
+        FROM bounds
+        LEFT JOIN report_timing_events
+          ON bounds.report_month_start = report_timing_events.report_month_start
+        GROUP BY bounds.report_month_start
       )
       SELECT
-        TRIM(TO_CHAR(month_bounds.report_month_start, 'Month YYYY')) AS report_month,
+        TO_CHAR(activity_summary.report_month_start, 'FMMonth YYYY') AS report_month,
+        TO_CHAR(activity_summary.report_month_start, 'YYYY-MM-DD') AS report_month_start,
+        TO_CHAR(activity_summary.report_month_end - INTERVAL '1 day', 'YYYY-MM-DD') AS report_month_end,
 
-        COUNT(DISTINCT report_month_users.user_id) AS monthly_active_users,
+        activity_summary.monthly_active_users,
+        activity_summary.previous_month_active_users,
+        activity_summary.net_user_change,
+        activity_summary.new_users_this_month,
+        activity_summary.returning_users_this_month,
+        activity_summary.retained_users_from_last_month,
+        activity_summary.lost_users_from_last_month,
 
-        (
-          SELECT COUNT(DISTINCT user_id)
-          FROM previous_month_users
-        ) AS previous_month_active_users,
+        event_summary.daily_challenge_viewers,
+        event_summary.daily_challenge_views,
+        event_summary.daily_challenge_starters,
+        event_summary.daily_challenge_starts,
+        event_summary.daily_challenge_completers,
+        event_summary.daily_challenge_completions,
 
-        COUNT(DISTINCT report_month_users.user_id)
-        -
-        (
-          SELECT COUNT(DISTINCT user_id)
-          FROM previous_month_users
-        ) AS net_user_change,
+        event_summary.philosopher_selectors,
+        event_summary.philosopher_selections,
+        event_summary.topic_selectors,
+        event_summary.topic_selections,
+        event_summary.difficulty_selectors,
+        event_summary.difficulty_selections,
 
-        ROUND(
-          (
-            COUNT(DISTINCT report_month_users.user_id)::numeric
-            -
-            (
-              SELECT COUNT(DISTINCT user_id)::numeric
-              FROM previous_month_users
-            )
-          )
-          / NULLIF(
-            (
-              SELECT COUNT(DISTINCT user_id)::numeric
-              FROM previous_month_users
-            ),
-            0
-          ) * 100,
-          1
-        ) AS monthly_growth_percent,
+        event_summary.unique_normal_debate_starters,
+        event_summary.normal_debate_starts,
+        event_summary.unique_normal_debate_completers,
+        event_summary.normal_debate_completions,
 
-        COUNT(DISTINCT report_month_users.user_id) FILTER (
-          WHERE first_seen.first_active_date >= month_bounds.report_month_start
-            AND first_seen.first_active_date < month_bounds.report_month_end
-        ) AS new_users_this_month,
-
-        COUNT(DISTINCT report_month_users.user_id) FILTER (
-          WHERE first_seen.first_active_date < month_bounds.report_month_start
-        ) AS returning_users_this_month,
-
-        (
-          SELECT COUNT(*)
-          FROM report_month_users r
-          INNER JOIN previous_month_users p
-            ON r.user_id = p.user_id
-        ) AS retained_users_from_last_month,
-
-        (
-          SELECT COUNT(*)
-          FROM previous_month_users p
-          LEFT JOIN report_month_users r
-            ON p.user_id = r.user_id
-          WHERE r.user_id IS NULL
-        ) AS lost_users_from_last_month,
-
-        event_summary.daily_challenge_viewed,
-        event_summary.daily_challenge_started,
-        event_summary.daily_challenge_completed,
-
-        ROUND(
-          event_summary.daily_challenge_started::numeric
-          / NULLIF(event_summary.daily_challenge_viewed, 0) * 100,
-          1
-        ) AS daily_challenge_start_percent,
-
-        ROUND(
-          event_summary.daily_challenge_completed::numeric
-          / NULLIF(event_summary.daily_challenge_started, 0) * 100,
-          1
-        ) AS daily_challenge_completion_percent,
-
-        event_summary.debates_started,
-        event_summary.debates_completed,
-
-        ROUND(
-          event_summary.debates_completed::numeric
-          / NULLIF(event_summary.debates_started, 0) * 100,
-          1
-        ) AS debate_completion_percent,
-
-        event_summary.reports_viewed,
+        event_summary.unique_report_viewers,
+        event_summary.report_views,
+        event_summary.unique_share_card_creators,
         event_summary.share_cards_created,
 
-        ROUND(
-          event_summary.share_cards_created::numeric
-          / NULLIF(event_summary.reports_viewed, 0) * 100,
-          1
-        ) AS report_to_share_percent
+        report_timing_summary.reports_timed,
+        report_timing_summary.average_report_load_seconds,
+        report_timing_summary.fastest_report_load_seconds,
+        report_timing_summary.slowest_report_load_seconds
 
-      FROM month_bounds
-      LEFT JOIN report_month_users
-        ON true
-      LEFT JOIN first_seen
-        ON report_month_users.user_id = first_seen.user_id
-      CROSS JOIN event_summary
-      GROUP BY
-        month_bounds.report_month_start,
-        event_summary.daily_challenge_viewed,
-        event_summary.daily_challenge_started,
-        event_summary.daily_challenge_completed,
-        event_summary.debates_started,
-        event_summary.debates_completed,
-        event_summary.reports_viewed,
-        event_summary.share_cards_created;
-    `);
+      FROM activity_summary
+      JOIN event_summary
+        ON activity_summary.report_month_start = event_summary.report_month_start
+      JOIN report_timing_summary
+        ON activity_summary.report_month_start = report_timing_summary.report_month_start;
+      `,
+      [reportMonthOverride]
+    );
 
     const row = result.rows[0];
 
@@ -348,51 +675,133 @@ async function main() {
     const monthlyActiveUsers = toNumber(row.monthly_active_users);
     const previousMonthActiveUsers = toNumber(row.previous_month_active_users);
     const netUserChange = toNumber(row.net_user_change);
-    const monthlyGrowthRate = formatGrowthRate(row.monthly_growth_percent);
-
     const newUsersThisMonth = toNumber(row.new_users_this_month);
     const returningUsersThisMonth = toNumber(row.returning_users_this_month);
     const retainedUsersFromLastMonth = toNumber(row.retained_users_from_last_month);
     const lostUsersFromLastMonth = toNumber(row.lost_users_from_last_month);
 
-    const dailyChallengeViewed = toNumber(row.daily_challenge_viewed);
-    const dailyChallengeStarted = toNumber(row.daily_challenge_started);
-    const dailyChallengeCompleted = toNumber(row.daily_challenge_completed);
-    const dailyChallengeStartRate = percent(
-      dailyChallengeStarted,
-      dailyChallengeViewed
-    );
-    const dailyChallengeCompletionRate = percent(
-      dailyChallengeCompleted,
-      dailyChallengeStarted
-    );
+    const dailyChallengeViewers = toNumber(row.daily_challenge_viewers);
+    const dailyChallengeViews = toNumber(row.daily_challenge_views);
+    const dailyChallengeStarters = toNumber(row.daily_challenge_starters);
+    const dailyChallengeStarts = toNumber(row.daily_challenge_starts);
+    const dailyChallengeCompleters = toNumber(row.daily_challenge_completers);
+    const dailyChallengeCompletions = toNumber(row.daily_challenge_completions);
 
-    const debatesStarted = toNumber(row.debates_started);
-    const debatesCompleted = toNumber(row.debates_completed);
-    const debateCompletionRate = percent(debatesCompleted, debatesStarted);
+    const philosopherSelectors = toNumber(row.philosopher_selectors);
+    const philosopherSelections = toNumber(row.philosopher_selections);
+    const topicSelectors = toNumber(row.topic_selectors);
+    const topicSelections = toNumber(row.topic_selections);
+    const difficultySelectors = toNumber(row.difficulty_selectors);
+    const difficultySelections = toNumber(row.difficulty_selections);
 
-    const reportsViewed = toNumber(row.reports_viewed);
+    const uniqueNormalDebateStarters = toNumber(row.unique_normal_debate_starters);
+    const normalDebateStarts = toNumber(row.normal_debate_starts);
+    const uniqueNormalDebateCompleters = toNumber(row.unique_normal_debate_completers);
+    const normalDebateCompletions = toNumber(row.normal_debate_completions);
+
+    const uniqueReportViewers = toNumber(row.unique_report_viewers);
+    const reportViews = toNumber(row.report_views);
+    const uniqueShareCardCreators = toNumber(row.unique_share_card_creators);
     const shareCardsCreated = toNumber(row.share_cards_created);
-    const reportToShareRate = percent(shareCardsCreated, reportsViewed);
 
-    const { monthlySummary, recommendedFocus } = chooseMonthlySummary({
-      monthly_active_users: monthlyActiveUsers,
-      previous_month_active_users: previousMonthActiveUsers,
-      net_user_change: netUserChange,
-      new_users_this_month: newUsersThisMonth,
-      returning_users_this_month: returningUsersThisMonth,
-      retained_users_from_last_month: retainedUsersFromLastMonth,
-      lost_users_from_last_month: lostUsersFromLastMonth,
-      debates_started: debatesStarted,
-      debates_completed: debatesCompleted,
-      share_cards_created: shareCardsCreated,
+    const reportsTimed = toNumber(row.reports_timed);
+    const averageReportLoadSeconds = row.average_report_load_seconds;
+    const fastestReportLoadSeconds = row.fastest_report_load_seconds;
+    const slowestReportLoadSeconds = row.slowest_report_load_seconds;
+
+    const monthlyGrowthRate = formatGrowthRate(
+      monthlyActiveUsers,
+      previousMonthActiveUsers
+    );
+
+    const monthlyViewToStartRate = percent(
+      dailyChallengeStarts,
+      dailyChallengeViews
+    );
+
+    const monthlyStartToCompletionRate = percent(
+      dailyChallengeCompletions,
+      dailyChallengeStarts
+    );
+
+    const monthlyViewToCompletionRate = percent(
+      dailyChallengeCompletions,
+      dailyChallengeViews
+    );
+
+    const monthlyPhilosopherToTopicRate = percent(
+      topicSelectors,
+      philosopherSelectors
+    );
+
+    const monthlyTopicToDifficultyRate = percent(
+      difficultySelectors,
+      topicSelectors
+    );
+
+    const monthlyDifficultyToNormalStartRate = percent(
+      uniqueNormalDebateStarters,
+      difficultySelectors
+    );
+
+    const monthlyNormalDebateCompletionRate = percent(
+      normalDebateCompletions,
+      normalDebateStarts
+    );
+
+    const totalReportToShareRate = percent(
+      shareCardsCreated,
+      reportViews
+    );
+
+    const uniqueReportToShareRate = percent(
+      uniqueShareCardCreators,
+      uniqueReportViewers
+    );
+
+    const strongestArea = chooseStrongestArea({
+      dailyChallengeCompletions,
+      normalDebateCompletions,
+      reportViews,
+      shareCardsCreated,
+    });
+
+    const { biggestDropOff, recommendedAction } = chooseBiggestDropOff({
+      dailyChallengeViews,
+      dailyChallengeStarts,
+      dailyChallengeCompletions,
+      philosopherSelectors,
+      topicSelectors,
+      difficultySelectors,
+      uniqueNormalDebateStarters,
+      normalDebateStarts,
+      normalDebateCompletions,
+      reportViews,
+      shareCardsCreated,
+    });
+
+    const reportLoadingNote = chooseReportLoadingNote({
+      reportsTimed,
+      reportViews,
+      averageReportLoadSeconds,
+      slowestReportLoadSeconds,
+    });
+
+    const trackingNote = chooseTrackingNote({
+      reportMonth: row.report_month,
+      normalDebateStarts,
+      normalDebateCompletions,
+      reportsTimed,
+      reportViews,
     });
 
     const message = [
       `🏛️ <b>The Oracle Monthly Report</b>`,
       ``,
       `For: <b>${row.report_month}</b>`,
+      `<b>Period:</b> ${row.report_month_start} to ${row.report_month_end}`,
       ``,
+      `<b>Monthly User Activity / Growth</b>`,
       `<b>Monthly Active Users:</b> ${monthlyActiveUsers}`,
       `<b>Previous Month Active Users:</b> ${previousMonthActiveUsers}`,
       `<b>Net User Change:</b> ${formatNetChange(netUserChange)}`,
@@ -403,22 +812,56 @@ async function main() {
       `<b>Retained users from last month:</b> ${retainedUsersFromLastMonth}`,
       `<b>Lost users from last month:</b> ${lostUsersFromLastMonth}`,
       ``,
-      `<b>Daily Challenge viewed:</b> ${dailyChallengeViewed}`,
-      `<b>Daily Challenge started:</b> ${dailyChallengeStarted}`,
-      `<b>Daily Challenge completed:</b> ${dailyChallengeCompleted}`,
-      `<b>Daily Challenge start rate:</b> ${dailyChallengeStartRate}`,
-      `<b>Daily Challenge completion rate:</b> ${dailyChallengeCompletionRate}`,
+      `<b>Daily Challenge Monthly Funnel</b>`,
+      `<b>Daily Challenge viewers:</b> ${dailyChallengeViewers} users`,
+      `<b>Daily Challenge views:</b> ${dailyChallengeViews} total`,
+      `<b>Daily Challenge starters:</b> ${dailyChallengeStarters} users`,
+      `<b>Daily Challenge starts:</b> ${dailyChallengeStarts} total`,
+      `<b>Daily Challenge completers:</b> ${dailyChallengeCompleters} users`,
+      `<b>Daily Challenge completions:</b> ${dailyChallengeCompletions} total`,
+      `<b>View → start rate:</b> ${monthlyViewToStartRate}`,
+      `<b>Start → completion rate:</b> ${monthlyStartToCompletionRate}`,
+      `<b>View → completion rate:</b> ${monthlyViewToCompletionRate}`,
       ``,
-      `<b>Debates started:</b> ${debatesStarted}`,
-      `<b>Debates completed:</b> ${debatesCompleted}`,
-      `<b>Debate completion rate:</b> ${debateCompletionRate}`,
+      `<b>Normal Debate Monthly Funnel</b>`,
+      `<b>Philosopher selectors:</b> ${philosopherSelectors} users`,
+      `<b>Philosopher selections:</b> ${philosopherSelections} total`,
+      `<b>Topic selectors:</b> ${topicSelectors} users`,
+      `<b>Topic selections:</b> ${topicSelections} total`,
+      `<b>Difficulty selectors:</b> ${difficultySelectors} users`,
+      `<b>Difficulty selections:</b> ${difficultySelections} total`,
       ``,
-      `<b>Reports viewed:</b> ${reportsViewed}`,
-      `<b>Share cards created:</b> ${shareCardsCreated}`,
-      `<b>Report-to-share rate:</b> ${reportToShareRate}`,
+      `<b>Normal debate starts:</b> ${normalDebateStarts} total`,
+      `<b>Unique normal debate starters:</b> ${uniqueNormalDebateStarters} users`,
+      `<b>Normal debate completions:</b> ${normalDebateCompletions} total`,
+      `<b>Unique normal debate completers:</b> ${uniqueNormalDebateCompleters} users`,
       ``,
-      `<b>Monthly summary:</b> ${monthlySummary}`,
-      `<b>Recommended focus:</b> ${recommendedFocus}`,
+      `<b>Philosopher → topic rate:</b> ${monthlyPhilosopherToTopicRate}`,
+      `<b>Topic → difficulty rate:</b> ${monthlyTopicToDifficultyRate}`,
+      `<b>Difficulty → normal debate start rate:</b> ${monthlyDifficultyToNormalStartRate}`,
+      `<b>Normal debate completion rate:</b> ${monthlyNormalDebateCompletionRate}`,
+      ``,
+      `<b>Reports / Sharing</b>`,
+      `<b>Reports viewed:</b> ${reportViews} total`,
+      `<b>Unique report viewers:</b> ${uniqueReportViewers} users`,
+      `<b>Share cards created:</b> ${shareCardsCreated} total`,
+      `<b>Unique share-card creators:</b> ${uniqueShareCardCreators} users`,
+      `<b>Total report-to-share rate:</b> ${totalReportToShareRate}`,
+      `<b>Unique report-to-share rate:</b> ${uniqueReportToShareRate}`,
+      ``,
+      `<b>Report Loading</b>`,
+      `<b>Report views:</b> ${reportViews} total`,
+      `<b>Reports timed:</b> ${reportsTimed} / ${reportViews}`,
+      `<b>Average report load time:</b> ${formatSeconds(averageReportLoadSeconds)}`,
+      `<b>Fastest / slowest report:</b> ${formatSeconds(fastestReportLoadSeconds)} / ${formatSeconds(slowestReportLoadSeconds)}`,
+      `<b>Report loading note:</b> ${reportLoadingNote}`,
+      ``,
+      `<b>Monthly Summary</b>`,
+      `<b>Strongest area:</b> ${strongestArea}`,
+      `<b>Biggest funnel drop-off:</b> ${biggestDropOff}`,
+      `<b>Recommended focus next month:</b> ${recommendedAction}`,
+      ``,
+      `<b>Tracking note:</b> ${trackingNote}`,
     ].join("\n");
 
     await sendTelegramMessage(message);
