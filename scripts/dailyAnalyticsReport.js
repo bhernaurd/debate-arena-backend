@@ -1,4 +1,5 @@
 import pg from "pg";
+import { sendAnalyticsEmail } from "./emailReporter.js";
 
 const { Pool } = pg;
 
@@ -31,6 +32,17 @@ function formatSeconds(value) {
   if (Number.isNaN(numberValue)) return "—";
 
   return `${numberValue.toFixed(2)}s`;
+}
+
+function stripTelegramHtml(value = "") {
+  return String(value)
+    .replaceAll("<b>", "")
+    .replaceAll("</b>", "")
+    .replaceAll("&amp;", "&")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&#039;", "'");
 }
 
 function chooseBiggestDropOff(data) {
@@ -233,6 +245,8 @@ async function sendTelegramMessage(text) {
   if (!response.ok || !data.ok) {
     throw new Error(`Telegram send failed: ${JSON.stringify(data)}`);
   }
+
+  return data;
 }
 
 async function main() {
@@ -731,8 +745,36 @@ async function main() {
       sevenDayLines.join("\n\n"),
     ].join("\n");
 
-    await sendTelegramMessage(message);
-    await sendTelegramMessage(sevenDayMessage);
+    const emailReport = [
+      stripTelegramHtml(message),
+      "",
+      "────────────────────────",
+      "",
+      stripTelegramHtml(sevenDayMessage),
+    ].join("\n");
+
+    const subject = `The Agora Daily Report — ${row.report_date}`;
+
+    const deliveryResults = await Promise.allSettled([
+      sendTelegramMessage(message),
+      sendTelegramMessage(sevenDayMessage),
+      sendAnalyticsEmail({
+        subject,
+        reportText: emailReport,
+      }),
+    ]);
+
+    console.log("[dailyAnalyticsReport] Delivery results:", deliveryResults);
+
+    const failedDeliveries = deliveryResults.filter(
+      (result) => result.status === "rejected"
+    );
+
+    if (failedDeliveries.length > 0) {
+      console.error("[dailyAnalyticsReport] One or more deliveries failed:", failedDeliveries);
+      process.exitCode = 1;
+      return;
+    }
 
     console.log("Daily analytics report sent successfully.");
   } catch (error) {
