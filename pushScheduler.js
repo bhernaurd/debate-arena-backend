@@ -2,14 +2,15 @@
 // Scheduled APNs push jobs for Daily Challenge retention.
 // Registered as side-effect import in server.js: import './pushScheduler.js';
 //
-// New behavior:
+// Behavior:
 //   - Runs every 15 minutes.
 //   - Checks each device's saved timezone.
 //   - Sends at 9:00 AM / 2:00 PM / 8:00 PM in that device's local time.
 //   - Uses the correct Daily Challenge for that user's local challenge window.
-//   - Reads push tokens from Postgres.
-//   - Reads Daily Challenges from Postgres.
+//   - Reads push tokens directly from Postgres.
+//   - Reads Daily Challenges directly from Postgres.
 //   - Prevents duplicate sends with push_notification_deliveries.
+//   - Filters by APNs environment so production sends only go to production tokens.
 //
 // This scheduler never generates new notification copy and never calls Claude.
 
@@ -22,7 +23,6 @@ import { sendPush } from './apnsService.js';
 
 const { Pool } = pg;
 
-const CHICAGO_ZONE = 'America/Chicago';
 const DEFAULT_TIMEZONE = 'America/Chicago';
 const DAILY_UNLOCK_HOUR = 5;
 
@@ -38,6 +38,17 @@ const pool = new Pool({
         ? { rejectUnauthorized: false }
         : false,
 });
+
+// ─── Environment helpers ──────────────────────────────────────────────────────
+
+function schedulerApnsEnvironment() {
+    const raw = String(process.env.APNS_ENVIRONMENT || 'production')
+        .trim()
+        .toLowerCase();
+
+    if (raw === 'development' || raw === 'sandbox') return 'development';
+    return 'production';
+}
 
 // ─── Time helpers ─────────────────────────────────────────────────────────────
 
@@ -170,12 +181,19 @@ async function ensureSchedulerTables() {
         ON push_notification_deliveries (status);
     `);
 
+    await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_push_notification_deliveries_device_token
+        ON push_notification_deliveries (device_token);
+    `);
+
     console.log('[PushScheduler] Delivery log table ready');
 }
 
 // ─── DB readers ───────────────────────────────────────────────────────────────
 
 async function getEnabledPushTokens() {
+    const env = schedulerApnsEnvironment();
+
     const result = await pool.query(
         `SELECT
             device_token,
@@ -185,10 +203,18 @@ async function getEnabledPushTokens() {
             last_completed_challenge_id,
             last_completed_challenge_date,
             registered_at,
-            updated_at
+            updated_at,
+            install_id,
+            app_version,
+            build_number,
+            apns_environment,
+            last_registered_at
          FROM push_tokens
          WHERE notifications_enabled = true
-         ORDER BY updated_at DESC`
+           AND platform = 'ios'
+           AND apns_environment = $1
+         ORDER BY last_registered_at DESC NULLS LAST, updated_at DESC NULLS LAST`,
+        [env]
     );
 
     return result.rows.map(row => ({
@@ -200,6 +226,12 @@ async function getEnabledPushTokens() {
         lastCompletedChallengeDate: normalizeDateValue(row.last_completed_challenge_date),
         registeredAt: row.registered_at || null,
         updatedAt: row.updated_at || null,
+
+        installId: row.install_id || null,
+        appVersion: row.app_version || null,
+        buildNumber: row.build_number || null,
+        apnsEnvironment: row.apns_environment || null,
+        lastRegisteredAt: row.last_registered_at || null,
     }));
 }
 
@@ -232,6 +264,36 @@ async function getChallengeByDate(challengeDate) {
         afternoon_notification: row.afternoon_notification,
         evening_notification: row.evening_notification,
     };
+}
+
+// ─── Token status updates ─────────────────────────────────────────────────────
+
+async function markTokenSuccess(deviceToken) {
+    await pool.query(
+        `UPDATE push_tokens
+         SET
+            last_success_at = now(),
+            last_failure_at = NULL,
+            failure_reason = NULL,
+            updated_at = now()
+         WHERE device_token = $1`,
+        [deviceToken]
+    );
+}
+
+async function markTokenFailure(deviceToken, error) {
+    await pool.query(
+        `UPDATE push_tokens
+         SET
+            last_failure_at = now(),
+            failure_reason = $2,
+            updated_at = now()
+         WHERE device_token = $1`,
+        [
+            deviceToken,
+            String(error || 'Unknown push failure').slice(0, 500),
+        ]
+    );
 }
 
 // ─── Delivery claiming ────────────────────────────────────────────────────────
@@ -379,6 +441,7 @@ function hasCompletedChallenge(record, challenge) {
 
 async function sendDueLocalPushes() {
     const now = DateTime.utc();
+    const env = schedulerApnsEnvironment();
 
     let tokens = [];
 
@@ -390,7 +453,7 @@ async function sendDueLocalPushes() {
     }
 
     if (tokens.length === 0) {
-        console.log('[PushScheduler] Local check — no registered enabled tokens');
+        console.log(`[PushScheduler] Local check — no registered enabled ${env} tokens`);
         return;
     }
 
@@ -408,12 +471,16 @@ async function sendDueLocalPushes() {
     }
 
     if (dueRecords.length === 0) {
-        console.log(`[PushScheduler] Local check ${now.toISO()} — no due local send slots`);
+        console.log(
+            `[PushScheduler] Local check ${now.toISO()} — no due local send slots ` +
+            `(enabledTokens=${tokens.length}, env=${env})`
+        );
         return;
     }
 
     console.log('──────────────────────────────────────────────');
     console.log(`[PushScheduler] Local send check ${now.toISO()}`);
+    console.log(`[PushScheduler] APNs environment: ${env}`);
     console.log(`[PushScheduler] Enabled tokens: ${tokens.length}`);
     console.log(`[PushScheduler] Due tokens: ${dueRecords.length}`);
     console.log('──────────────────────────────────────────────');
@@ -464,7 +531,8 @@ async function sendDueLocalPushes() {
             skippedMissingChallenge++;
 
             console.log(
-                `[PushScheduler] Missing ${bodyKey} for challenge ${challenge.id}. Skipping ${tokenPreview(record.deviceToken)}`
+                `[PushScheduler] Missing ${bodyKey} for challenge ${challenge.id}. ` +
+                `Skipping ${tokenPreview(record.deviceToken)}`
             );
 
             continue;
@@ -505,7 +573,9 @@ async function sendDueLocalPushes() {
 
         console.log(
             `[PushScheduler] Sending ${record.timeOfDay} push to ${tokenPreview(record.deviceToken)} ` +
-            `(timezone=${record.timezone}, local=${record.localTime}, challenge=${challenge.id})`
+            `(timezone=${record.timezone}, local=${record.localTime}, challenge=${challenge.id}, ` +
+            `installId=${record.installId || 'unknown'}, appVersion=${record.appVersion || 'unknown'}, ` +
+            `build=${record.buildNumber || 'unknown'}, env=${record.apnsEnvironment || env})`
         );
 
         const ok = await sendPush(
@@ -523,6 +593,8 @@ async function sendDueLocalPushes() {
                 challengeId: challenge.id,
                 timeOfDay: record.timeOfDay,
             });
+
+            await markTokenSuccess(record.deviceToken);
         } else {
             failed++;
 
@@ -532,12 +604,14 @@ async function sendDueLocalPushes() {
                 timeOfDay: record.timeOfDay,
                 error: 'sendPush returned false',
             });
+
+            await markTokenFailure(record.deviceToken, 'sendPush returned false');
         }
     }
 
     console.log(
         `[PushScheduler] Local run complete — sent: ${sent}, completed: ${skippedCompleted}, ` +
-        `duplicates: ${skippedDuplicate}, missing: ${skippedMissingChallenge}, failed: ${failed}`
+        `duplicates: ${skippedDuplicate}, missing: ${skippedMissingChallenge}, failed: ${failed}, env=${env}`
     );
 }
 
@@ -545,7 +619,7 @@ async function sendDueLocalPushes() {
 
 ensureSchedulerTables()
     .then(() => {
-        console.log('[PushScheduler] Startup ready');
+        console.log(`[PushScheduler] Startup ready — APNs environment: ${schedulerApnsEnvironment()}`);
     })
     .catch((err) => {
         console.error('[PushScheduler] Startup table setup failed:', err.message);
@@ -568,4 +642,6 @@ cron.schedule(
     { timezone: 'UTC' }
 );
 
-console.log('[PushScheduler] Local-time cron registered — checks every 15 minutes for 9 AM / 2 PM / 8 PM in each device timezone');
+console.log(
+    '[PushScheduler] Local-time cron registered — checks every 15 minutes for 9 AM / 2 PM / 8 PM in each device timezone'
+);
