@@ -11,7 +11,10 @@ import { createDailyChallengeRouter } from './dailyChallenge.js';
 import { createPushRouter } from './pushRoutes.js';
 import questionsRouter from './questions.js';
 import { createAnalyticsRouter } from './analytics.js';
+import aiJobsRouter from './aiJobs.js';
+
 import './pushScheduler.js';  // registers cron jobs on startup
+import './aiJobWorker.js';    // processes persistent AI jobs
 
 const { Pool } = pg;
 
@@ -52,6 +55,7 @@ app.use('/debate', limiter);
 app.use(createDailyChallengeRouter(pool));
 app.use(createPushRouter(pool));
 app.use(questionsRouter);
+app.use(aiJobsRouter);
 
 // Analytics routes
 app.use('/analytics', createAnalyticsRouter(pool, {
