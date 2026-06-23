@@ -24,11 +24,9 @@ const anthropic = new Anthropic({
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
-    ssl:
-        process.env.DATABASE_URL?.includes('localhost') ||
-        process.env.DATABASE_URL?.includes('railway.internal')
-            ? false
-            : { rejectUnauthorized: false },
+    ssl: process.env.DATABASE_URL?.includes('railway')
+        ? { rejectUnauthorized: false }
+        : false,
 });
 
 pool.on('error', (err) => {
@@ -202,7 +200,8 @@ export async function processAIJob(jobId) {
         console.error(`[AIJobs] Job failed ${jobId}:`, message);
 
         if (claimedJob?.id) {
-            const currentAttempts = Number(claimedJob.attempts || 0) + 1;
+            // claimedJob.attempts is already incremented by the UPDATE ... RETURNING above.
+            const currentAttempts = Number(claimedJob.attempts || 0);
             const maxAttempts = Number(claimedJob.max_attempts || 3);
             const shouldFinalFail = currentAttempts >= maxAttempts;
 
@@ -460,8 +459,10 @@ router.post('/api/ai-jobs/:jobId/retry', async (req, res) => {
             UPDATE ai_generation_jobs
             SET
                 status = 'pending',
+                attempts = 0,
                 error_message = NULL,
-                failed_at = NULL
+                failed_at = NULL,
+                processing_started_at = NULL
             WHERE id = $1
               AND status = 'failed'
             RETURNING *
