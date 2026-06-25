@@ -1,18 +1,6 @@
 // pushScheduler.js
 // Scheduled APNs push jobs for Daily Challenge retention.
 // Registered as side-effect import in server.js: import './pushScheduler.js';
-//
-// Behavior:
-//   - Runs every 15 minutes.
-//   - Checks each device's saved timezone.
-//   - Sends at 9:00 AM / 2:00 PM / 8:00 PM in that device's local time.
-//   - Uses the correct Daily Challenge for that user's local challenge window.
-//   - Reads push tokens directly from Postgres.
-//   - Reads Daily Challenges directly from Postgres.
-//   - Prevents duplicate sends with push_notification_deliveries.
-//   - Filters by APNs environment so production sends only go to production tokens.
-//
-// This scheduler never generates new notification copy and never calls Claude.
 
 import './env.js';
 
@@ -31,6 +19,13 @@ const SEND_SLOTS = {
     14: 'afternoon',
     20: 'evening',
 };
+
+const PERMANENT_APNS_FAILURES = new Set([
+    'BadDeviceToken',
+    'Unregistered',
+    'DeviceTokenNotForTopic',
+    'BadCertificateEnvironment',
+]);
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -101,6 +96,15 @@ function normalizeDateValue(value) {
     return String(value).slice(0, 10);
 }
 
+function toMillis(value) {
+    if (!value) return 0;
+
+    const date = value instanceof Date ? value : new Date(value);
+    const time = date.getTime();
+
+    return Number.isFinite(time) ? time : 0;
+}
+
 // ─── Display helpers ──────────────────────────────────────────────────────────
 
 function philosopherDisplayName(id) {
@@ -152,6 +156,74 @@ function bodyKeyFor(timeOfDay) {
     return 'evening_notification';
 }
 
+// ─── Target key helpers ───────────────────────────────────────────────────────
+// This is the main duplicate fix.
+// Old logic treated each APNs token as a separate target.
+// New logic treats the same user/device as one target.
+
+function targetKeyFor(record) {
+    const env = record.apnsEnvironment || schedulerApnsEnvironment();
+
+    if (record.userId) {
+        return `${env}:user:${record.userId}`;
+    }
+
+    if (record.installId) {
+        return `${env}:install:${record.installId}`;
+    }
+
+    return `${env}:token:${record.deviceToken}`;
+}
+
+function dedupeDueRecords(records) {
+    const byTargetSlot = new Map();
+    const skipped = [];
+
+    for (const record of records) {
+        const targetKey = targetKeyFor(record);
+        const key = `${targetKey}:${record.challengeDate}:${record.timeOfDay}`;
+        const existing = byTargetSlot.get(key);
+
+        if (!existing) {
+            byTargetSlot.set(key, {
+                ...record,
+                targetKey,
+            });
+            continue;
+        }
+
+        const existingTime = Math.max(
+            toMillis(existing.lastRegisteredAt),
+            toMillis(existing.updatedAt),
+            toMillis(existing.registeredAt)
+        );
+
+        const recordTime = Math.max(
+            toMillis(record.lastRegisteredAt),
+            toMillis(record.updatedAt),
+            toMillis(record.registeredAt)
+        );
+
+        if (recordTime > existingTime) {
+            skipped.push(existing);
+            byTargetSlot.set(key, {
+                ...record,
+                targetKey,
+            });
+        } else {
+            skipped.push({
+                ...record,
+                targetKey,
+            });
+        }
+    }
+
+    return {
+        kept: Array.from(byTargetSlot.values()),
+        skipped,
+    };
+}
+
 // ─── Database setup ───────────────────────────────────────────────────────────
 
 async function ensureSchedulerTables() {
@@ -167,8 +239,14 @@ async function ensureSchedulerTables() {
             sent_at TIMESTAMPTZ,
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             error TEXT,
+            target_key TEXT,
             PRIMARY KEY (device_token, challenge_id, time_of_day)
         );
+    `);
+
+    await pool.query(`
+        ALTER TABLE push_notification_deliveries
+        ADD COLUMN IF NOT EXISTS target_key TEXT;
     `);
 
     await pool.query(`
@@ -184,6 +262,11 @@ async function ensureSchedulerTables() {
     await pool.query(`
         CREATE INDEX IF NOT EXISTS idx_push_notification_deliveries_device_token
         ON push_notification_deliveries (device_token);
+    `);
+
+    await pool.query(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_push_notification_deliveries_target_once
+        ON push_notification_deliveries (target_key, challenge_id, challenge_date, time_of_day);
     `);
 
     console.log('[PushScheduler] Delivery log table ready');
@@ -205,6 +288,7 @@ async function getEnabledPushTokens() {
             registered_at,
             updated_at,
             install_id,
+            user_id,
             app_version,
             build_number,
             apns_environment,
@@ -228,6 +312,7 @@ async function getEnabledPushTokens() {
         updatedAt: row.updated_at || null,
 
         installId: row.install_id || null,
+        userId: row.user_id || null,
         appVersion: row.app_version || null,
         buildNumber: row.build_number || null,
         apnsEnvironment: row.apns_environment || null,
@@ -282,25 +367,33 @@ async function markTokenSuccess(deviceToken) {
 }
 
 async function markTokenFailure(deviceToken, error) {
+    const reason = String(error || 'Unknown push failure').slice(0, 500);
+    const shouldDisable = PERMANENT_APNS_FAILURES.has(reason);
+
     await pool.query(
         `UPDATE push_tokens
          SET
             last_failure_at = now(),
             failure_reason = $2,
+            notifications_enabled = CASE WHEN $3 THEN false ELSE notifications_enabled END,
             updated_at = now()
          WHERE device_token = $1`,
         [
             deviceToken,
-            String(error || 'Unknown push failure').slice(0, 500),
+            reason,
+            shouldDisable,
         ]
     );
+
+    if (shouldDisable) {
+        console.log(`[PushScheduler] Disabled bad APNs token ${tokenPreview(deviceToken)} because: ${reason}`);
+    }
 }
 
 // ─── Delivery claiming ────────────────────────────────────────────────────────
-// This prevents duplicate sends if Railway restarts or if the scheduler overlaps.
-// We claim before sending. If the row already exists, this push was already handled.
 
 async function claimDelivery({
+    targetKey,
     deviceToken,
     challengeId,
     challengeDate,
@@ -309,6 +402,7 @@ async function claimDelivery({
 }) {
     const result = await pool.query(
         `INSERT INTO push_notification_deliveries (
+            target_key,
             device_token,
             challenge_id,
             challenge_date,
@@ -321,17 +415,19 @@ async function claimDelivery({
          VALUES (
             $1,
             $2,
-            $3::date,
-            $4,
+            $3,
+            $4::date,
             $5,
+            $6,
             'claimed',
             now(),
             now()
          )
-         ON CONFLICT (device_token, challenge_id, time_of_day)
+         ON CONFLICT (target_key, challenge_id, challenge_date, time_of_day)
          DO NOTHING
-         RETURNING device_token`,
+         RETURNING target_key`,
         [
+            targetKey,
             deviceToken,
             challengeId,
             challengeDate,
@@ -344,8 +440,9 @@ async function claimDelivery({
 }
 
 async function markDeliverySent({
-    deviceToken,
+    targetKey,
     challengeId,
+    challengeDate,
     timeOfDay,
 }) {
     await pool.query(
@@ -355,20 +452,23 @@ async function markDeliverySent({
             sent_at = now(),
             updated_at = now(),
             error = NULL
-         WHERE device_token = $1
+         WHERE target_key = $1
            AND challenge_id = $2
-           AND time_of_day = $3`,
+           AND challenge_date = $3::date
+           AND time_of_day = $4`,
         [
-            deviceToken,
+            targetKey,
             challengeId,
+            challengeDate,
             timeOfDay,
         ]
     );
 }
 
 async function markDeliveryFailed({
-    deviceToken,
+    targetKey,
     challengeId,
+    challengeDate,
     timeOfDay,
     error,
 }) {
@@ -377,13 +477,15 @@ async function markDeliveryFailed({
          SET
             status = 'failed',
             updated_at = now(),
-            error = $4
-         WHERE device_token = $1
+            error = $5
+         WHERE target_key = $1
            AND challenge_id = $2
-           AND time_of_day = $3`,
+           AND challenge_date = $3::date
+           AND time_of_day = $4`,
         [
-            deviceToken,
+            targetKey,
             challengeId,
+            challengeDate,
             timeOfDay,
             String(error || 'Unknown error').slice(0, 500),
         ]
@@ -457,20 +559,20 @@ async function sendDueLocalPushes() {
         return;
     }
 
-    const dueRecords = [];
+    const rawDueRecords = [];
 
     for (const record of tokens) {
         const dueSlot = getDueSlotForToken(record, now);
 
         if (!dueSlot) continue;
 
-        dueRecords.push({
+        rawDueRecords.push({
             ...record,
             ...dueSlot,
         });
     }
 
-    if (dueRecords.length === 0) {
+    if (rawDueRecords.length === 0) {
         console.log(
             `[PushScheduler] Local check ${now.toISO()} — no due local send slots ` +
             `(enabledTokens=${tokens.length}, env=${env})`
@@ -478,11 +580,15 @@ async function sendDueLocalPushes() {
         return;
     }
 
+    const { kept: dueRecords, skipped: preSendDuplicates } = dedupeDueRecords(rawDueRecords);
+
     console.log('──────────────────────────────────────────────');
     console.log(`[PushScheduler] Local send check ${now.toISO()}`);
     console.log(`[PushScheduler] APNs environment: ${env}`);
     console.log(`[PushScheduler] Enabled tokens: ${tokens.length}`);
-    console.log(`[PushScheduler] Due tokens: ${dueRecords.length}`);
+    console.log(`[PushScheduler] Due tokens before dedupe: ${rawDueRecords.length}`);
+    console.log(`[PushScheduler] Due tokens after dedupe: ${dueRecords.length}`);
+    console.log(`[PushScheduler] Duplicate due records skipped before send: ${preSendDuplicates.length}`);
     console.log('──────────────────────────────────────────────');
 
     const challengeCache = new Map();
@@ -490,7 +596,7 @@ async function sendDueLocalPushes() {
     let sent = 0;
     let skippedCompleted = 0;
     let skippedMissingChallenge = 0;
-    let skippedDuplicate = 0;
+    let skippedDuplicate = preSendDuplicates.length;
     let failed = 0;
 
     for (const record of dueRecords) {
@@ -518,7 +624,8 @@ async function sendDueLocalPushes() {
             skippedCompleted++;
 
             console.log(
-                `[PushScheduler] Skipping completed ${challenge.id} for ${tokenPreview(record.deviceToken)}`
+                `[PushScheduler] Skipping completed ${challenge.id} for ` +
+                `${tokenPreview(record.deviceToken)} target=${record.targetKey}`
             );
 
             continue;
@@ -545,6 +652,7 @@ async function sendDueLocalPushes() {
         const title = titleFor(record.timeOfDay, philosopherName);
 
         const claimed = await claimDelivery({
+            targetKey: record.targetKey,
             deviceToken: record.deviceToken,
             challengeId: challenge.id,
             challengeDate: challenge.date,
@@ -556,7 +664,7 @@ async function sendDueLocalPushes() {
             skippedDuplicate++;
 
             console.log(
-                `[PushScheduler] Duplicate avoided for ${tokenPreview(record.deviceToken)} ` +
+                `[PushScheduler] Duplicate avoided for target=${record.targetKey} ` +
                 `${challenge.id} ${record.timeOfDay}`
             );
 
@@ -573,24 +681,32 @@ async function sendDueLocalPushes() {
 
         console.log(
             `[PushScheduler] Sending ${record.timeOfDay} push to ${tokenPreview(record.deviceToken)} ` +
-            `(timezone=${record.timezone}, local=${record.localTime}, challenge=${challenge.id}, ` +
-            `installId=${record.installId || 'unknown'}, appVersion=${record.appVersion || 'unknown'}, ` +
+            `(target=${record.targetKey}, timezone=${record.timezone}, local=${record.localTime}, ` +
+            `challenge=${challenge.id}, installId=${record.installId || 'unknown'}, ` +
+            `userId=${record.userId || 'unknown'}, appVersion=${record.appVersion || 'unknown'}, ` +
             `build=${record.buildNumber || 'unknown'}, env=${record.apnsEnvironment || env})`
         );
 
-        const ok = await sendPush(
+        const outcome = await sendPush(
             record.deviceToken,
             title,
             body,
             payload
         );
 
+        const ok = outcome === true || outcome?.ok === true;
+        const failureReason =
+            typeof outcome === 'object' && outcome?.reason
+                ? outcome.reason
+                : 'sendPush returned false';
+
         if (ok) {
             sent++;
 
             await markDeliverySent({
-                deviceToken: record.deviceToken,
+                targetKey: record.targetKey,
                 challengeId: challenge.id,
+                challengeDate: challenge.date,
                 timeOfDay: record.timeOfDay,
             });
 
@@ -599,13 +715,14 @@ async function sendDueLocalPushes() {
             failed++;
 
             await markDeliveryFailed({
-                deviceToken: record.deviceToken,
+                targetKey: record.targetKey,
                 challengeId: challenge.id,
+                challengeDate: challenge.date,
                 timeOfDay: record.timeOfDay,
-                error: 'sendPush returned false',
+                error: failureReason,
             });
 
-            await markTokenFailure(record.deviceToken, 'sendPush returned false');
+            await markTokenFailure(record.deviceToken, failureReason);
         }
     }
 
@@ -626,11 +743,6 @@ ensureSchedulerTables()
     });
 
 // ─── Cron job ─────────────────────────────────────────────────────────────────
-// Every 15 minutes catches all global timezones, including half-hour and
-// 45-minute offsets.
-// Example:
-//   India 9:00 AM = UTC 3:30
-//   Nepal 9:00 AM = UTC 3:15
 
 cron.schedule(
     '*/15 * * * *',
