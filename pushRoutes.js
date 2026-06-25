@@ -5,16 +5,17 @@
 //
 // Endpoints:
 //   POST /api/push/register                  — store/update device token
-//   POST /api/push/complete-daily-challenge  — mark challenge done for this device
+//   POST /api/push/complete-daily-challenge  — mark challenge done for this device/user
 //   POST /api/push/test                      — send a test push immediately
 //   GET  /api/push/tokens                    — admin-only token list
 //   GET  /api/push/tokens/debug              — admin-only token chunks
 //   GET  /api/push/token-status              — admin-only one-token debug
 //
-// Storage:
-//   - Postgres push_tokens table is the source of truth.
-//   - push_tokens.json is still written as a temporary compatibility file
-//     so the current pushScheduler.js does not break until we update it.
+// Main fix:
+//   - iOS should send userId from identifierForVendor.
+//   - Backend stores user_id.
+//   - When a new token registers, older tokens for the same userId/installId are disabled.
+//   - Bad APNs tokens can be disabled when sendPush returns permanent APNs failures.
 
 import express from 'express';
 import fs from 'fs';
@@ -28,6 +29,13 @@ const TOKENS_PATH = path.join(__dirname, 'push_tokens.json');
 
 const DEFAULT_TIMEZONE = 'America/Chicago';
 const DEVICE_TOKEN_RE = /^[A-Za-z0-9:_-]{32,512}$/;
+
+const PERMANENT_APNS_FAILURES = new Set([
+    'BadDeviceToken',
+    'Unregistered',
+    'DeviceTokenNotForTopic',
+    'BadCertificateEnvironment',
+]);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -74,7 +82,6 @@ function getAdminKey() {
 function isAuthorizedAdmin(req) {
     const adminKey = getAdminKey();
 
-    // Important:
     // If no admin key is configured, deny admin endpoints by default.
     if (!adminKey) return false;
 
@@ -132,9 +139,8 @@ function rowToTokenRecord(row) {
 }
 
 // ─── Compatibility JSON writer ────────────────────────────────────────────────
-// Temporary only.
-// Current pushScheduler.js reads push_tokens.json.
-// Once pushScheduler.js is moved to Postgres, this can be removed.
+// Legacy compatibility only. The current scheduler reads from Postgres, but this
+// can remain safely until you decide to remove it.
 
 async function syncPushTokensJson(pool) {
     try {
@@ -160,6 +166,12 @@ async function syncPushTokensJson(pool) {
                 lastCompletedChallengeDate: record.lastCompletedChallengeDate,
                 registeredAt: record.registeredAt,
                 updatedAt: record.updatedAt,
+
+                installId: record.installId,
+                userId: record.userId,
+                appVersion: record.appVersion,
+                buildNumber: record.buildNumber,
+                apnsEnvironment: record.apnsEnvironment,
             };
         }
 
@@ -173,6 +185,55 @@ async function syncPushTokensJson(pool) {
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 
+async function pruneOlderTokensForSameTarget(client, {
+    deviceToken,
+    installId,
+    userId,
+    apnsEnvironment,
+}) {
+    const finalUserId = normalizeText(userId);
+    const finalInstallId = normalizeText(installId);
+    const finalEnvironment = normalizeApnsEnvironment(apnsEnvironment);
+
+    const values = [
+        deviceToken,
+        finalEnvironment,
+    ];
+
+    const conditions = [];
+
+    if (finalUserId) {
+        values.push(finalUserId);
+        conditions.push(`user_id = $${values.length}`);
+    }
+
+    if (finalInstallId) {
+        values.push(finalInstallId);
+        conditions.push(`install_id = $${values.length}`);
+    }
+
+    if (conditions.length === 0) {
+        return 0;
+    }
+
+    const result = await client.query(
+        `UPDATE push_tokens
+         SET
+            notifications_enabled = false,
+            last_failure_at = now(),
+            failure_reason = 'superseded_by_new_token_registration',
+            updated_at = now()
+         WHERE notifications_enabled = true
+           AND device_token <> $1
+           AND apns_environment = $2
+           AND (${conditions.join(' OR ')})
+         RETURNING device_token`,
+        values
+    );
+
+    return result.rowCount;
+}
+
 async function upsertPushToken(pool, {
     deviceToken,
     platform,
@@ -184,50 +245,17 @@ async function upsertPushToken(pool, {
     apnsEnvironment,
 }) {
     const finalInstallId = normalizeText(installId) || deviceToken;
+    const finalUserId = normalizeText(userId);
     const finalEnvironment = normalizeApnsEnvironment(apnsEnvironment);
 
-    await pool.query('BEGIN');
+    const client = await pool.connect();
 
     try {
-        // First: if this app install already exists, update that row.
-        // This handles the case where APNs gives the same install a new token.
-        const existingInstall = await pool.query(
-            `UPDATE push_tokens
-             SET
-                device_token = $1,
-                platform = $2,
-                timezone = $3,
-                notifications_enabled = true,
-                user_id = COALESCE($4, user_id),
-                app_version = $5,
-                build_number = $6,
-                last_registered_at = now(),
-                updated_at = now(),
-                last_failure_at = NULL,
-                failure_reason = NULL
-             WHERE install_id = $7
-               AND apns_environment = $8
-             RETURNING *`,
-            [
-                deviceToken,
-                platform,
-                timezone,
-                normalizeText(userId),
-                normalizeText(appVersion),
-                normalizeText(buildNumber),
-                finalInstallId,
-                finalEnvironment,
-            ]
-        );
+        await client.query('BEGIN');
 
-        if (existingInstall.rows.length > 0) {
-            await pool.query('COMMIT');
-            return rowToTokenRecord(existingInstall.rows[0]);
-        }
-
-        // Second: if the device token already exists from older app versions,
-        // claim/update that row and attach the new stable install_id.
-        const result = await pool.query(
+        // Insert/update by the true APNs token + environment.
+        // Then prune older active tokens for the same userId/installId.
+        const result = await client.query(
             `INSERT INTO push_tokens (
                 device_token,
                 platform,
@@ -241,7 +269,9 @@ async function upsertPushToken(pool, {
                 registered_at,
                 updated_at,
                 created_at,
-                last_registered_at
+                last_registered_at,
+                last_failure_at,
+                failure_reason
              )
              VALUES (
                 $1,
@@ -256,7 +286,9 @@ async function upsertPushToken(pool, {
                 now(),
                 now(),
                 now(),
-                now()
+                now(),
+                NULL,
+                NULL
              )
              ON CONFLICT (device_token, apns_environment)
              DO UPDATE SET
@@ -277,18 +309,43 @@ async function upsertPushToken(pool, {
                 platform,
                 timezone,
                 finalInstallId,
-                normalizeText(userId),
+                finalUserId,
                 normalizeText(appVersion),
                 normalizeText(buildNumber),
                 finalEnvironment,
             ]
         );
 
-        await pool.query('COMMIT');
-        return rowToTokenRecord(result.rows[0]);
+        const row = result.rows[0];
+
+        const effectiveUserId = finalUserId || row?.user_id || null;
+        const effectiveInstallId = finalInstallId || row?.install_id || null;
+
+        const prunedCount = await pruneOlderTokensForSameTarget(client, {
+            deviceToken,
+            installId: effectiveInstallId,
+            userId: effectiveUserId,
+            apnsEnvironment: finalEnvironment,
+        });
+
+        await client.query('COMMIT');
+
+        if (prunedCount > 0) {
+            console.log(
+                `[Push] Disabled ${prunedCount} older token(s) for same target ` +
+                `(userId=${effectiveUserId || 'none'}, installId=${effectiveInstallId || 'none'}, env=${finalEnvironment})`
+            );
+        }
+
+        return {
+            ...rowToTokenRecord(row),
+            prunedCount,
+        };
     } catch (err) {
-        await pool.query('ROLLBACK');
+        await client.query('ROLLBACK');
         throw err;
+    } finally {
+        client.release();
     }
 }
 
@@ -296,20 +353,65 @@ async function markCompleted(pool, {
     deviceToken,
     challengeId,
     challengeDate,
+    userId,
+    installId,
+    apnsEnvironment,
 }) {
+    const normalizedUserId = normalizeText(userId);
+    const normalizedInstallId = normalizeText(installId);
+    const normalizedEnvironment = normalizeApnsEnvironment(apnsEnvironment);
+
+    const existing = await pool.query(
+        `SELECT user_id, install_id, apns_environment
+         FROM push_tokens
+         WHERE device_token = $1
+         LIMIT 1`,
+        [deviceToken]
+    );
+
+    const existingRow = existing.rows[0];
+
+    const finalUserId = normalizedUserId || existingRow?.user_id || null;
+    const finalInstallId = normalizedInstallId || existingRow?.install_id || null;
+    const finalEnvironment = normalizeApnsEnvironment(
+        existingRow?.apns_environment || normalizedEnvironment
+    );
+
+    const values = [
+        deviceToken,
+        challengeId,
+        challengeDate,
+    ];
+
+    const conditions = [`device_token = $1`];
+
+    if (finalUserId) {
+        values.push(finalUserId);
+        values.push(finalEnvironment);
+
+        conditions.push(
+            `(user_id = $${values.length - 1} AND apns_environment = $${values.length})`
+        );
+    }
+
+    if (finalInstallId) {
+        values.push(finalInstallId);
+        values.push(finalEnvironment);
+
+        conditions.push(
+            `(install_id = $${values.length - 1} AND apns_environment = $${values.length})`
+        );
+    }
+
     const result = await pool.query(
         `UPDATE push_tokens
          SET
             last_completed_challenge_id = $2,
             last_completed_challenge_date = COALESCE($3::date, last_completed_challenge_date),
             updated_at = now()
-         WHERE device_token = $1
+         WHERE ${conditions.join(' OR ')}
          RETURNING *`,
-        [
-            deviceToken,
-            challengeId,
-            challengeDate,
-        ]
+        values
     );
 
     return rowToTokenRecord(result.rows[0]);
@@ -335,6 +437,43 @@ async function listTokens(pool) {
     );
 
     return result.rows.map(rowToTokenRecord).filter(Boolean);
+}
+
+async function markTestPushSuccess(pool, deviceToken) {
+    await pool.query(
+        `UPDATE push_tokens
+         SET
+            last_success_at = now(),
+            last_failure_at = NULL,
+            failure_reason = NULL,
+            updated_at = now()
+         WHERE device_token = $1`,
+        [deviceToken]
+    );
+}
+
+async function markTestPushFailure(pool, deviceToken, reason) {
+    const cleanReason = String(reason || 'Test push failed').slice(0, 500);
+    const shouldDisable = PERMANENT_APNS_FAILURES.has(cleanReason);
+
+    await pool.query(
+        `UPDATE push_tokens
+         SET
+            last_failure_at = now(),
+            failure_reason = $2,
+            notifications_enabled = CASE WHEN $3 THEN false ELSE notifications_enabled END,
+            updated_at = now()
+         WHERE device_token = $1`,
+        [
+            deviceToken,
+            cleanReason,
+            shouldDisable,
+        ]
+    );
+
+    if (shouldDisable) {
+        console.log(`[Push] Disabled bad token after test failure: ${tokenPreview(deviceToken)} — ${cleanReason}`);
+    }
 }
 
 // ─── Router factory ───────────────────────────────────────────────────────────
@@ -379,8 +518,9 @@ export function createPushRouter(pool) {
             console.log(
                 `[Push] Registered token: ${tokenPreview(normalizedToken)} ` +
                 `(length=${normalizedToken.length}, timezone=${record.timezone}, ` +
-                `installId=${record.installId || 'none'}, env=${record.apnsEnvironment || 'unknown'}, ` +
-                `appVersion=${record.appVersion || 'unknown'}, build=${record.buildNumber || 'unknown'})`
+                `userId=${record.userId || 'none'}, installId=${record.installId || 'none'}, ` +
+                `env=${record.apnsEnvironment || 'unknown'}, appVersion=${record.appVersion || 'unknown'}, ` +
+                `build=${record.buildNumber || 'unknown'}, pruned=${record.prunedCount || 0})`
             );
 
             return res.json({
@@ -388,13 +528,16 @@ export function createPushRouter(pool) {
                 tokenPreview: tokenPreview(normalizedToken),
                 tokenLength: normalizedToken.length,
                 timezone: record.timezone,
+                userId: record.userId || null,
                 installId: record.installId || null,
                 apnsEnvironment: record.apnsEnvironment || null,
                 appVersion: record.appVersion || null,
                 buildNumber: record.buildNumber || null,
+                prunedCount: record.prunedCount || 0,
             });
         } catch (err) {
             console.error('[Push] Register error:', err.message);
+
             return res.status(500).json({
                 success: false,
                 error: 'Failed to register push token.',
@@ -406,7 +549,14 @@ export function createPushRouter(pool) {
 
     router.post('/api/push/complete-daily-challenge', async (req, res) => {
         try {
-            const { deviceToken, challengeId, challengeDate } = req.body || {};
+            const {
+                deviceToken,
+                challengeId,
+                challengeDate,
+                userId,
+                installId,
+                apnsEnvironment,
+            } = req.body || {};
 
             const normalizedToken = normalizeDeviceToken(deviceToken);
             const normalizedChallengeId = String(challengeId || '').trim();
@@ -422,10 +572,12 @@ export function createPushRouter(pool) {
                 deviceToken: normalizedToken,
                 challengeId: normalizedChallengeId,
                 challengeDate: normalizedChallengeDate,
+                userId,
+                installId,
+                apnsEnvironment,
             });
 
             if (!updated) {
-                // Token not registered yet — that's fine, nothing to update.
                 return res.json({
                     success: true,
                     note: 'Token not found — no update needed.',
@@ -436,16 +588,20 @@ export function createPushRouter(pool) {
 
             console.log(
                 `[Push] Marked completed: ${normalizedChallengeId} for ` +
-                `${tokenPreview(normalizedToken)}`
+                `${tokenPreview(normalizedToken)} ` +
+                `(userId=${updated.userId || 'none'}, installId=${updated.installId || 'none'})`
             );
 
             return res.json({
                 success: true,
                 challengeId: updated.lastCompletedChallengeId,
                 challengeDate: updated.lastCompletedChallengeDate,
+                userId: updated.userId || null,
+                installId: updated.installId || null,
             });
         } catch (err) {
             console.error('[Push] Complete daily challenge error:', err.message);
+
             return res.status(500).json({
                 success: false,
                 error: 'Failed to mark challenge completed.',
@@ -480,19 +636,16 @@ export function createPushRouter(pool) {
                 `(length=${normalizedToken.length})`
             );
 
-            const ok = await sendPush(normalizedToken, pushTitle, pushBody);
+            const outcome = await sendPush(normalizedToken, pushTitle, pushBody);
+            const ok = outcome === true || outcome?.ok === true;
+
+            const reason =
+                typeof outcome === 'object' && outcome?.reason
+                    ? outcome.reason
+                    : 'Test push failed';
 
             if (ok) {
-                await pool.query(
-                    `UPDATE push_tokens
-                     SET
-                        last_success_at = now(),
-                        last_failure_at = NULL,
-                        failure_reason = NULL,
-                        updated_at = now()
-                     WHERE device_token = $1`,
-                    [normalizedToken]
-                );
+                await markTestPushSuccess(pool, normalizedToken);
 
                 return res.json({
                     success: true,
@@ -501,22 +654,17 @@ export function createPushRouter(pool) {
                 });
             }
 
-            await pool.query(
-                `UPDATE push_tokens
-                 SET
-                    last_failure_at = now(),
-                    failure_reason = 'Test push failed',
-                    updated_at = now()
-                 WHERE device_token = $1`,
-                [normalizedToken]
-            );
+            await markTestPushFailure(pool, normalizedToken, reason);
 
             return res.status(500).json({
                 success: false,
                 message: 'Push failed — check Railway logs.',
+                reason,
+                tokenPreview: tokenPreview(normalizedToken),
             });
         } catch (err) {
             console.error('[Push] Test push error:', err.message);
+
             return res.status(500).json({
                 success: false,
                 error: 'Push failed.',
@@ -568,6 +716,7 @@ export function createPushRouter(pool) {
             });
         } catch (err) {
             console.error('[Push] Token list error:', err.message);
+
             return res.status(500).json({
                 error: 'Failed to list tokens.',
             });
@@ -629,6 +778,7 @@ export function createPushRouter(pool) {
             });
         } catch (err) {
             console.error('[Push] Token debug list error:', err.message);
+
             return res.status(500).json({
                 error: 'Failed to list debug tokens.',
             });
@@ -688,6 +838,7 @@ export function createPushRouter(pool) {
             });
         } catch (err) {
             console.error('[Push] Token status error:', err.message);
+
             return res.status(500).json({
                 error: 'Failed to read token status.',
             });
