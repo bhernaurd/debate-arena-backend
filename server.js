@@ -19,6 +19,7 @@ import './aiJobWorker.js';    // processes persistent AI jobs
 const { Pool } = pg;
 
 const app = express();
+app.use(express.static("public"));
 const PORT = process.env.PORT || 3000;
 
 const client = new Anthropic({
