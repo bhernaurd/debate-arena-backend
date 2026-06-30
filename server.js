@@ -19,10 +19,13 @@ import './aiJobWorker.js';    // processes persistent AI jobs
 const { Pool } = pg;
 
 const app = express();
-app.get("/tiktoksEj6XzEmPpvavjyCl6uI5SXIFhGYJ6hC.txt", (req, res) => {
-  res
-    .type("text/plain")
-    .send("tiktok-developers-site-verification=sEj6XzEmPpvavjyCl6uI5SXIFhGYJ6hC");
+app.all("/tiktoksEj6XzEmPpvavjyCl6uI5SXIFhGYJ6hC.txt", (req, res) => {
+  res.setHeader("Content-Type", "text/plain; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
+
+  return res
+    .status(200)
+    .send("tiktok-developers-site-verification=sEj6XzEmPpvavjyCl6uI5SXIFhGYJ6hC\n");
 });
 app.use(express.static("public"));
 const PORT = process.env.PORT || 3000;
