@@ -19,6 +19,11 @@ import './aiJobWorker.js';    // processes persistent AI jobs
 const { Pool } = pg;
 
 const app = express();
+app.get("/tiktoksEj6XzEmPpvavjyCl6uI5SXIFhGYJ6hC.txt", (req, res) => {
+  res
+    .type("text/plain")
+    .send("tiktok-developers-site-verification=sEj6XzEmPpvavjyCl6uI5SXIFhGYJ6hC");
+});
 app.use(express.static("public"));
 const PORT = process.env.PORT || 3000;
 
