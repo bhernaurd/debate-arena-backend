@@ -9,11 +9,13 @@
 // (id, generation_id, user_id, philosopher, question_text,
 //  question_normalized, theme, difficulty, source, generated_at, used_at).
 //
-// This version hard-enforces exactly one question per difficulty:
-// Beginner → Intermediate → Advanced
-//
-// It also retries Claude question generation if the Anthropic connection
-// closes early or temporarily fails.
+// This version:
+// - Supports the Standard Six + Albert Camus
+// - Uses Claude-generated questions, not static fallback questions
+// - Hard-enforces Beginner → Intermediate → Advanced
+// - Uses Sonnet instead of Haiku because Haiku topic generation is currently
+//   failing with repeated Anthropic "Premature close" errors on Railway
+// - Retries Anthropic connection failures
 
 import express from 'express';
 import crypto from 'crypto';
@@ -21,7 +23,12 @@ import pg from 'pg';
 import Anthropic from '@anthropic-ai/sdk';
 
 const router = express.Router();
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+const client = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+    timeout: 60_000,
+    maxRetries: 2,
+});
 
 const { Pool } = pg;
 
@@ -37,6 +44,8 @@ pool.on('error', (err) => {
 });
 
 // ─── Constants ───────────────────────────────────────────────────────────────
+
+const QUESTION_MODEL = process.env.QUESTION_GENERATOR_MODEL || 'claude-sonnet-4-5-20250929';
 
 const REQUIRED_DIFFICULTIES = ['beginner', 'intermediate', 'advanced'];
 
@@ -136,7 +145,7 @@ async function createClaudeMessageWithRetry(args, label = 'questions') {
                 throw err;
             }
 
-            await sleep(500 * attempt);
+            await sleep(800 * attempt);
         }
     }
 
@@ -179,11 +188,13 @@ function tooSimilar(a, b) {
     if (wordsA.size === 0 || wordsB.size === 0) return false;
 
     let shared = 0;
+
     for (const w of wordsA) {
         if (wordsB.has(w)) shared++;
     }
 
     const overlap = shared / Math.min(wordsA.size, wordsB.size);
+
     return overlap > 0.8;
 }
 
@@ -334,11 +345,11 @@ async function callClaudeForQuestions(philosopher, recentQuestionTexts, neededDi
 
     const message = await createClaudeMessageWithRetry(
         {
-            model: 'claude-haiku-4-5-20251001',
+            model: QUESTION_MODEL,
             max_tokens: 700,
             messages: [{ role: 'user', content: prompt }],
         },
-        `question generation for ${philosopher}`
+        `question generation for ${philosopher} using ${QUESTION_MODEL}`
     );
 
     const raw = message.content?.find(b => b.type === 'text')?.text ?? '';
