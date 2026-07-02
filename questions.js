@@ -12,23 +12,18 @@
 // This version:
 // - Supports the Standard Six + Albert Camus
 // - Uses Claude-generated questions, not static fallback questions
+// - Uses Haiku again
+// - Bypasses the Anthropic SDK for this route and calls Anthropic through
+//   Node's built-in https module with Connection: close
 // - Hard-enforces Beginner → Intermediate → Advanced
-// - Uses Sonnet instead of Haiku because Haiku topic generation is currently
-//   failing with repeated Anthropic "Premature close" errors on Railway
-// - Retries Anthropic connection failures
+// - Retries temporary Anthropic/network failures
 
 import express from 'express';
 import crypto from 'crypto';
 import pg from 'pg';
-import Anthropic from '@anthropic-ai/sdk';
+import https from 'https';
 
 const router = express.Router();
-
-const client = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-    timeout: 60_000,
-    maxRetries: 2,
-});
 
 const { Pool } = pg;
 
@@ -45,7 +40,8 @@ pool.on('error', (err) => {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const QUESTION_MODEL = process.env.QUESTION_GENERATOR_MODEL || 'claude-sonnet-4-5-20250929';
+const QUESTION_MODEL = process.env.QUESTION_GENERATOR_MODEL || 'claude-haiku-4-5-20251001';
+const ANTHROPIC_VERSION = process.env.ANTHROPIC_VERSION || '2023-06-01';
 
 const REQUIRED_DIFFICULTIES = ['beginner', 'intermediate', 'advanced'];
 
@@ -119,37 +115,11 @@ function isRetryableAnthropicError(err) {
         message.includes('fetch failed') ||
         message.includes('econnreset') ||
         message.includes('etimedout') ||
+        message.includes('empty response') ||
         message.includes('503') ||
         message.includes('529') ||
         message.includes('overloaded')
     );
-}
-
-async function createClaudeMessageWithRetry(args, label = 'questions') {
-    let lastError;
-
-    for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-            return await client.messages.create(args);
-        } catch (err) {
-            lastError = err;
-
-            const retryable = isRetryableAnthropicError(err);
-
-            console.error(
-                `[Questions] Claude ${label} attempt ${attempt}/3 failed:`,
-                err?.message || err
-            );
-
-            if (!retryable || attempt === 3) {
-                throw err;
-            }
-
-            await sleep(800 * attempt);
-        }
-    }
-
-    throw lastError;
 }
 
 function resolvePhilosopher(input) {
@@ -266,6 +236,122 @@ function parseQuestionsJSON(raw) {
 
         throw new Error('AI response was not valid JSON');
     }
+}
+
+// ─── Raw Anthropic HTTPS Client ──────────────────────────────────────────────
+
+function callAnthropicMessagesRaw(payload, label = 'questions') {
+    return new Promise((resolve, reject) => {
+        const apiKey = process.env.ANTHROPIC_API_KEY;
+
+        if (!apiKey) {
+            reject(new Error('Missing ANTHROPIC_API_KEY'));
+            return;
+        }
+
+        const body = JSON.stringify(payload);
+
+        const options = {
+            hostname: 'api.anthropic.com',
+            path: '/v1/messages',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': ANTHROPIC_VERSION,
+                'Content-Length': Buffer.byteLength(body),
+                'Connection': 'close',
+            },
+            timeout: 60_000,
+            agent: new https.Agent({
+                keepAlive: false,
+                maxSockets: 1,
+            }),
+        };
+
+        const req = https.request(options, (res) => {
+            let raw = '';
+
+            res.setEncoding('utf8');
+
+            res.on('data', (chunk) => {
+                raw += chunk;
+            });
+
+            res.on('end', () => {
+                const statusCode = res.statusCode || 0;
+
+                if (!raw || raw.trim().length === 0) {
+                    reject(new Error(`Anthropic empty response body. Status ${statusCode}`));
+                    return;
+                }
+
+                let parsed;
+
+                try {
+                    parsed = JSON.parse(raw);
+                } catch {
+                    reject(
+                        new Error(
+                            `Anthropic returned non-JSON response. Status ${statusCode}. Body: ${raw.slice(0, 300)}`
+                        )
+                    );
+                    return;
+                }
+
+                if (statusCode < 200 || statusCode >= 300) {
+                    const message =
+                        parsed?.error?.message ||
+                        parsed?.message ||
+                        `Anthropic request failed with status ${statusCode}`;
+
+                    reject(new Error(message));
+                    return;
+                }
+
+                resolve(parsed);
+            });
+        });
+
+        req.on('timeout', () => {
+            req.destroy(new Error(`Anthropic request timed out for ${label}`));
+        });
+
+        req.on('error', (err) => {
+            reject(err);
+        });
+
+        req.write(body);
+        req.end();
+    });
+}
+
+async function createClaudeMessageWithRetry(args, label = 'questions') {
+    let lastError;
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            return await callAnthropicMessagesRaw(args, label);
+        } catch (err) {
+            lastError = err;
+
+            const retryable = isRetryableAnthropicError(err);
+
+            console.error(
+                `[Questions] Claude ${label} attempt ${attempt}/3 failed:`,
+                err?.message || err
+            );
+
+            if (!retryable || attempt === 3) {
+                throw err;
+            }
+
+            await sleep(900 * attempt);
+        }
+    }
+
+    throw lastError;
 }
 
 // ─── Claude generation ──────────────────────────────────────────────────────
