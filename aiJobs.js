@@ -10,17 +10,18 @@
 // GET  /api/ai-jobs/:jobId
 // GET  /api/ai-jobs/client/:clientRequestId
 // POST /api/ai-jobs/:jobId/retry
+//
+// This version keeps the existing persistent job system, but bypasses the
+// Anthropic SDK/fetch layer for Claude calls because Railway is currently
+// failing with:
+// "Invalid response body while trying to fetch ... Premature close"
 
 import express from 'express';
 import pg from 'pg';
-import Anthropic from '@anthropic-ai/sdk';
+import https from 'https';
 
 const router = express.Router();
 const { Pool } = pg;
-
-const anthropic = new Anthropic({
-    apiKey: process.env.ANTHROPIC_API_KEY,
-});
 
 const pool = new Pool({
     connectionString: process.env.DATABASE_URL,
@@ -34,9 +35,11 @@ pool.on('error', (err) => {
 });
 
 // Keep this model consistent with the rest of your backend.
-// If your current backend uses a different Claude model, change it here.
 const DEFAULT_CLAUDE_MODEL =
     process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929';
+
+const ANTHROPIC_VERSION =
+    process.env.ANTHROPIC_VERSION || '2023-06-01';
 
 const MODEL_BY_JOB_TYPE = {
     debate_opening: DEFAULT_CLAUDE_MODEL,
@@ -63,6 +66,12 @@ const TEMPERATURE_BY_JOB_TYPE = {
 };
 
 const ALLOWED_JOB_TYPES = new Set(Object.keys(MODEL_BY_JOB_TYPE));
+
+// MARK: - Helpers
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 function cleanString(value, maxLength = 20000) {
     if (typeof value !== 'string') return '';
@@ -107,6 +116,143 @@ function publicJob(row) {
     };
 }
 
+function isRetryableAnthropicError(err) {
+    const message = String(err?.message || err || '').toLowerCase();
+
+    return (
+        message.includes('premature close') ||
+        message.includes('socket hang up') ||
+        message.includes('network') ||
+        message.includes('timeout') ||
+        message.includes('timed out') ||
+        message.includes('fetch failed') ||
+        message.includes('econnreset') ||
+        message.includes('etimedout') ||
+        message.includes('empty response') ||
+        message.includes('503') ||
+        message.includes('529') ||
+        message.includes('overloaded')
+    );
+}
+
+// MARK: - Raw Anthropic HTTPS client
+
+function callAnthropicMessagesRaw(payload, label = 'ai job') {
+    return new Promise((resolve, reject) => {
+        const apiKey = process.env.ANTHROPIC_API_KEY;
+
+        if (!apiKey) {
+            reject(new Error('Missing ANTHROPIC_API_KEY'));
+            return;
+        }
+
+        const body = JSON.stringify(payload);
+
+        const options = {
+            hostname: 'api.anthropic.com',
+            path: '/v1/messages',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                'x-api-key': apiKey,
+                'anthropic-version': ANTHROPIC_VERSION,
+                'Content-Length': Buffer.byteLength(body),
+                'Connection': 'close',
+            },
+            timeout: 90_000,
+            agent: new https.Agent({
+                keepAlive: false,
+                maxSockets: 1,
+            }),
+        };
+
+        const req = https.request(options, (res) => {
+            let raw = '';
+
+            res.setEncoding('utf8');
+
+            res.on('data', (chunk) => {
+                raw += chunk;
+            });
+
+            res.on('end', () => {
+                const statusCode = res.statusCode || 0;
+
+                if (!raw || raw.trim().length === 0) {
+                    reject(new Error(`Anthropic empty response body. Status ${statusCode}`));
+                    return;
+                }
+
+                let parsed;
+
+                try {
+                    parsed = JSON.parse(raw);
+                } catch {
+                    reject(
+                        new Error(
+                            `Anthropic returned non-JSON response. Status ${statusCode}. Body: ${raw.slice(0, 300)}`
+                        )
+                    );
+                    return;
+                }
+
+                if (statusCode < 200 || statusCode >= 300) {
+                    const message =
+                        parsed?.error?.message ||
+                        parsed?.message ||
+                        `Anthropic request failed with status ${statusCode}`;
+
+                    reject(new Error(message));
+                    return;
+                }
+
+                resolve(parsed);
+            });
+        });
+
+        req.on('timeout', () => {
+            req.destroy(new Error(`Anthropic request timed out for ${label}`));
+        });
+
+        req.on('error', (err) => {
+            reject(err);
+        });
+
+        req.write(body);
+        req.end();
+    });
+}
+
+async function createClaudeMessageWithRetry(args, label = 'ai job') {
+    let lastError;
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            return await callAnthropicMessagesRaw(args, label);
+        } catch (err) {
+            lastError = err;
+
+            const retryable = isRetryableAnthropicError(err);
+
+            console.error(
+                `[AIJobs] Claude ${label} attempt ${attempt}/3 failed:`,
+                err?.message || err
+            );
+
+            if (!retryable || attempt === 3) {
+                throw err;
+            }
+
+            await sleep(900 * attempt);
+        }
+    }
+
+    throw lastError;
+}
+
+// MARK: - Claude job call
+
 async function callClaudeForJob(job) {
     const payload = job.payload || {};
 
@@ -121,13 +267,16 @@ async function callClaudeForJob(job) {
     const maxTokens = MAX_TOKENS_BY_JOB_TYPE[job.job_type] || 900;
     const temperature = TEMPERATURE_BY_JOB_TYPE[job.job_type] ?? 0.7;
 
-    const response = await anthropic.messages.create({
-        model,
-        max_tokens: maxTokens,
-        temperature,
-        system: systemPrompt,
-        messages,
-    });
+    const response = await createClaudeMessageWithRetry(
+        {
+            model,
+            max_tokens: maxTokens,
+            temperature,
+            system: systemPrompt,
+            messages,
+        },
+        `${job.job_type} ${job.id} using ${model}`
+    );
 
     const text = (response.content || [])
         .filter((part) => part.type === 'text')
