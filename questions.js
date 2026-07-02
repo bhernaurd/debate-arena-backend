@@ -12,8 +12,8 @@
 // This version hard-enforces exactly one question per difficulty:
 // Beginner → Intermediate → Advanced
 //
-// Even if Claude returns duplicate difficulties, the backend repairs/retries
-// and only sends the app one beginner, one intermediate, and one advanced.
+// It also retries Claude question generation if the Anthropic connection
+// closes early or temporarily fails.
 
 import express from 'express';
 import crypto from 'crypto';
@@ -93,6 +93,55 @@ const PHILOSOPHER_THEMES = {
 const RECENT_EXCLUSION_COUNT = 20;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function isRetryableAnthropicError(err) {
+    const message = String(err?.message || err || '').toLowerCase();
+
+    return (
+        message.includes('premature close') ||
+        message.includes('socket hang up') ||
+        message.includes('network') ||
+        message.includes('timeout') ||
+        message.includes('timed out') ||
+        message.includes('fetch failed') ||
+        message.includes('econnreset') ||
+        message.includes('etimedout') ||
+        message.includes('503') ||
+        message.includes('529') ||
+        message.includes('overloaded')
+    );
+}
+
+async function createClaudeMessageWithRetry(args, label = 'questions') {
+    let lastError;
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+            return await client.messages.create(args);
+        } catch (err) {
+            lastError = err;
+
+            const retryable = isRetryableAnthropicError(err);
+
+            console.error(
+                `[Questions] Claude ${label} attempt ${attempt}/3 failed:`,
+                err?.message || err
+            );
+
+            if (!retryable || attempt === 3) {
+                throw err;
+            }
+
+            await sleep(500 * attempt);
+        }
+    }
+
+    throw lastError;
+}
 
 function resolvePhilosopher(input) {
     if (typeof input !== 'string') return null;
@@ -187,6 +236,27 @@ function selectOnePerDifficulty(generated, neededDifficulties, recentNormalized,
     return selected;
 }
 
+function parseQuestionsJSON(raw) {
+    const clean = String(raw || '')
+        .replace(/```json/gi, '')
+        .replace(/```/g, '')
+        .trim();
+
+    try {
+        return JSON.parse(clean);
+    } catch {
+        const firstBrace = clean.indexOf('{');
+        const lastBrace = clean.lastIndexOf('}');
+
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            const extracted = clean.slice(firstBrace, lastBrace + 1);
+            return JSON.parse(extracted);
+        }
+
+        throw new Error('AI response was not valid JSON');
+    }
+}
+
 // ─── Claude generation ──────────────────────────────────────────────────────
 
 function buildPrompt(philosopher, themes, recentQuestions, neededDifficulties) {
@@ -262,16 +332,17 @@ async function callClaudeForQuestions(philosopher, recentQuestionTexts, neededDi
         neededDifficulties
     );
 
-    const message = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 700,
-        messages: [{ role: 'user', content: prompt }],
-    });
+    const message = await createClaudeMessageWithRetry(
+        {
+            model: 'claude-haiku-4-5-20251001',
+            max_tokens: 700,
+            messages: [{ role: 'user', content: prompt }],
+        },
+        `question generation for ${philosopher}`
+    );
 
     const raw = message.content?.find(b => b.type === 'text')?.text ?? '';
-    const clean = raw.replace(/```json|```/g, '').trim();
-
-    const parsed = JSON.parse(clean);
+    const parsed = parseQuestionsJSON(raw);
 
     if (!Array.isArray(parsed.questions)) {
         throw new Error('AI response missing questions array');
