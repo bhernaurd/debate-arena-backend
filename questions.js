@@ -48,30 +48,46 @@ const DIFFICULTY_LABELS = {
 
 const PHILOSOPHER_ALIASES = {
     'socrates': 'Socrates',
+
     'plato': 'Plato',
+
     'aristotle': 'Aristotle',
+
     'nietzsche': 'Nietzsche',
     'friedrich nietzsche': 'Nietzsche',
+
     'marcus aurelius': 'Marcus Aurelius',
     'aurelius': 'Marcus Aurelius',
     'marcus': 'Marcus Aurelius',
+
     'jung': 'Carl Jung',
     'carl jung': 'Carl Jung',
+
+    'camus': 'Albert Camus',
+    'albert camus': 'Albert Camus',
 };
 
 const PHILOSOPHER_THEMES = {
     'Socrates':
         'self-examination, virtue, knowledge vs ignorance, truth, justice, the examined life, moral confidence, questioning assumptions, admitting what you do not know',
+
     'Plato':
         'truth vs illusion, the soul, justice, the Forms, the Allegory of the Cave, the ideal society, education, appearance vs reality, who should rule',
+
     'Aristotle':
         'virtue, habit, excellence, eudaimonia (flourishing), friendship, purpose, moderation and the golden mean, practical wisdom, character built through action',
+
     'Nietzsche':
-        'values, suffering as fuel, herd morality, self-overcoming, "God is dead", the Ubermensch, comfort vs greatness, weakness, creating your own meaning, resentment',
+        'values, suffering as fuel, herd morality, self-overcoming, "God is dead", the Ubermensch, comfort vs greatness, weakness, resentment, the revaluation of values',
+
     'Marcus Aurelius':
         'what is in your control, discipline, duty, mortality and memento mori, adversity, emotional restraint, acceptance, responsibility, fate, the opinions of others',
+
     'Carl Jung':
         'the shadow, individuation, dreams, projection, archetypes, the unconscious, identity, inner conflict, the persona vs the true self, integrating what you deny',
+
+    'Albert Camus':
+        'the absurd, lucidity, revolt, refusal of false consolation, happiness without illusion, life without appeal, the silence of the world, freedom, human dignity, solidarity, beauty, suffering, justice, limits, living honestly without ultimate meaning',
 };
 
 const RECENT_EXCLUSION_COUNT = 20;
@@ -132,6 +148,7 @@ function sanitizeQuestion(raw) {
     if (!raw || typeof raw !== 'object') return null;
 
     const question = typeof raw.question === 'string' ? raw.question.trim() : '';
+
     const theme = typeof raw.theme === 'string' && raw.theme.trim().length > 0
         ? raw.theme.trim()
         : 'general';
@@ -210,6 +227,14 @@ Rules for every question:
 - No generic self-help phrasing.
 - No academic jargon.
 - Each question must cover a different theme.
+
+Question style:
+- The question should sound like it belongs to ${philosopher}'s philosophical world.
+- It should not sound like a generic debate prompt.
+- It should pressure the user to defend a real position.
+- Avoid vague questions like "What is the meaning of life?"
+- Avoid classroom phrasing like "Explain why..." or "Define..."
+- Prefer sharp, personal, philosophically loaded questions.
 
 Difficulty guide:
 - beginner: requires no philosophy background, purely intuitive
