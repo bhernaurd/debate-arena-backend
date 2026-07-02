@@ -9,21 +9,19 @@
 // (id, generation_id, user_id, philosopher, question_text,
 //  question_normalized, theme, difficulty, source, generated_at, used_at).
 //
-// This version:
-// - Supports the Standard Six + Albert Camus
-// - Uses Claude-generated questions, not static fallback questions
-// - Uses Haiku again
-// - Bypasses the Anthropic SDK for this route and calls Anthropic through
-//   Node's built-in https module with Connection: close
-// - Hard-enforces Beginner → Intermediate → Advanced
-// - Retries temporary Anthropic/network failures
+// This version hard-enforces exactly one question per difficulty:
+// Beginner → Intermediate → Advanced
+//
+// Even if Claude returns duplicate difficulties, the backend repairs/retries
+// and only sends the app one beginner, one intermediate, and one advanced.
 
 import express from 'express';
 import crypto from 'crypto';
 import pg from 'pg';
-import https from 'https';
+import Anthropic from '@anthropic-ai/sdk';
 
 const router = express.Router();
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const { Pool } = pg;
 
@@ -40,9 +38,6 @@ pool.on('error', (err) => {
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-const QUESTION_MODEL = process.env.QUESTION_GENERATOR_MODEL || 'claude-haiku-4-5-20251001';
-const ANTHROPIC_VERSION = process.env.ANTHROPIC_VERSION || '2023-06-01';
-
 const REQUIRED_DIFFICULTIES = ['beginner', 'intermediate', 'advanced'];
 
 const DIFFICULTY_LABELS = {
@@ -53,21 +48,15 @@ const DIFFICULTY_LABELS = {
 
 const PHILOSOPHER_ALIASES = {
     'socrates': 'Socrates',
-
     'plato': 'Plato',
-
     'aristotle': 'Aristotle',
-
     'nietzsche': 'Nietzsche',
     'friedrich nietzsche': 'Nietzsche',
-
     'marcus aurelius': 'Marcus Aurelius',
     'aurelius': 'Marcus Aurelius',
     'marcus': 'Marcus Aurelius',
-
     'jung': 'Carl Jung',
     'carl jung': 'Carl Jung',
-
     'camus': 'Albert Camus',
     'albert camus': 'Albert Camus',
 };
@@ -75,22 +64,16 @@ const PHILOSOPHER_ALIASES = {
 const PHILOSOPHER_THEMES = {
     'Socrates':
         'self-examination, virtue, knowledge vs ignorance, truth, justice, the examined life, moral confidence, questioning assumptions, admitting what you do not know',
-
     'Plato':
         'truth vs illusion, the soul, justice, the Forms, the Allegory of the Cave, the ideal society, education, appearance vs reality, who should rule',
-
     'Aristotle':
         'virtue, habit, excellence, eudaimonia (flourishing), friendship, purpose, moderation and the golden mean, practical wisdom, character built through action',
-
     'Nietzsche':
-        'values, suffering as fuel, herd morality, self-overcoming, "God is dead", the Ubermensch, comfort vs greatness, weakness, resentment, the revaluation of values',
-
+        'values, suffering as fuel, herd morality, self-overcoming, "God is dead", the Ubermensch, comfort vs greatness, weakness, creating your own meaning, resentment',
     'Marcus Aurelius':
         'what is in your control, discipline, duty, mortality and memento mori, adversity, emotional restraint, acceptance, responsibility, fate, the opinions of others',
-
     'Carl Jung':
         'the shadow, individuation, dreams, projection, archetypes, the unconscious, identity, inner conflict, the persona vs the true self, integrating what you deny',
-
     'Albert Camus':
         'the absurd, lucidity, revolt, refusal of false consolation, happiness without illusion, life without appeal, the silence of the world, freedom, human dignity, solidarity, beauty, suffering, justice, limits, living honestly without ultimate meaning',
 };
@@ -98,29 +81,6 @@ const PHILOSOPHER_THEMES = {
 const RECENT_EXCLUSION_COUNT = 20;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-function isRetryableAnthropicError(err) {
-    const message = String(err?.message || err || '').toLowerCase();
-
-    return (
-        message.includes('premature close') ||
-        message.includes('socket hang up') ||
-        message.includes('network') ||
-        message.includes('timeout') ||
-        message.includes('timed out') ||
-        message.includes('fetch failed') ||
-        message.includes('econnreset') ||
-        message.includes('etimedout') ||
-        message.includes('empty response') ||
-        message.includes('503') ||
-        message.includes('529') ||
-        message.includes('overloaded')
-    );
-}
 
 function resolvePhilosopher(input) {
     if (typeof input !== 'string') return null;
@@ -158,13 +118,11 @@ function tooSimilar(a, b) {
     if (wordsA.size === 0 || wordsB.size === 0) return false;
 
     let shared = 0;
-
     for (const w of wordsA) {
         if (wordsB.has(w)) shared++;
     }
 
     const overlap = shared / Math.min(wordsA.size, wordsB.size);
-
     return overlap > 0.8;
 }
 
@@ -178,7 +136,6 @@ function sanitizeQuestion(raw) {
     if (!raw || typeof raw !== 'object') return null;
 
     const question = typeof raw.question === 'string' ? raw.question.trim() : '';
-
     const theme = typeof raw.theme === 'string' && raw.theme.trim().length > 0
         ? raw.theme.trim()
         : 'general';
@@ -215,143 +172,6 @@ function selectOnePerDifficulty(generated, neededDifficulties, recentNormalized,
     }
 
     return selected;
-}
-
-function parseQuestionsJSON(raw) {
-    const clean = String(raw || '')
-        .replace(/```json/gi, '')
-        .replace(/```/g, '')
-        .trim();
-
-    try {
-        return JSON.parse(clean);
-    } catch {
-        const firstBrace = clean.indexOf('{');
-        const lastBrace = clean.lastIndexOf('}');
-
-        if (firstBrace >= 0 && lastBrace > firstBrace) {
-            const extracted = clean.slice(firstBrace, lastBrace + 1);
-            return JSON.parse(extracted);
-        }
-
-        throw new Error('AI response was not valid JSON');
-    }
-}
-
-// ─── Raw Anthropic HTTPS Client ──────────────────────────────────────────────
-
-function callAnthropicMessagesRaw(payload, label = 'questions') {
-    return new Promise((resolve, reject) => {
-        const apiKey = process.env.ANTHROPIC_API_KEY;
-
-        if (!apiKey) {
-            reject(new Error('Missing ANTHROPIC_API_KEY'));
-            return;
-        }
-
-        const body = JSON.stringify(payload);
-
-        const options = {
-            hostname: 'api.anthropic.com',
-            path: '/v1/messages',
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'x-api-key': apiKey,
-                'anthropic-version': ANTHROPIC_VERSION,
-                'Content-Length': Buffer.byteLength(body),
-                'Connection': 'close',
-            },
-            timeout: 60_000,
-            agent: new https.Agent({
-                keepAlive: false,
-                maxSockets: 1,
-            }),
-        };
-
-        const req = https.request(options, (res) => {
-            let raw = '';
-
-            res.setEncoding('utf8');
-
-            res.on('data', (chunk) => {
-                raw += chunk;
-            });
-
-            res.on('end', () => {
-                const statusCode = res.statusCode || 0;
-
-                if (!raw || raw.trim().length === 0) {
-                    reject(new Error(`Anthropic empty response body. Status ${statusCode}`));
-                    return;
-                }
-
-                let parsed;
-
-                try {
-                    parsed = JSON.parse(raw);
-                } catch {
-                    reject(
-                        new Error(
-                            `Anthropic returned non-JSON response. Status ${statusCode}. Body: ${raw.slice(0, 300)}`
-                        )
-                    );
-                    return;
-                }
-
-                if (statusCode < 200 || statusCode >= 300) {
-                    const message =
-                        parsed?.error?.message ||
-                        parsed?.message ||
-                        `Anthropic request failed with status ${statusCode}`;
-
-                    reject(new Error(message));
-                    return;
-                }
-
-                resolve(parsed);
-            });
-        });
-
-        req.on('timeout', () => {
-            req.destroy(new Error(`Anthropic request timed out for ${label}`));
-        });
-
-        req.on('error', (err) => {
-            reject(err);
-        });
-
-        req.write(body);
-        req.end();
-    });
-}
-
-async function createClaudeMessageWithRetry(args, label = 'questions') {
-    let lastError;
-
-    for (let attempt = 1; attempt <= 3; attempt++) {
-        try {
-            return await callAnthropicMessagesRaw(args, label);
-        } catch (err) {
-            lastError = err;
-
-            const retryable = isRetryableAnthropicError(err);
-
-            console.error(
-                `[Questions] Claude ${label} attempt ${attempt}/3 failed:`,
-                err?.message || err
-            );
-
-            if (!retryable || attempt === 3) {
-                throw err;
-            }
-
-            await sleep(900 * attempt);
-        }
-    }
-
-    throw lastError;
 }
 
 // ─── Claude generation ──────────────────────────────────────────────────────
@@ -395,14 +215,6 @@ Rules for every question:
 - No academic jargon.
 - Each question must cover a different theme.
 
-Question style:
-- The question should sound like it belongs to ${philosopher}'s philosophical world.
-- It should not sound like a generic debate prompt.
-- It should pressure the user to defend a real position.
-- Avoid vague questions like "What is the meaning of life?"
-- Avoid classroom phrasing like "Explain why..." or "Define..."
-- Prefer sharp, personal, philosophically loaded questions.
-
 Difficulty guide:
 - beginner: requires no philosophy background, purely intuitive
 - intermediate: touches a named concept or recognizable idea in plain language
@@ -429,17 +241,16 @@ async function callClaudeForQuestions(philosopher, recentQuestionTexts, neededDi
         neededDifficulties
     );
 
-    const message = await createClaudeMessageWithRetry(
-        {
-            model: QUESTION_MODEL,
-            max_tokens: 700,
-            messages: [{ role: 'user', content: prompt }],
-        },
-        `question generation for ${philosopher} using ${QUESTION_MODEL}`
-    );
+    const message = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 700,
+        messages: [{ role: 'user', content: prompt }],
+    });
 
     const raw = message.content?.find(b => b.type === 'text')?.text ?? '';
-    const parsed = parseQuestionsJSON(raw);
+    const clean = raw.replace(/```json|```/g, '').trim();
+
+    const parsed = JSON.parse(clean);
 
     if (!Array.isArray(parsed.questions)) {
         throw new Error('AI response missing questions array');
