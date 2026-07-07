@@ -10,7 +10,7 @@
 //  question_normalized, theme, difficulty, source, generated_at, used_at).
 //
 // This version:
-// - Supports the Standard Six + Albert Camus
+// - Supports the Standard Six + Albert Camus + Fyodor Dostoevsky
 // - Uses Claude-generated questions, not static fallback questions
 // - Uses Haiku for question generation
 // - Bypasses the Anthropic SDK/fetch layer because Railway was failing with:
@@ -72,6 +72,9 @@ const PHILOSOPHER_ALIASES = {
 
     'camus': 'Albert Camus',
     'albert camus': 'Albert Camus',
+
+    'dostoevsky': 'Fyodor Dostoevsky',
+    'fyodor dostoevsky': 'Fyodor Dostoevsky',
 };
 
 const PHILOSOPHER_THEMES = {
@@ -95,6 +98,9 @@ const PHILOSOPHER_THEMES = {
 
     'Albert Camus':
         'the absurd, lucidity, revolt, refusal of false consolation, happiness without illusion, life without appeal, the silence of the world, freedom, human dignity, solidarity, beauty, suffering, justice, limits, living honestly without ultimate meaning',
+
+    'Fyodor Dostoevsky':
+        'faith, suffering, guilt, freedom, conscience, moral responsibility, redemption, evil, sin, spiritual crisis, the burden of choice, human contradiction, compassion, pride, humility, underground psychology, nihilism, innocent suffering, rebellion against God, salvation through suffering',
 };
 
 const RECENT_EXCLUSION_COUNT = 20;
