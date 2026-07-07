@@ -88,7 +88,7 @@ const PHILOSOPHER_THEMES = {
         'virtue, habit, excellence, eudaimonia (flourishing), friendship, purpose, moderation and the golden mean, practical wisdom, character built through action',
 
     'Nietzsche':
-        'values, suffering as fuel, herd morality, self-overcoming, "God is dead", the Ubermensch, comfort vs greatness, weakness, creating your own meaning, resentment',
+        'values, suffering and what it makes of a person, herd morality, self-overcoming, "God is dead", the Ubermensch, comfort vs greatness, weakness, creating your own meaning, resentment',
 
     'Marcus Aurelius':
         'what is in your control, discipline, duty, mortality and memento mori, adversity, emotional restraint, acceptance, responsibility, fate, the opinions of others',
@@ -104,6 +104,25 @@ const PHILOSOPHER_THEMES = {
 };
 
 const RECENT_EXCLUSION_COUNT = 20;
+
+const MAX_QUESTION_CHARS = Number(
+    process.env.QUESTION_MAX_CHARS || 160
+);
+
+const GENERATE_RATE_LIMIT_PER_HOUR = Number(
+    process.env.QUESTION_GENERATE_RATE_LIMIT_PER_HOUR || 5
+);
+
+const STOPWORDS = new Set([
+    'a', 'an', 'and', 'are', 'as', 'at', 'be', 'being', 'by', 'can',
+    'could', 'did', 'do', 'does', 'for', 'from', 'had', 'has', 'have',
+    'he', 'her', 'his', 'how', 'i', 'if', 'in', 'into', 'is', 'it',
+    'its', 'of', 'on', 'or', 'our', 'should', 'so', 'than', 'that',
+    'the', 'their', 'them', 'then', 'there', 'these', 'they', 'this',
+    'those', 'through', 'to', 'was', 'we', 'were', 'what', 'when',
+    'where', 'whether', 'which', 'who', 'whom', 'whose', 'why', 'will',
+    'with', 'without', 'would', 'you', 'your'
+]);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -155,15 +174,37 @@ function normalizeDifficulty(value) {
     return null;
 }
 
+function contentWords(normalizedText) {
+    return String(normalizedText || '')
+        .split(' ')
+        .map(w => w.trim())
+        .filter(w => w.length > 0)
+        .filter(w => !STOPWORDS.has(w));
+}
+
+function normalizedTheme(theme) {
+    return normalizeText(theme || 'general');
+}
+
 function tooSimilar(a, b) {
     if (!a || !b) return false;
     if (a === b) return true;
-    if (a.includes(b) || b.includes(a)) return true;
 
-    const wordsA = new Set(a.split(' ').filter(Boolean));
-    const wordsB = new Set(b.split(' ').filter(Boolean));
+    const wordsA = new Set(contentWords(a));
+    const wordsB = new Set(contentWords(b));
 
     if (wordsA.size === 0 || wordsB.size === 0) return false;
+
+    // The raw includes check is useful for catching true paraphrase fragments,
+    // but only after stopword filtering. Without this, short questions can look
+    // falsely similar because they share words like "is", "to", or "the".
+    if (a.includes(b) || b.includes(a)) {
+        const smallerSet = wordsA.size <= wordsB.size ? wordsA : wordsB;
+
+        if (smallerSet.size >= 4) {
+            return true;
+        }
+    }
 
     let shared = 0;
 
@@ -173,7 +214,7 @@ function tooSimilar(a, b) {
 
     const overlap = shared / Math.min(wordsA.size, wordsB.size);
 
-    return overlap > 0.8;
+    return shared >= 3 && overlap > 0.8;
 }
 
 function sortByRequiredDifficulty(questions) {
@@ -185,7 +226,12 @@ function sortByRequiredDifficulty(questions) {
 function sanitizeQuestion(raw) {
     if (!raw || typeof raw !== 'object') return null;
 
-    const question = typeof raw.question === 'string' ? raw.question.trim() : '';
+    const question = typeof raw.question === 'string'
+        ? raw.question
+            .trim()
+            .replace(/^[-*\d.)\s]+/, '')
+            .trim()
+        : '';
 
     const theme = typeof raw.theme === 'string' && raw.theme.trim().length > 0
         ? raw.theme.trim()
@@ -194,6 +240,8 @@ function sanitizeQuestion(raw) {
     const difficulty = normalizeDifficulty(raw.difficulty);
 
     if (!question || !difficulty) return null;
+    if (!question.endsWith('?')) return null;
+    if (question.length > MAX_QUESTION_CHARS) return null;
 
     return {
         question,
@@ -210,12 +258,19 @@ function selectOnePerDifficulty(generated, neededDifficulties, recentNormalized,
 
         for (const candidate of candidates) {
             const norm = normalizeText(candidate.question);
+            const theme = normalizedTheme(candidate.theme);
+
+            const usedThemes = new Set([
+                ...accepted.map(q => normalizedTheme(q.theme)),
+                ...selected.map(q => normalizedTheme(q.theme)),
+            ]);
 
             const dupAgainstRecent = recentNormalized.some(r => tooSimilar(norm, r));
             const dupAgainstAccepted = accepted.some(a => tooSimilar(norm, normalizeText(a.question)));
             const dupAgainstSelected = selected.some(s => tooSimilar(norm, normalizeText(s.question)));
+            const dupTheme = usedThemes.has(theme);
 
-            if (!dupAgainstRecent && !dupAgainstAccepted && !dupAgainstSelected) {
+            if (!dupAgainstRecent && !dupAgainstAccepted && !dupAgainstSelected && !dupTheme) {
                 selected.push(candidate);
                 break;
             }
@@ -391,9 +446,10 @@ The final JSON array must be ordered exactly like this:
 ${neededDifficulties.map(d => DIFFICULTY_LABELS[d]).join(' → ')}
 
 Rules for every question:
-- One sentence.
-- Under 140 characters whenever possible.
-- It must create tension and invite real disagreement.
+- One sentence, under 140 characters whenever possible.
+- THE CURIOSITY TEST: the user must have an instant gut answer, followed immediately by doubt. If the gut answer arrives with no doubt attached, the question fails.
+- SELF-IMPLICATING: the question should make the user defend their own life or their own beliefs, not an abstract position.
+- TWO-SECOND TEST: fully understandable at a glance by someone with zero philosophy background. No philosopher's technical vocabulary in the question itself.
 - It should be arguable, never a definition, trivia, or "explain X" question.
 - It must feel like ${philosopher} is challenging the user personally and directly.
 - It must be philosophically accurate to ${philosopher}'s actual ideas and concerns.
@@ -403,6 +459,16 @@ Rules for every question:
 - No academic jargon.
 - Each question must cover a different theme.
 
+Examples of GOOD questions:
+- "Is it worse to hurt someone or to be hurt?"
+- "Can a person be happy without being good?"
+- "Is hope a strength or a form of escape?"
+
+Examples of BAD questions:
+- "Does wealth lead to happiness?" This has an easy gut answer with little doubt.
+- "What is the role of virtue in eudaimonia?" This is jargon and classroom phrasing.
+- "Can we truly know anything?" This is abstract, ownerless, and has weak personal stakes.
+
 Question style:
 - The question should sound like it belongs to ${philosopher}'s philosophical world.
 - It should not sound like a generic debate prompt.
@@ -410,6 +476,7 @@ Question style:
 - Avoid vague questions like "What is the meaning of life?"
 - Avoid classroom phrasing like "Explain why..." or "Define..."
 - Prefer sharp, personal, philosophically loaded questions.
+- Do not copy the structure of the examples. Use them only as quality standards.
 
 Difficulty guide:
 - beginner: requires no philosophy background, purely intuitive
@@ -494,16 +561,103 @@ async function generateDifficultyLockedQuestions(philosopher, recentTexts, recen
     return sortByRequiredDifficulty(accepted);
 }
 
+// ─── Persistence / protection helpers ───────────────────────────────────────
+
+function makePublicError(statusCode, publicMessage, internalMessage = publicMessage) {
+    const err = new Error(internalMessage);
+    err.statusCode = statusCode;
+    err.publicMessage = publicMessage;
+    return err;
+}
+
+function validateUserId(userId) {
+    return typeof userId === 'string' && userId.trim().length >= 6;
+}
+
+async function enforceGenerateRateLimit(userId, philosopher) {
+    if (!Number.isFinite(GENERATE_RATE_LIMIT_PER_HOUR) || GENERATE_RATE_LIMIT_PER_HOUR <= 0) {
+        return;
+    }
+
+    const result = await pool.query(
+        `SELECT COUNT(DISTINCT generation_id)::int AS generation_count
+         FROM generated_questions
+         WHERE user_id = $1
+           AND philosopher = $2
+           AND generated_at > now() - interval '1 hour'`,
+        [userId, philosopher]
+    );
+
+    const generationCount = Number(result.rows[0]?.generation_count || 0);
+
+    if (generationCount >= GENERATE_RATE_LIMIT_PER_HOUR) {
+        throw makePublicError(
+            429,
+            'Too many question generations. Please try again later.',
+            `Rate limit exceeded for ${philosopher} by user ${userId}`
+        );
+    }
+}
+
+async function saveGeneratedQuestionsAtomic({ generationId, userId, philosopher, questions }) {
+    const client = await pool.connect();
+
+    try {
+        await client.query('BEGIN');
+
+        const values = [];
+        const rowsSql = questions.map((q, index) => {
+            const base = index * 7;
+
+            values.push(
+                generationId,
+                userId,
+                philosopher,
+                q.question,
+                normalizeText(q.question),
+                q.theme,
+                q.difficulty
+            );
+
+            return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, 'ai_generated', now())`;
+        }).join(',\n');
+
+        const insert = await client.query(
+            `INSERT INTO generated_questions
+                 (generation_id, user_id, philosopher, question_text,
+                  question_normalized, theme, difficulty, source, generated_at)
+             VALUES
+                 ${rowsSql}
+             RETURNING id, question_text, theme, difficulty`,
+            values
+        );
+
+        await client.query('COMMIT');
+
+        return insert.rows.map(row => ({
+            id: row.id,
+            question: row.question_text,
+            theme: row.theme,
+            difficulty: row.difficulty,
+        }));
+    } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+    } finally {
+        client.release();
+    }
+}
+
 // ─── POST /api/questions/generate ───────────────────────────────────────────
 
 router.post('/api/questions/generate', async (req, res) => {
     try {
         const { userId } = req.body;
 
-        if (!userId || typeof userId !== 'string') {
+        if (!validateUserId(userId)) {
             return res.status(400).json({
                 success: false,
-                error: 'userId is required',
+                error: 'A valid userId is required',
             });
         }
 
@@ -515,6 +669,8 @@ router.post('/api/questions/generate', async (req, res) => {
                 error: 'Invalid philosopher',
             });
         }
+
+        await enforceGenerateRateLimit(userId, philosopher);
 
         const recent = await pool.query(
             `SELECT question_text, question_normalized
@@ -536,33 +692,12 @@ router.post('/api/questions/generate', async (req, res) => {
 
         const generationId = crypto.randomUUID();
 
-        const saved = [];
-
-        for (const q of accepted) {
-            const insert = await pool.query(
-                `INSERT INTO generated_questions
-                     (generation_id, user_id, philosopher, question_text,
-                      question_normalized, theme, difficulty, source, generated_at)
-                 VALUES ($1, $2, $3, $4, $5, $6, $7, 'ai_generated', now())
-                 RETURNING id`,
-                [
-                    generationId,
-                    userId,
-                    philosopher,
-                    q.question,
-                    normalizeText(q.question),
-                    q.theme,
-                    q.difficulty,
-                ]
-            );
-
-            saved.push({
-                id: insert.rows[0].id,
-                question: q.question,
-                theme: q.theme,
-                difficulty: q.difficulty,
-            });
-        }
+        const saved = await saveGeneratedQuestionsAtomic({
+            generationId,
+            userId,
+            philosopher,
+            questions: accepted,
+        });
 
         const orderedSaved = sortByRequiredDifficulty(saved);
 
@@ -578,9 +713,9 @@ router.post('/api/questions/generate', async (req, res) => {
     } catch (err) {
         console.error('[Questions] generate error:', err.message);
 
-        return res.status(500).json({
+        return res.status(err.statusCode || 500).json({
             success: false,
-            error: 'Question generation failed. Please try again.',
+            error: err.publicMessage || 'Question generation failed. Please try again.',
         });
     }
 });
@@ -589,12 +724,31 @@ router.post('/api/questions/generate', async (req, res) => {
 
 router.patch('/api/questions/:id/used', async (req, res) => {
     try {
-        await pool.query(
+        const userId = req.body?.userId || req.query?.userId;
+
+        if (!validateUserId(userId)) {
+            return res.status(400).json({
+                success: false,
+                error: 'A valid userId is required',
+            });
+        }
+
+        const update = await pool.query(
             `UPDATE generated_questions
              SET used_at = now()
-             WHERE id = $1 AND used_at IS NULL`,
-            [req.params.id]
+             WHERE id = $1
+               AND user_id = $2
+               AND used_at IS NULL
+             RETURNING id`,
+            [req.params.id, userId]
         );
+
+        if (update.rowCount === 0) {
+            return res.status(404).json({
+                success: false,
+                error: 'Question not found or already marked used',
+            });
+        }
 
         return res.json({ success: true });
     } catch (err) {
