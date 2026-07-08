@@ -8,11 +8,28 @@
 //   - Postgres stores today through the next 7 days.
 //   - Notification copy is generated ahead of time with each challenge.
 //
-// Why Postgres:
+// Important behavior preserved:
 //   - Backend deploys/restarts will NOT regenerate existing challenge dates.
 //   - challenge_date is the source of truth.
 //   - Existing dates are skipped.
 //   - A Postgres advisory lock prevents duplicate Claude generation during concurrent deploys.
+//   - The rolling 7-day calendar remains intact.
+//
+// Improvements in this version:
+//   - Larger source-grounded idea pools.
+//   - Question modes to prevent every Daily Challenge from feeling like the same prompt.
+//   - Source idea LRU is scoped per philosopher.
+//   - Question mode LRU is scoped globally across recent Daily Challenges.
+//   - Optional source-level mode allowlists are supported.
+//   - One retry happens before fallback if generation or validation fails.
+//   - Fallback difficulty follows the scheduled difficulty curve.
+//   - Stricter validation for difficulty, source grounding, generic wording, and notification mismatch.
+//   - Sonnet model by default, with Railway env override.
+//   - question_mode is stored in Postgres.
+//
+// Required DB migration before deploying this version:
+//   ALTER TABLE daily_challenges
+//   ADD COLUMN IF NOT EXISTS question_mode TEXT;
 //
 // Compatibility:
 //   - daily_challenge_cache.json is still written for the current Chicago window
@@ -27,6 +44,11 @@ import { DateTime } from 'luxon';
 import cron from 'node-cron';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+// Keep this env-configurable so you can change the Anthropic model in Railway
+// without editing code.
+const DAILY_CHALLENGE_MODEL =
+    process.env.DAILY_CHALLENGE_MODEL || 'claude-sonnet-4-5-20250929';
 
 // ─── Storage compatibility for current pushScheduler.js ───────────────────────
 
@@ -136,19 +158,19 @@ const PHILOSOPHERS = {
         id: 'nietzsche',
         name: 'Nietzsche',
         era: '1844–1900',
-        discipline: 'Will to Power',
+        discipline: 'Genealogy & Value-Critique',
     },
     aurelius: {
         id: 'aurelius',
         name: 'Marcus Aurelius',
         era: '121–180 AD',
-        discipline: 'Stoic Emperor',
+        discipline: 'Stoic Discipline',
     },
     jung: {
         id: 'jung',
         name: 'Carl Jung',
         era: '1875–1961',
-        discipline: 'Psyche & Shadow',
+        discipline: 'Depth Psychology',
     },
     plato: {
         id: 'plato',
@@ -160,7 +182,7 @@ const PHILOSOPHERS = {
         id: 'aristotle',
         name: 'Aristotle',
         era: '384–322 BC',
-        discipline: 'Logic & Virtue',
+        discipline: 'Virtue & Practical Reason',
     },
 };
 
@@ -193,21 +215,118 @@ function stableHashString(value) {
     return hash;
 }
 
-function getPhilosopherForDate(dateString) {
+function getWeekdayPhilosopherId(dateString) {
     const dow = DateTime.fromISO(dateString, { zone: CHICAGO_ZONE }).weekday;
+    return ROTATION[dow] || null;
+}
+
+function getPhilosopherForDate(dateString) {
+    const date = DateTime.fromISO(dateString, { zone: CHICAGO_ZONE });
+    const dow = date.weekday;
 
     if (dow === 7) {
+        const previousDayId = getWeekdayPhilosopherId(date.minus({ days: 1 }).toISODate());
+        const nextDayId = getWeekdayPhilosopherId(date.plus({ days: 1 }).toISODate());
+
+        const forbidden = new Set([previousDayId, nextDayId].filter(Boolean));
+        const candidates = ALL_PHILOSOPHER_IDS.filter(id => !forbidden.has(id));
+
         const hash = stableHashString(dateString);
-        const id = ALL_PHILOSOPHER_IDS[hash % ALL_PHILOSOPHER_IDS.length];
+        const id = candidates[hash % candidates.length] || 'socrates';
+
         return PHILOSOPHERS[id] ?? PHILOSOPHERS.socrates;
     }
 
     return PHILOSOPHERS[ROTATION[dow]] ?? PHILOSOPHERS.socrates;
 }
 
+// ─── Question modes ───────────────────────────────────────────────────────────
+// Source ideas rotate per philosopher.
+// Question modes rotate globally across recent Daily Challenges.
+
+const QUESTION_MODES = {
+    defend_a_definition: {
+        id: 'defend_a_definition',
+        label: 'Defend a Definition',
+        instruction:
+            'Require the user to define a key moral, psychological, or philosophical term, then defend that definition against the philosopher.',
+        goodShape:
+            'Ask the user to define something they use confidently, then expose whether the definition survives pressure.',
+        avoid:
+            'Do not ask a vague reflection question. The user must supply and defend a definition.',
+    },
+    take_a_side: {
+        id: 'take_a_side',
+        label: 'Take a Side',
+        instruction:
+            'Force the user to take a clear side on a real philosophical tension raised by the source idea.',
+        goodShape:
+            'Frame the question so the user must choose between two defensible but conflicting positions.',
+        avoid:
+            'Do not let the user answer with a neutral reflection or list of feelings.',
+    },
+    self_audit: {
+        id: 'self_audit',
+        label: 'Self-Audit',
+        instruction:
+            'Make the source idea personally implicating by asking the user to test a belief, habit, relationship, judgment, or desire in their own life.',
+        goodShape:
+            'The question should make the user examine themselves without becoming generic journaling.',
+        avoid:
+            'Do not write motivational self-help. Keep the source idea visible.',
+    },
+    steelman_the_opposite: {
+        id: 'steelman_the_opposite',
+        label: 'Steelman the Opposite',
+        instruction:
+            'Ask the user to defend the side they would usually resist, then let the philosopher attack or complicate it.',
+        goodShape:
+            'The user should have to make the strongest case for a position that challenges their instinct.',
+        avoid:
+            'Do not merely ask what the opposite view is. Require a defense.',
+    },
+    concrete_case: {
+        id: 'concrete_case',
+        label: 'Concrete Case',
+        instruction:
+            'Demand one concrete example from the user’s life, then judge that case through the philosopher’s concept.',
+        goodShape:
+            'Ask for one named situation, relationship, habit, judgment, fear, desire, or conflict.',
+        avoid:
+            'Do not ask broad abstract questions that can be answered without an example.',
+    },
+    moral_trial: {
+        id: 'moral_trial',
+        label: 'Moral Trial',
+        instruction:
+            'Put the user’s belief, excuse, desire, resentment, ambition, or fear on trial before the philosopher.',
+        goodShape:
+            'The question should feel like the user has to defend themselves against a serious accusation.',
+        avoid:
+            'Do not make the philosopher merely curious. The philosopher should press a charge.',
+    },
+};
+
+const QUESTION_MODE_IDS = Object.keys(QUESTION_MODES);
+
+const VALID_DIFFICULTIES = new Set([
+    'Accessible',
+    'Challenging',
+    'Demanding',
+]);
+
+function getScheduledDifficulty(dateString) {
+    const dow = DateTime.fromISO(dateString, { zone: CHICAGO_ZONE }).weekday;
+
+    if (dow >= 1 && dow <= 3) return 'Accessible';
+    if (dow >= 4 && dow <= 5) return 'Challenging';
+    return 'Demanding';
+}
+
 // ─── Source-grounded idea pool ────────────────────────────────────────────────
 // These are paraphrased source ideas, not invented modern opinions.
 // Modern relevance is application, not foundation.
+// Optional modes: [...] can restrict awkward source/mode pairings.
 
 const SOURCE_IDEAS = {
     socrates: [
@@ -242,6 +361,7 @@ const SOURCE_IDEAS = {
             concept: 'Piety and Definition',
             sourceIdea: 'Socrates presses Euthyphro to define piety rather than rely on confidence or social approval.',
             debateAngle: 'whether people truly understand the moral words they use',
+            modes: ['defend_a_definition', 'take_a_side', 'concrete_case', 'moral_trial'],
         },
         {
             key: 'socrates-meno-virtue-teachable',
@@ -274,6 +394,104 @@ const SOURCE_IDEAS = {
             concept: 'Fear of Death',
             sourceIdea: 'Socrates suggests that fearing death may be pretending to know what one does not know.',
             debateAngle: 'whether fear is often false knowledge disguised as certainty',
+        },
+        {
+            key: 'socrates-laches-courage-definition',
+            work: 'Laches',
+            reference: 'Plato, Laches',
+            concept: 'Courage and Definition',
+            sourceIdea: 'Socrates challenges confident claims about courage by asking what courage itself is.',
+            debateAngle: 'whether people praise courage without knowing what courage means',
+            modes: ['defend_a_definition', 'take_a_side', 'concrete_case', 'moral_trial'],
+        },
+        {
+            key: 'socrates-charmides-temperance',
+            work: 'Charmides',
+            reference: 'Plato, Charmides',
+            concept: 'Temperance and Self-Knowledge',
+            sourceIdea: 'Socrates investigates whether temperance involves knowing oneself and the limits of one’s knowledge.',
+            debateAngle: 'whether self-control requires self-knowledge',
+        },
+        {
+            key: 'socrates-protagoras-virtue-unity',
+            work: 'Protagoras',
+            reference: 'Plato, Protagoras',
+            concept: 'Unity of Virtue',
+            sourceIdea: 'Socrates presses whether virtues such as courage, justice, wisdom, and temperance can truly be separated.',
+            debateAngle: 'whether a person can possess one virtue while lacking the others',
+        },
+        {
+            key: 'socrates-protagoras-akrasia-knowledge',
+            work: 'Protagoras',
+            reference: 'Plato, Protagoras',
+            concept: 'Knowledge and Weakness',
+            sourceIdea: 'Socrates questions whether people knowingly choose what is bad when they understand the good.',
+            debateAngle: 'whether wrongdoing comes from ignorance or from weakness of will',
+        },
+        {
+            key: 'socrates-hippias-major-beauty',
+            work: 'Hippias Major',
+            reference: 'Plato, Hippias Major',
+            concept: 'What Is Beauty?',
+            sourceIdea: 'Socrates exposes the difficulty of defining beauty rather than merely naming beautiful things.',
+            debateAngle: 'whether people confuse examples with definitions',
+            modes: ['defend_a_definition', 'take_a_side', 'concrete_case'],
+        },
+        {
+            key: 'socrates-ion-expertise-inspiration',
+            work: 'Ion',
+            reference: 'Plato, Ion',
+            concept: 'Expertise and Inspiration',
+            sourceIdea: 'Socrates questions whether a performer speaks from knowledge or from inspiration without understanding.',
+            debateAngle: 'whether eloquence proves understanding',
+        },
+        {
+            key: 'socrates-apology-public-opinion',
+            work: 'Apology',
+            reference: 'Plato, Apology',
+            concept: 'Public Opinion and Integrity',
+            sourceIdea: 'Socrates refuses to abandon philosophy merely because the city condemns him.',
+            debateAngle: 'whether one should obey conscience when public opinion turns hostile',
+        },
+        {
+            key: 'socrates-crito-social-contract',
+            work: 'Crito',
+            reference: 'Plato, Crito',
+            concept: 'Obligation to the City',
+            sourceIdea: 'Socrates argues that benefiting from a city’s laws creates obligations even when those laws harm him.',
+            debateAngle: 'whether receiving benefits creates duties one cannot abandon when convenient',
+        },
+        {
+            key: 'socrates-gorgias-flattery-craft',
+            work: 'Gorgias',
+            reference: 'Plato, Gorgias',
+            concept: 'Flattery vs. True Craft',
+            sourceIdea: 'Socrates distinguishes genuine crafts that improve the soul from flattering practices that merely please.',
+            debateAngle: 'whether pleasure can imitate goodness while corrupting judgment',
+        },
+        {
+            key: 'socrates-gorgias-punishment-medicine',
+            work: 'Gorgias',
+            reference: 'Plato, Gorgias',
+            concept: 'Punishment and the Soul',
+            sourceIdea: 'Socrates compares just punishment to medicine for a diseased soul.',
+            debateAngle: 'whether being corrected is sometimes better than escaping consequences',
+        },
+        {
+            key: 'socrates-apology-care-of-soul',
+            work: 'Apology',
+            reference: 'Plato, Apology',
+            concept: 'Care of the Soul',
+            sourceIdea: 'Socrates urges people to care less for wealth and reputation than for the condition of the soul.',
+            debateAngle: 'whether success matters if the soul is neglected',
+        },
+        {
+            key: 'socrates-meno-recollection-inquiry',
+            work: 'Meno',
+            reference: 'Plato, Meno',
+            concept: 'Inquiry and Perplexity',
+            sourceIdea: 'Socrates treats perplexity not as failure but as the beginning of real inquiry.',
+            debateAngle: 'whether confusion is an obstacle to learning or the doorway into it',
         },
     ],
 
@@ -341,6 +559,105 @@ const SOURCE_IDEAS = {
             concept: 'What Is Knowledge?',
             sourceIdea: 'Plato investigates whether knowledge is perception, true judgment, or something more secure.',
             debateAngle: 'whether seeing and believing are enough to count as knowing',
+            modes: ['defend_a_definition', 'take_a_side', 'concrete_case'],
+        },
+        {
+            key: 'plato-republic-noble-lie',
+            work: 'Republic',
+            reference: 'Republic, Book III',
+            concept: 'Noble Lie',
+            sourceIdea: 'Plato considers whether a founding myth can preserve civic order.',
+            debateAngle: 'whether a useful falsehood can ever serve justice',
+        },
+        {
+            key: 'plato-republic-thrasymachus-justice',
+            work: 'Republic',
+            reference: 'Republic, Book I',
+            concept: 'Justice and Advantage',
+            sourceIdea: 'Plato has Thrasymachus claim that justice is the advantage of the stronger, a view Socrates challenges.',
+            debateAngle: 'whether justice is real or merely power disguised as morality',
+        },
+        {
+            key: 'plato-republic-gyges-ring',
+            work: 'Republic',
+            reference: 'Republic, Book II',
+            concept: 'Ring of Gyges',
+            sourceIdea: 'Plato uses the Ring of Gyges to ask whether people would remain just if they could act without consequence.',
+            debateAngle: 'whether morality survives when no one is watching',
+        },
+        {
+            key: 'plato-republic-tyrannical-soul',
+            work: 'Republic',
+            reference: 'Republic, Book IX',
+            concept: 'The Tyrannical Soul',
+            sourceIdea: 'Plato portrays tyranny as disorder in the soul ruled by lawless desire.',
+            debateAngle: 'whether unchecked desire makes a person powerful or enslaved',
+        },
+        {
+            key: 'plato-republic-education-turning-soul',
+            work: 'Republic',
+            reference: 'Republic, Book VII',
+            concept: 'Education as Turning the Soul',
+            sourceIdea: 'Plato describes education not as inserting knowledge but as turning the soul toward what is real.',
+            debateAngle: 'whether learning requires conversion of attention more than information',
+        },
+        {
+            key: 'plato-republic-poetry-imitation',
+            work: 'Republic',
+            reference: 'Republic, Book X',
+            concept: 'Poetry and Imitation',
+            sourceIdea: 'Plato worries that imitative art can inflame emotion and pull the soul away from reason.',
+            debateAngle: 'whether art reveals truth or seduces people into illusion',
+        },
+        {
+            key: 'plato-gorgias-pleasure-good',
+            work: 'Gorgias',
+            reference: 'Gorgias',
+            concept: 'Pleasure and the Good',
+            sourceIdea: 'Plato distinguishes what is pleasant from what is genuinely good for the soul.',
+            debateAngle: 'whether pleasure is a reliable guide to the good',
+        },
+        {
+            key: 'plato-phaedo-philosophy-death',
+            work: 'Phaedo',
+            reference: 'Phaedo',
+            concept: 'Philosophy as Preparation for Death',
+            sourceIdea: 'Plato portrays philosophy as training the soul to loosen its dependence on bodily attachments.',
+            debateAngle: 'whether philosophy should detach people from ordinary desires',
+        },
+        {
+            key: 'plato-meno-true-opinion-knowledge',
+            work: 'Meno',
+            reference: 'Meno',
+            concept: 'True Opinion and Knowledge',
+            sourceIdea: 'Plato distinguishes true opinion from knowledge that is tied down by an account.',
+            debateAngle: 'whether being right is enough if one cannot explain why',
+        },
+        {
+            key: 'plato-timaeus-order-cosmos',
+            work: 'Timaeus',
+            reference: 'Timaeus',
+            concept: 'Order and Cosmos',
+            sourceIdea: 'Plato presents reality as intelligibly ordered rather than chaotic accident.',
+            debateAngle: 'whether seeing order in life clarifies responsibility or imposes false meaning',
+            modes: ['take_a_side', 'self_audit', 'concrete_case'],
+        },
+        {
+            key: 'plato-laws-law-character',
+            work: 'Laws',
+            reference: 'Laws',
+            concept: 'Law and Character Formation',
+            sourceIdea: 'Plato treats law as a teacher that shapes citizens’ habits and souls.',
+            debateAngle: 'whether laws should merely restrain behavior or form character',
+        },
+        {
+            key: 'plato-parmenides-forms-difficulty',
+            work: 'Parmenides',
+            reference: 'Parmenides',
+            concept: 'The Difficulty of Forms',
+            sourceIdea: 'Plato tests his own theory of Forms through serious objections.',
+            debateAngle: 'whether a philosophy is stronger when it can survive attacks from within',
+            modes: ['take_a_side', 'steelman_the_opposite', 'concrete_case'],
         },
     ],
 
@@ -409,6 +726,105 @@ const SOURCE_IDEAS = {
             sourceIdea: 'Aristotle presents tragedy as a structured imitation of action that evokes pity and fear.',
             debateAngle: 'whether art helps people understand suffering better than argument does',
         },
+        {
+            key: 'aristotle-nicomachean-ethics-choice',
+            work: 'Nicomachean Ethics',
+            reference: 'Nicomachean Ethics, Book III',
+            concept: 'Choice and Responsibility',
+            sourceIdea: 'Aristotle treats voluntary action and deliberate choice as central to moral responsibility.',
+            debateAngle: 'whether people are responsible for choices shaped by habit and circumstance',
+        },
+        {
+            key: 'aristotle-nicomachean-ethics-practical-wisdom',
+            work: 'Nicomachean Ethics',
+            reference: 'Nicomachean Ethics, Book VI',
+            concept: 'Practical Wisdom',
+            sourceIdea: 'Aristotle distinguishes practical wisdom from cleverness and abstract knowledge.',
+            debateAngle: 'whether knowing principles matters without judging the concrete situation well',
+        },
+        {
+            key: 'aristotle-nicomachean-ethics-pleasure',
+            work: 'Nicomachean Ethics',
+            reference: 'Nicomachean Ethics, Book X',
+            concept: 'Pleasure and the Good Life',
+            sourceIdea: 'Aristotle argues that pleasure completes activity but should be judged by the quality of the activity.',
+            debateAngle: 'whether pleasure proves that an activity is good',
+        },
+        {
+            key: 'aristotle-nicomachean-ethics-magnanimity',
+            work: 'Nicomachean Ethics',
+            reference: 'Nicomachean Ethics, Book IV',
+            concept: 'Greatness of Soul',
+            sourceIdea: 'Aristotle describes the great-souled person as worthy of great things and rightly aware of that worth.',
+            debateAngle: 'whether humility or accurate self-worth is closer to virtue',
+        },
+        {
+            key: 'aristotle-nicomachean-ethics-justice',
+            work: 'Nicomachean Ethics',
+            reference: 'Nicomachean Ethics, Book V',
+            concept: 'Justice as Complete Virtue',
+            sourceIdea: 'Aristotle treats justice as virtue in relation to others, not merely rule-following.',
+            debateAngle: 'whether justice is measured by law or by giving others what is due',
+        },
+        {
+            key: 'aristotle-politics-household-city',
+            work: 'Politics',
+            reference: 'Politics, Book I',
+            concept: 'Household and City',
+            sourceIdea: 'Aristotle sees the household and city as ordered communities aimed at human life and flourishing.',
+            debateAngle: 'whether private life can be separated from public virtue',
+        },
+        {
+            key: 'aristotle-politics-middle-constitution',
+            work: 'Politics',
+            reference: 'Politics, Book IV',
+            concept: 'The Middle Class and Stability',
+            sourceIdea: 'Aristotle argues that political stability often depends on a strong middle element rather than extremes.',
+            debateAngle: 'whether moderation in civic life is wisdom or weakness',
+        },
+        {
+            key: 'aristotle-metaphysics-four-causes',
+            work: 'Metaphysics',
+            reference: 'Metaphysics',
+            concept: 'Four Causes',
+            sourceIdea: 'Aristotle explains things through material, formal, efficient, and final causes.',
+            debateAngle: 'whether understanding something requires knowing its purpose',
+            modes: ['take_a_side', 'concrete_case', 'self_audit'],
+        },
+        {
+            key: 'aristotle-physics-telos-nature',
+            work: 'Physics',
+            reference: 'Physics',
+            concept: 'Nature and Purpose',
+            sourceIdea: 'Aristotle often explains natural things by the ends toward which they develop.',
+            debateAngle: 'whether human life can be understood without a purpose or end',
+            modes: ['take_a_side', 'self_audit', 'concrete_case'],
+        },
+        {
+            key: 'aristotle-rhetoric-character-proof',
+            work: 'Rhetoric',
+            reference: 'Rhetoric',
+            concept: 'Character as Persuasion',
+            sourceIdea: 'Aristotle treats the speaker’s character as one of the strongest means of persuasion.',
+            debateAngle: 'whether trust in the speaker should affect trust in the argument',
+        },
+        {
+            key: 'aristotle-poetics-recognition-reversal',
+            work: 'Poetics',
+            reference: 'Poetics',
+            concept: 'Recognition and Reversal',
+            sourceIdea: 'Aristotle sees recognition and reversal as powerful features of tragic understanding.',
+            debateAngle: 'whether painful reversals reveal truths ordinary success hides',
+        },
+        {
+            key: 'aristotle-nicomachean-ethics-contemplation',
+            work: 'Nicomachean Ethics',
+            reference: 'Nicomachean Ethics, Book X',
+            concept: 'Contemplation',
+            sourceIdea: 'Aristotle presents contemplation as the highest activity because it most fully exercises reason.',
+            debateAngle: 'whether the best life is active achievement, moral virtue, or contemplation',
+            modes: ['take_a_side', 'self_audit', 'concrete_case'],
+        },
     ],
 
     aurelius: [
@@ -427,6 +843,7 @@ const SOURCE_IDEAS = {
             concept: 'Impermanence',
             sourceIdea: 'Marcus Aurelius reflects often on the passing nature of life, fame, pleasure, and pain.',
             debateAngle: 'whether remembering impermanence makes life clearer or darker',
+            modes: ['take_a_side', 'self_audit', 'concrete_case', 'moral_trial'],
         },
         {
             key: 'aurelius-meditations-duty',
@@ -475,6 +892,102 @@ const SOURCE_IDEAS = {
             concept: 'Present Action',
             sourceIdea: 'Marcus Aurelius urges attention to the present act rather than regret, fantasy, or complaint.',
             debateAngle: 'whether the present action is the only real place to practice virtue',
+        },
+        {
+            key: 'aurelius-meditations-morning-reluctance',
+            work: 'Meditations',
+            reference: 'Meditations',
+            concept: 'Rising to One’s Work',
+            sourceIdea: 'Marcus Aurelius rebukes his reluctance to rise by reminding himself he was made to perform human work.',
+            debateAngle: 'whether reluctance excuses neglecting one’s duty',
+        },
+        {
+            key: 'aurelius-meditations-obstacle-action',
+            work: 'Meditations',
+            reference: 'Meditations',
+            concept: 'The Obstacle and the Action',
+            sourceIdea: 'Marcus Aurelius teaches that impediments to action can become material for action.',
+            debateAngle: 'whether obstacles excuse failure or become part of virtue’s work',
+        },
+        {
+            key: 'aurelius-meditations-view-from-above',
+            work: 'Meditations',
+            reference: 'Meditations',
+            concept: 'View from Above',
+            sourceIdea: 'Marcus Aurelius uses distance and scale to reduce vanity, panic, and self-importance.',
+            debateAngle: 'whether seeing oneself from above humbles wisely or detaches coldly',
+        },
+        {
+            key: 'aurelius-meditations-death-at-hand',
+            work: 'Meditations',
+            reference: 'Meditations',
+            concept: 'Death as Moral Urgency',
+            sourceIdea: 'Marcus Aurelius repeatedly uses death to focus attention on present virtue.',
+            debateAngle: 'whether remembering death makes a person more serious or more despairing',
+        },
+        {
+            key: 'aurelius-meditations-social-being',
+            work: 'Meditations',
+            reference: 'Meditations',
+            concept: 'Human Beings as Social',
+            sourceIdea: 'Marcus Aurelius sees human beings as made for cooperation like parts of one body.',
+            debateAngle: 'whether duty to others remains binding when others are difficult',
+        },
+        {
+            key: 'aurelius-meditations-opinion-harm',
+            work: 'Meditations',
+            reference: 'Meditations',
+            concept: 'Opinion and Harm',
+            sourceIdea: 'Marcus Aurelius insists that the mind’s judgment determines whether an event harms the ruling faculty.',
+            debateAngle: 'whether insult, loss, or failure harms us before judgment makes it so',
+        },
+        {
+            key: 'aurelius-meditations-revenge',
+            work: 'Meditations',
+            reference: 'Meditations',
+            concept: 'Revenge and Likeness',
+            sourceIdea: 'Marcus Aurelius suggests the best revenge is not to become like the wrongdoer.',
+            debateAngle: 'whether retaliation corrupts the person who seeks justice through it',
+        },
+        {
+            key: 'aurelius-meditations-simplicity',
+            work: 'Meditations',
+            reference: 'Meditations',
+            concept: 'Simplicity of Action',
+            sourceIdea: 'Marcus Aurelius urges himself to act simply, justly, and without theatrical self-display.',
+            debateAngle: 'whether virtue loses purity when performed for recognition',
+        },
+        {
+            key: 'aurelius-meditations-nature-change',
+            work: 'Meditations',
+            reference: 'Meditations',
+            concept: 'Change and Nature',
+            sourceIdea: 'Marcus Aurelius treats change as nature’s ordinary work rather than a personal insult.',
+            debateAngle: 'whether resisting change is a failure to understand nature',
+        },
+        {
+            key: 'aurelius-meditations-ruling-faculty',
+            work: 'Meditations',
+            reference: 'Meditations',
+            concept: 'The Ruling Faculty',
+            sourceIdea: 'Marcus Aurelius emphasizes guarding the ruling faculty that judges, chooses, and assents.',
+            debateAngle: 'whether protecting attention and judgment is the core of self-command',
+        },
+        {
+            key: 'aurelius-meditations-praise-blame',
+            work: 'Meditations',
+            reference: 'Meditations',
+            concept: 'Praise and Blame',
+            sourceIdea: 'Marcus Aurelius reminds himself that praise and blame come from people who are themselves confused and mortal.',
+            debateAngle: 'whether reputation deserves authority over one’s conduct',
+        },
+        {
+            key: 'aurelius-meditations-complaint',
+            work: 'Meditations',
+            reference: 'Meditations',
+            concept: 'Complaint and Discipline',
+            sourceIdea: 'Marcus Aurelius repeatedly cuts off complaint by returning to what reason and duty require now.',
+            debateAngle: 'whether complaint reveals injustice or failure to govern the self',
         },
     ],
 
@@ -543,6 +1056,102 @@ const SOURCE_IDEAS = {
             sourceIdea: 'Nietzsche portrays the last man as someone who wants comfort, safety, and small pleasures above greatness.',
             debateAngle: 'whether comfort can become spiritual decline',
         },
+        {
+            key: 'nietzsche-genealogy-master-slave',
+            work: 'On the Genealogy of Morality',
+            reference: 'Genealogy of Morality, First Essay',
+            concept: 'Master and Slave Moralities',
+            sourceIdea: 'Nietzsche contrasts value-creation from strength with value-creation born from reaction against strength.',
+            debateAngle: 'whether your values are created from power or reaction',
+        },
+        {
+            key: 'nietzsche-beyond-good-evil-free-spirit',
+            work: 'Beyond Good and Evil',
+            reference: 'Beyond Good and Evil',
+            concept: 'Free Spirit',
+            sourceIdea: 'Nietzsche praises spirits willing to question inherited morality and intellectual comfort.',
+            debateAngle: 'whether independence of mind requires solitude from common values',
+        },
+        {
+            key: 'nietzsche-beyond-good-evil-will-to-truth',
+            work: 'Beyond Good and Evil',
+            reference: 'Beyond Good and Evil',
+            concept: 'Will to Truth',
+            sourceIdea: 'Nietzsche asks why truth is valued over illusion, comfort, or appearance.',
+            debateAngle: 'whether people truly want truth or only truths that serve life',
+        },
+        {
+            key: 'nietzsche-gay-science-joyful-wisdom',
+            work: 'The Gay Science',
+            reference: 'The Gay Science',
+            concept: 'Joyful Wisdom',
+            sourceIdea: 'Nietzsche links seriousness with dance, laughter, experiment, and intellectual courage.',
+            debateAngle: 'whether wisdom must be heavy or can become joyful and dangerous',
+        },
+        {
+            key: 'nietzsche-twilight-idols-idols',
+            work: 'Twilight of the Idols',
+            reference: 'Twilight of the Idols',
+            concept: 'Idols',
+            sourceIdea: 'Nietzsche attacks revered ideals that survive because people have stopped questioning them.',
+            debateAngle: 'whether your highest ideal is alive or merely an idol you inherited',
+        },
+        {
+            key: 'nietzsche-antichrist-pity',
+            work: 'The Antichrist',
+            reference: 'The Antichrist',
+            concept: 'Pity',
+            sourceIdea: 'Nietzsche criticizes pity when it preserves weakness or masks superiority.',
+            debateAngle: 'whether compassion can sometimes conceal contempt or love of weakness',
+        },
+        {
+            key: 'nietzsche-genealogy-bad-conscience',
+            work: 'On the Genealogy of Morality',
+            reference: 'Genealogy of Morality, Second Essay',
+            concept: 'Bad Conscience',
+            sourceIdea: 'Nietzsche describes bad conscience as instinct turned inward when outward expression is constrained.',
+            debateAngle: 'whether guilt can be internalized aggression rather than moral insight',
+        },
+        {
+            key: 'nietzsche-zarathustra-three-metamorphoses',
+            work: 'Thus Spoke Zarathustra',
+            reference: 'Thus Spoke Zarathustra',
+            concept: 'Three Metamorphoses',
+            sourceIdea: 'Nietzsche describes the spirit becoming camel, lion, and child in the movement from burden to freedom to creation.',
+            debateAngle: 'whether you are still carrying inherited burdens, merely rebelling, or creating',
+        },
+        {
+            key: 'nietzsche-ecce-homo-amor-fati',
+            work: 'Ecce Homo',
+            reference: 'Ecce Homo',
+            concept: 'Amor Fati',
+            sourceIdea: 'Nietzsche presents amor fati as loving one’s fate rather than merely enduring it.',
+            debateAngle: 'whether you can affirm the necessary parts of your life without resentment',
+        },
+        {
+            key: 'nietzsche-gay-science-live-dangerously',
+            work: 'The Gay Science',
+            reference: 'The Gay Science',
+            concept: 'Living Dangerously',
+            sourceIdea: 'Nietzsche praises risk, experiment, and exposure over protected comfort.',
+            debateAngle: 'whether safety has become an excuse for spiritual smallness',
+        },
+        {
+            key: 'nietzsche-beyond-good-evil-rank',
+            work: 'Beyond Good and Evil',
+            reference: 'Beyond Good and Evil',
+            concept: 'Order of Rank',
+            sourceIdea: 'Nietzsche argues that souls, values, and ways of life may differ in rank rather than equal worth.',
+            debateAngle: 'whether all values deserve equal respect or some reveal higher strength',
+        },
+        {
+            key: 'nietzsche-zarathustra-contemptible-comfort',
+            work: 'Thus Spoke Zarathustra',
+            reference: 'Thus Spoke Zarathustra',
+            concept: 'Contempt and Aspiration',
+            sourceIdea: 'Nietzsche uses contempt for one’s present smallness as a spur toward overcoming.',
+            debateAngle: 'whether dissatisfaction with oneself is sickness or the beginning of growth',
+        },
     ],
 
     jung: [
@@ -569,6 +1178,7 @@ const SOURCE_IDEAS = {
             concept: 'Collective Unconscious',
             sourceIdea: 'Jung argues that the psyche contains inherited patterns and images deeper than personal experience.',
             debateAngle: 'whether human beings are shaped by patterns they did not personally choose',
+            modes: ['take_a_side', 'self_audit', 'concrete_case'],
         },
         {
             key: 'jung-memories-dreams-individuation',
@@ -609,33 +1219,186 @@ const SOURCE_IDEAS = {
             concept: 'Symbol and Transformation',
             sourceIdea: 'Jung treats symbols as expressions of unconscious transformation rather than decorative images.',
             debateAngle: 'whether symbols reveal truths that ordinary rational language cannot reach',
+            modes: ['take_a_side', 'self_audit', 'concrete_case'],
+        },
+        {
+            key: 'jung-aion-self',
+            work: 'Aion',
+            reference: 'Aion',
+            concept: 'The Self',
+            sourceIdea: 'Jung distinguishes the ego from the Self as a deeper organizing center of psychic wholeness.',
+            debateAngle: 'whether the conscious identity is only a partial view of who one is',
+            modes: ['take_a_side', 'self_audit', 'concrete_case', 'moral_trial'],
+        },
+        {
+            key: 'jung-psychology-religion-symbol',
+            work: 'Psychology and Religion',
+            reference: 'Psychology and Religion',
+            concept: 'Religious Symbolism',
+            sourceIdea: 'Jung studies religious symbols as expressions of psychic realities rather than merely dogmatic claims.',
+            debateAngle: 'whether symbols can carry truths the ego does not fully understand',
+        },
+        {
+            key: 'jung-two-essays-neurosis',
+            work: 'Two Essays on Analytical Psychology',
+            reference: 'Two Essays on Analytical Psychology',
+            concept: 'Neurosis and Meaning',
+            sourceIdea: 'Jung often treats neurosis as connected to unresolved psychic conflict and blocked development.',
+            debateAngle: 'whether symptoms can contain meaning rather than only malfunction',
+        },
+        {
+            key: 'jung-archetypes-anima-animus',
+            work: 'The Archetypes and the Collective Unconscious',
+            reference: 'The Archetypes and the Collective Unconscious',
+            concept: 'Anima and Animus',
+            sourceIdea: 'Jung describes inner contrasexual figures as mediators between consciousness and the unconscious.',
+            debateAngle: 'whether rejected inner qualities distort relationships with others',
+        },
+        {
+            key: 'jung-modern-man-dreams',
+            work: 'Modern Man in Search of a Soul',
+            reference: 'Modern Man in Search of a Soul',
+            concept: 'Dreams',
+            sourceIdea: 'Jung treats dreams as meaningful expressions of unconscious processes rather than random noise.',
+            debateAngle: 'whether the unconscious may know what the conscious mind avoids',
+        },
+        {
+            key: 'jung-memories-inner-voice',
+            work: 'Memories, Dreams, Reflections',
+            reference: 'Memories, Dreams, Reflections',
+            concept: 'The Inner Voice',
+            sourceIdea: 'Jung presents inner experience as something that must be listened to carefully, not dismissed as irrationality.',
+            debateAngle: 'whether inner voices are guidance, danger, fantasy, or ignored truth',
+        },
+        {
+            key: 'jung-undiscovered-self-state',
+            work: 'The Undiscovered Self',
+            reference: 'The Undiscovered Self',
+            concept: 'The State and the Individual',
+            sourceIdea: 'Jung warns that collective systems can erase individual conscience and inner responsibility.',
+            debateAngle: 'whether belonging to a mass movement weakens self-knowledge',
+        },
+        {
+            key: 'jung-archetypes-mother',
+            work: 'The Archetypes and the Collective Unconscious',
+            reference: 'The Archetypes and the Collective Unconscious',
+            concept: 'The Mother Archetype',
+            sourceIdea: 'Jung explores the mother archetype as a deep pattern of origin, protection, dependency, and danger.',
+            debateAngle: 'whether early symbolic patterns shape adult expectations of care and safety',
+        },
+        {
+            key: 'jung-psychological-types-one-sidedness',
+            work: 'Psychological Types',
+            reference: 'Psychological Types',
+            concept: 'One-Sidedness',
+            sourceIdea: 'Jung argues that overidentifying with one psychological attitude or function can deform the personality.',
+            debateAngle: 'whether your greatest strength has become your imbalance',
+        },
+        {
+            key: 'jung-aion-christ-shadow',
+            work: 'Aion',
+            reference: 'Aion',
+            concept: 'Wholeness and Shadow',
+            sourceIdea: 'Jung associates psychic wholeness with confronting darkness rather than identifying only with goodness.',
+            debateAngle: 'whether trying to be only good can make the shadow more dangerous',
+        },
+        {
+            key: 'jung-symbols-hero',
+            work: 'Symbols of Transformation',
+            reference: 'Symbols of Transformation',
+            concept: 'Hero Pattern',
+            sourceIdea: 'Jung analyzes heroic imagery as symbolic of psychic struggle, separation, and transformation.',
+            debateAngle: 'whether growth requires a symbolic descent before renewal',
+        },
+        {
+            key: 'jung-memories-mandala',
+            work: 'Memories, Dreams, Reflections',
+            reference: 'Memories, Dreams, Reflections',
+            concept: 'Mandala and Psychic Order',
+            sourceIdea: 'Jung sees mandala imagery as expressing the psyche’s movement toward order and wholeness.',
+            debateAngle: 'whether the psyche seeks order even when the ego feels fragmented',
+            modes: ['take_a_side', 'self_audit', 'concrete_case'],
         },
     ],
 };
 
-function getRecentForPhilosopher(history, philosopherId, limit = 8) {
-    return history
-        .filter(item => item.philosopherId === philosopherId)
-        .slice(0, limit);
+// ─── Source and mode selection helpers ────────────────────────────────────────
+
+function randomItem(items) {
+    return items[Math.floor(Math.random() * items.length)];
+}
+
+function latestUseMap(history, keyName) {
+    const map = new Map();
+
+    for (const item of history) {
+        const value = item[keyName];
+
+        if (!value) continue;
+
+        const date = normalizeDateValue(item.date || item.challengeDate);
+
+        if (!map.has(value)) {
+            map.set(value, date || '0000-00-00');
+        }
+    }
+
+    return map;
+}
+
+function pickLeastRecentlyUsed({
+    allItems,
+    getId,
+    history,
+    historyKey,
+}) {
+    const latest = latestUseMap(history, historyKey);
+
+    const neverUsed = allItems.filter(item => !latest.has(getId(item)));
+
+    if (neverUsed.length > 0) {
+        return randomItem(neverUsed);
+    }
+
+    const ranked = [...allItems].sort((a, b) => {
+        const aDate = latest.get(getId(a)) || '0000-00-00';
+        const bDate = latest.get(getId(b)) || '0000-00-00';
+        return aDate.localeCompare(bDate);
+    });
+
+    const oldestDate = latest.get(getId(ranked[0])) || '0000-00-00';
+    const oldestGroup = ranked.filter(item => {
+        return (latest.get(getId(item)) || '0000-00-00') === oldestDate;
+    });
+
+    return randomItem(oldestGroup);
 }
 
 function pickSourceIdea(philosopherId, history) {
     const list = SOURCE_IDEAS[philosopherId] ?? SOURCE_IDEAS.socrates;
-    const recentForPhilosopher = getRecentForPhilosopher(history, philosopherId, 8);
 
-    const recentlyUsedSourceKeys = new Set(
-        recentForPhilosopher
-            .map(item => item.sourceKey)
-            .filter(Boolean)
-    );
+    return pickLeastRecentlyUsed({
+        allItems: list,
+        getId: item => item.key,
+        history,
+        historyKey: 'sourceKey',
+    });
+}
 
-    let available = list.filter(source => !recentlyUsedSourceKeys.has(source.key));
+function pickQuestionMode(globalHistory, source = null) {
+    const allowedModeIds =
+        Array.isArray(source?.modes) && source.modes.length > 0
+            ? source.modes.filter(id => QUESTION_MODES[id])
+            : QUESTION_MODE_IDS;
 
-    if (available.length === 0) {
-        available = list;
-    }
+    const modeObjects = allowedModeIds.map(id => QUESTION_MODES[id]);
 
-    return available[Math.floor(Math.random() * available.length)];
+    return pickLeastRecentlyUsed({
+        allItems: modeObjects,
+        getId: item => item.id,
+        history: globalHistory,
+        historyKey: 'questionMode',
+    });
 }
 
 // ─── Philosopher ID normalizer ────────────────────────────────────────────────
@@ -658,6 +1421,107 @@ function normalizePhilosopherId(raw) {
 
 // ─── Validation ───────────────────────────────────────────────────────────────
 
+function normalizeText(value) {
+    return String(value || '')
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+const STOP_WORDS = new Set([
+    'about',
+    'above',
+    'after',
+    'again',
+    'against',
+    'alone',
+    'among',
+    'because',
+    'before',
+    'being',
+    'between',
+    'could',
+    'does',
+    'from',
+    'have',
+    'into',
+    'itself',
+    'more',
+    'most',
+    'only',
+    'other',
+    'people',
+    'person',
+    'rather',
+    'should',
+    'than',
+    'that',
+    'their',
+    'there',
+    'these',
+    'thing',
+    'things',
+    'this',
+    'through',
+    'truth',
+    'whether',
+    'which',
+    'while',
+    'with',
+    'without',
+    'your',
+    'you',
+]);
+
+function importantTerms(text) {
+    return normalizeText(text)
+        .split(' ')
+        .map(term => term.trim())
+        .filter(term => term.length >= 4)
+        .filter(term => !STOP_WORDS.has(term));
+}
+
+function hasSourceGrounding(challenge) {
+    const sourceTerms = [
+        ...importantTerms(challenge.sourceConcept),
+        ...importantTerms(challenge.sourceIdea),
+        ...importantTerms(challenge.debateAngle),
+    ];
+
+    const uniqueTerms = [...new Set(sourceTerms)];
+
+    if (uniqueTerms.length === 0) return true;
+
+    const combined = normalizeText([
+        challenge.title,
+        challenge.challengeQuestion,
+        challenge.userPositionPrompt,
+        challenge.opposingAngle,
+        challenge.educationalNote,
+    ].join(' '));
+
+    return uniqueTerms.some(term => combined.includes(term));
+}
+
+function looksTooGeneric(challenge) {
+    const question = normalizeText(challenge.challengeQuestion);
+
+    const genericPatterns = [
+        'what do you think',
+        'how do you feel',
+        'what is your opinion',
+        'what can you learn',
+        'how can you improve',
+        'what is holding you back',
+        'comfort zone',
+        'become your best self',
+        'unlock your potential',
+    ];
+
+    return genericPatterns.some(pattern => question.includes(pattern));
+}
+
 function validateChallenge(challenge) {
     const required = [
         'id',
@@ -669,6 +1533,10 @@ function validateChallenge(challenge) {
         'sourceConcept',
         'sourceIdea',
         'challengeQuestion',
+        'userPositionPrompt',
+        'opposingAngle',
+        'difficulty',
+        'questionMode',
         'morningNotification',
         'afternoonNotification',
         'eveningNotification',
@@ -693,6 +1561,36 @@ function validateChallenge(challenge) {
 
     if (!philosopherNames[philosopherId]) {
         throw new Error(`Invalid philosopherId: ${challenge.philosopherId}`);
+    }
+
+    if (!VALID_DIFFICULTIES.has(challenge.difficulty)) {
+        throw new Error(
+            `Invalid difficulty "${challenge.difficulty}". Must be Accessible, Challenging, or Demanding.`
+        );
+    }
+
+    if (!QUESTION_MODES[challenge.questionMode]) {
+        throw new Error(`Invalid questionMode: ${challenge.questionMode}`);
+    }
+
+    const questionLength = String(challenge.challengeQuestion || '').trim().length;
+
+    if (questionLength < 45) {
+        throw new Error('challengeQuestion is too short to carry a real debate.');
+    }
+
+    if (questionLength > 420) {
+        throw new Error('challengeQuestion is too long for the Daily Challenge entry point.');
+    }
+
+    if (looksTooGeneric(challenge)) {
+        throw new Error('challengeQuestion appears too generic or self-help oriented.');
+    }
+
+    if (!hasSourceGrounding(challenge)) {
+        throw new Error(
+            `challengeQuestion does not clearly deploy the source concept: ${challenge.sourceConcept}`
+        );
     }
 
     const allOtherNames = Object.entries(philosopherNames)
@@ -728,40 +1626,70 @@ function buildRecentQuestionText(recentQuestions) {
 
     return recentQuestions
         .map((item, index) => {
-            return `${index + 1}. Date: ${item.date} | Work: ${item.sourceWork || 'unknown'} | Concept: ${item.sourceConcept || 'unknown'} | Question: ${item.challengeQuestion}`;
+            return `${index + 1}. Date: ${item.date} | Work: ${item.sourceWork || 'unknown'} | Concept: ${item.sourceConcept || 'unknown'} | Mode: ${item.questionMode || 'unknown'} | Question: ${item.challengeQuestion}`;
         })
         .join('\n');
 }
 
-async function generateChallenge(philosopher, source, dateString, recentQuestions = []) {
+async function generateChallenge(
+    philosopher,
+    source,
+    questionMode,
+    scheduledDifficulty,
+    dateString,
+    recentQuestions = [],
+    previousRejectionReason = null
+) {
     const recentQuestionText = buildRecentQuestionText(recentQuestions);
+
+    const retryInstruction = previousRejectionReason
+        ? `
+
+Previous attempt rejected by backend validation:
+${previousRejectionReason}
+
+Regenerate the challenge and specifically fix this issue. Do not repeat the rejected wording.`
+        : '';
 
     const systemPrompt = `You are the editorial team for The Agora, an iOS app where users debate historical philosophers as if they were alive today. Tagline: "For centuries, you could only read the philosophers. Now you can debate them."
 
 You create the shared Daily Challenge — one official debate question for all users.
 
-The Daily Challenge must be educational, accurate, and grounded in the selected philosopher's actual works. You are not guessing what the philosopher would think about modern issues. You are turning a real source idea from the philosopher's work into a personal debate question.
+The Daily Challenge must be educational, accurate, debate-worthy, and grounded in the selected philosopher's actual works. You are not guessing what the philosopher would think about modern issues. You are turning a real source idea from the philosopher's work into a personal debate question.
 
-Rules:
+Core rules:
 - The source work and source idea are the foundation.
 - Do not invent views the philosopher did not hold.
 - Do not make unsupported claims about how the philosopher would react to modern technology, politics, or culture.
-- You may create a modern or personal application, but it must clearly come from the selected source idea.
-- The question should help the user understand the philosopher's real thought while forcing them to examine their own life.
 - Modern relevance is allowed, but the foundation must remain the work, concept, and source idea provided.
+- The question should help the user understand the philosopher's real thought while forcing them to take a defensible position.
+- Do not write generic journaling prompts.
+- Do not write motivational self-help.
+- Do not write quote-app content.
 - Do not mention AI or ChatGPT unless the selected source idea explicitly requires it.
-- Do not assume the user's position. Invite them to explain their own side.
-- The Daily Challenge question is the center of the experience.
+- Do not assume the user's position.
+- The user must be able to enter the debate in 1-2 sentences, but the question should have enough tension to sustain a serious argument.
+- The Daily Challenge should be loseable: the philosopher should have a real angle of attack.
+- Avoid repeating or closely resembling any recent question provided by the backend.
+- Return ONLY valid JSON. No preamble, no markdown, no backticks.
+
+Question quality standard:
+1. Traceable — a reader familiar with the source should recognize the concept.
+2. Contestable — the user can take a real side that the philosopher can attack.
+3. Personally implicating — the user should feel addressed, not merely informed.
+4. Enterable — the opening answer should be possible in 1-2 sentences.
+5. Loseable — the user should be able to feel their position crack under pressure.
+6. Teachable — the user should understand the philosopher's concept better after the debate.
+
+Notification rules:
 - The notification copy must directly revolve around the generated challengeQuestion.
 - Each notification should tease, challenge, pressure, or reframe the exact Daily Challenge question.
 - Do not write generic philosopher-themed notifications.
 - The user should be able to read the notification and immediately understand it belongs to today's specific question.
 - The notifications must connect to BOTH the selected philosopher and the specific debate question.
-- Notification copy must sound like the philosopher's voice — sharp, characteristic, inviting tension. Not motivational quotes.
+- Notification copy must sound like the philosopher's voice — characteristic, sharp, and faithful without parody.
 - The notification copy must be written in the voice and style of ${philosopher.name} ONLY.
-- The notifications must NOT mention, reference, or allude to any other philosopher by name.
-- Avoid repeating or closely resembling any recent question provided by the backend.
-- Return ONLY valid JSON. No preamble, no markdown, no backticks.`;
+- The notifications must NOT mention, reference, or allude to any other philosopher by name.`;
 
     const userPrompt = `Generate one source-grounded Daily Challenge for The Agora.
 
@@ -775,6 +1703,15 @@ Concept: ${source.concept}
 Source idea: ${source.sourceIdea}
 Debate angle: ${source.debateAngle}
 
+Question mode:
+${questionMode.label}
+Mode instruction: ${questionMode.instruction}
+Good shape: ${questionMode.goodShape}
+Avoid: ${questionMode.avoid}
+
+Scheduled difficulty:
+${scheduledDifficulty}
+
 Date:
 ${dateString}
 
@@ -783,23 +1720,28 @@ ${recentQuestionText}
 
 CRITICAL:
 The challengeQuestion must clearly grow out of the source idea above.
+The challengeQuestion must follow the selected question mode.
+The difficulty must be exactly: ${scheduledDifficulty}
 The question may connect to the user's life, choices, beliefs, habits, relationships, society, or future — but it must remain grounded in the selected work and concept.
 Do NOT write a vague modern hypothetical such as "What would ${philosopher.name} think about social media?"
 Instead, teach the actual philosophical idea by turning it into a debate the user can enter.
 The new challengeQuestion must NOT repeat or closely resemble the recent questions above.
+The user should have to defend a real position, not merely reflect.
+The opposingAngle must be the position ${philosopher.name} will argue during the debate, grounded in the selected source idea.
 The morningNotification, afternoonNotification, and eveningNotification must be written ONLY in the voice/style of ${philosopher.name}.
 They must directly relate to the exact challengeQuestion you generate.
 Do not write generic ${philosopher.name} notifications.
 Do not name, reference, or allude to any other philosopher in the notifications.
 The notification should make sense as a reminder to answer today's specific Daily Challenge.
+${retryInstruction}
 
 Return this exact JSON with no other text:
 {
   "title": "Short evocative title (max 6 words)",
   "challengeQuestion": "The full debate question (1-2 sentences, no assumed position)",
-  "userPositionPrompt": "One sentence inviting the user to state their view",
+  "userPositionPrompt": "One sentence inviting the user to state and defend their view",
   "opposingAngle": "The position ${philosopher.name} will argue, grounded in the selected source idea (1 sentence)",
-  "difficulty": "Accessible or Challenging or Demanding",
+  "difficulty": "${scheduledDifficulty}",
   "shareHook": "One-sentence hook for sharing on social media",
   "educationalNote": "One sentence explaining the source idea in simple language without sounding academic",
   "morningNotification": "${philosopher.name}'s voice — morning reminder tied directly to the challengeQuestion (max 2 sentences, do NOT name any other philosopher)",
@@ -808,8 +1750,8 @@ Return this exact JSON with no other text:
 }`;
 
     const message = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1200,
+        model: DAILY_CHALLENGE_MODEL,
+        max_tokens: 1400,
         messages: [{ role: 'user', content: userPrompt }],
         system: systemPrompt,
     });
@@ -822,6 +1764,7 @@ Return this exact JSON with no other text:
 
 // ─── Fallbacks ────────────────────────────────────────────────────────────────
 // Fallbacks are source-grounded and tied to exact fallback questions.
+// Fallback difficulty is overwritten by getScheduledDifficulty(dateString).
 
 const FALLBACKS = {
     socrates: {
@@ -831,12 +1774,13 @@ const FALLBACKS = {
         sourceConcept: 'The Examined Life',
         sourceIdea: 'Socrates argues that a life without examination is not worthy of a human being.',
         debateAngle: 'whether self-questioning is necessary for a good life',
+        questionMode: 'defend_a_definition',
         title: 'The Unexamined Life',
-        challengeQuestion: 'Socrates argues that an unexamined life is not truly worthy of a human being. What belief in your life have you accepted without examining it?',
-        userPositionPrompt: 'Name one belief you hold with confidence, and explain why it deserves to survive questioning.',
+        challengeQuestion: 'Socrates argues that an unexamined life is not worthy of a human being. Define one belief you live by, then defend why it deserves to guide your life.',
+        userPositionPrompt: 'Name one belief you hold with confidence, define it clearly, and explain why it should survive questioning.',
         opposingAngle: 'Socrates will argue that confidence without examination is not wisdom.',
         difficulty: 'Accessible',
-        shareHook: 'Socrates made me question a belief I thought was already settled.',
+        shareHook: 'Socrates made me defend a belief I thought was already settled.',
         educationalNote: 'In the Apology, Socrates presents self-examination as essential to living well.',
         morningNotification: 'You carry beliefs into the day. Have you examined whether they deserve to guide you?',
         afternoonNotification: 'A belief has ruled you long enough. Bring it forward and let it answer.',
@@ -850,10 +1794,11 @@ const FALLBACKS = {
         sourceConcept: 'Allegory of the Cave',
         sourceIdea: 'Plato describes people mistaking shadows and appearances for reality.',
         debateAngle: 'whether people prefer comforting appearances over difficult truth',
+        questionMode: 'concrete_case',
         title: 'Shadows or Truth',
-        challengeQuestion: 'Plato’s cave suggests that people often mistake appearances for reality. What is one thing you trust that may only be a shadow of the truth?',
-        userPositionPrompt: 'Name something you trust, and explain why you believe it is reality rather than appearance.',
-        opposingAngle: 'Plato will argue that what feels familiar may still be only a shadow.',
+        challengeQuestion: 'Plato’s cave suggests that people often mistake appearances for reality. Name one thing you trust, then defend why it is truth rather than only a familiar shadow.',
+        userPositionPrompt: 'Choose one belief, image, authority, or desire you trust, and defend why it is real rather than merely familiar.',
+        opposingAngle: 'Plato will argue that what feels familiar may still be only appearance.',
         difficulty: 'Accessible',
         shareHook: 'Plato made me ask whether something I trust is only a shadow.',
         educationalNote: 'In the Republic, Plato uses the cave to show how education turns the soul from appearance toward truth.',
@@ -869,15 +1814,16 @@ const FALLBACKS = {
         sourceConcept: 'Virtue as Habit',
         sourceIdea: 'Aristotle argues that virtues are formed through repeated action rather than mere intention.',
         debateAngle: 'whether people become good by what they repeatedly do',
+        questionMode: 'concrete_case',
         title: 'Habit Becomes Character',
-        challengeQuestion: 'Aristotle argues that character is formed by repeated action, not by intention alone. What are your daily habits making you become?',
-        userPositionPrompt: 'Describe what your repeated actions say about your character.',
-        opposingAngle: 'Aristotle will argue that your habits reveal your character more truthfully than your intentions do.',
+        challengeQuestion: 'Aristotle argues that character is formed by repeated action, not intention alone. Name one habit you practice often, then defend what kind of character it is forming in you.',
+        userPositionPrompt: 'Choose one repeated action and explain what it reveals about the person you are becoming.',
+        opposingAngle: 'Aristotle will argue that repeated action reveals character more truthfully than intention does.',
         difficulty: 'Accessible',
-        shareHook: 'Aristotle made me look at my habits as evidence of who I am becoming.',
+        shareHook: 'Aristotle made me look at my habits as evidence of my character.',
         educationalNote: 'In the Nicomachean Ethics, Aristotle teaches that virtue is built through practice.',
-        morningNotification: 'Your habits are already voting for the person you are becoming. Do you agree with their choice?',
-        afternoonNotification: 'Intentions speak softly. Repeated actions speak louder. What have yours said today?',
+        morningNotification: 'Character is not declared in the morning. It is practiced, act by act.',
+        afternoonNotification: 'Your intention may be noble. But what has your repeated action trained in you today?',
         eveningNotification: 'The day has practiced something in you. Was it virtue, or its opposite?',
     },
 
@@ -888,8 +1834,9 @@ const FALLBACKS = {
         sourceConcept: 'Control and Judgment',
         sourceIdea: 'Marcus Aurelius repeatedly distinguishes what depends on us from what does not.',
         debateAngle: 'whether suffering comes more from events or from judgments about events',
+        questionMode: 'self_audit',
         title: 'What Is Yours',
-        challengeQuestion: 'Marcus Aurelius teaches that much of our disturbance comes from judging things outside our control. What are you treating as yours that may not belong to you?',
+        challengeQuestion: 'Marcus Aurelius teaches that much of our disturbance comes from judging things outside our control. Name one thing disturbing you, then defend whether it truly belongs to your power.',
         userPositionPrompt: 'Name something currently disturbing you, and explain whether it is truly within your control.',
         opposingAngle: 'Marcus Aurelius will argue that your judgment, not the event itself, is where discipline begins.',
         difficulty: 'Accessible',
@@ -907,8 +1854,9 @@ const FALLBACKS = {
         sourceConcept: 'Ressentiment',
         sourceIdea: 'Nietzsche analyzes how resentment can disguise itself as moral judgment.',
         debateAngle: 'whether moral criticism can hide envy or weakness',
+        questionMode: 'moral_trial',
         title: 'Resentment in Disguise',
-        challengeQuestion: 'Nietzsche warns that resentment can disguise itself as moral judgment. When you condemn something, how do you know it is justice rather than envy or weakness speaking?',
+        challengeQuestion: 'Nietzsche warns that resentment can disguise itself as moral judgment. Name something you condemn, then defend why your judgment is justice rather than envy or weakness speaking.',
         userPositionPrompt: 'Name something you judge harshly, and explain why your judgment is honest rather than resentful.',
         opposingAngle: 'Nietzsche will argue that some moral outrage is resentment wearing noble clothing.',
         difficulty: 'Demanding',
@@ -926,9 +1874,10 @@ const FALLBACKS = {
         sourceConcept: 'The Shadow',
         sourceIdea: 'Jung describes the shadow as the rejected or unconscious side of the personality.',
         debateAngle: 'whether what people condemn in others often reveals what they refuse to face in themselves',
+        questionMode: 'concrete_case',
         title: 'The Hidden Self',
-        challengeQuestion: 'Jung’s idea of the shadow suggests that what we reject in others may reveal what we refuse to face in ourselves. What kind of person irritates you most, and why?',
-        userPositionPrompt: 'Describe the trait in others that bothers you most, and what you believe it says about them.',
+        challengeQuestion: 'Jung’s idea of the shadow suggests that what we reject in others may reveal what we refuse to face in ourselves. Name the kind of person who irritates you most, then defend why that reaction says nothing hidden about you.',
+        userPositionPrompt: 'Describe the trait in others that bothers you most, and explain what you believe it says about them rather than you.',
         opposingAngle: 'Jung will argue that your strongest reaction may reveal an unconscious part of yourself.',
         difficulty: 'Demanding',
         shareHook: 'Jung made me ask whether what bothers me in others is hidden in me.',
@@ -949,6 +1898,10 @@ function getFallback(philosopher, dateString, expiresAt = null) {
         philosopherName: philosopher.name,
         theme: f.sourceConcept,
         ...f,
+
+        // Preserve the deliberate difficulty schedule even when fallback is used.
+        difficulty: getScheduledDifficulty(dateString),
+
         expiresAt,
     };
 }
@@ -1004,6 +1957,8 @@ function rowToChallenge(row) {
         sourceIdea: row.source_idea,
         debateAngle: row.debate_angle,
 
+        questionMode: row.question_mode,
+
         theme: row.theme,
         title: row.title,
         challengeQuestion: row.challenge_question,
@@ -1031,7 +1986,7 @@ async function getChallengeFromDb(db, dateString) {
     return rowToChallenge(result.rows[0]);
 }
 
-async function getRecentChallengesForPhilosopher(db, philosopherId, limit = 8) {
+async function getRecentChallengesForPhilosopher(db, philosopherId, limit = 30) {
     const result = await db.query(
         `SELECT *
          FROM daily_challenges
@@ -1039,6 +1994,18 @@ async function getRecentChallengesForPhilosopher(db, philosopherId, limit = 8) {
          ORDER BY challenge_date DESC
          LIMIT $2`,
         [philosopherId, limit]
+    );
+
+    return result.rows.map(rowToChallenge).filter(Boolean);
+}
+
+async function getRecentChallengesGlobal(db, limit = 10) {
+    const result = await db.query(
+        `SELECT *
+         FROM daily_challenges
+         ORDER BY challenge_date DESC
+         LIMIT $1`,
+        [limit]
     );
 
     return result.rows.map(rowToChallenge).filter(Boolean);
@@ -1059,6 +2026,7 @@ async function insertChallengeIntoDb(db, challenge) {
             source_concept,
             source_idea,
             debate_angle,
+            question_mode,
             theme,
             title,
             challenge_question,
@@ -1092,7 +2060,8 @@ async function insertChallengeIntoDb(db, challenge) {
             $18,
             $19,
             $20,
-            $21
+            $21,
+            $22
          )
          ON CONFLICT (challenge_date) DO NOTHING
          RETURNING *`,
@@ -1107,6 +2076,7 @@ async function insertChallengeIntoDb(db, challenge) {
             clean.sourceConcept,
             clean.sourceIdea,
             clean.debateAngle,
+            clean.questionMode,
             clean.theme,
             clean.title,
             clean.challengeQuestion,
@@ -1140,72 +2110,111 @@ async function getUpcomingChallengesFromDb(db, limit = 21) {
 
 async function generateChallengeForDate(db, dateString) {
     const philosopher = getPhilosopherForDate(dateString);
-    const recentQuestions = await getRecentChallengesForPhilosopher(db, philosopher.id, 5);
-    const historyForSourceSelection = await getRecentChallengesForPhilosopher(db, philosopher.id, 8);
+
+    // Source idea history stays per philosopher.
+    const recentQuestions = await getRecentChallengesForPhilosopher(db, philosopher.id, 8);
+    const historyForSourceSelection = await getRecentChallengesForPhilosopher(db, philosopher.id, 60);
+
+    // Question mode history is global because users experience Daily Challenge day-by-day.
+    const globalModeHistory = await getRecentChallengesGlobal(db, 10);
+
     const source = pickSourceIdea(philosopher.id, historyForSourceSelection);
+    const questionMode = pickQuestionMode(globalModeHistory, source);
+    const scheduledDifficulty = getScheduledDifficulty(dateString);
 
     let challengeData;
 
     try {
-        const generated = await generateChallenge(
-            philosopher,
-            source,
-            dateString,
-            recentQuestions
-        );
+        let lastError = null;
 
-        challengeData = {
-            id: `daily-${philosopher.id}-${dateString}`,
-            date: dateString,
-            philosopherId: philosopher.id,
-            philosopherName: philosopher.name,
+        for (let attempt = 1; attempt <= 2; attempt++) {
+            try {
+                const generated = await generateChallenge(
+                    philosopher,
+                    source,
+                    questionMode,
+                    scheduledDifficulty,
+                    dateString,
+                    recentQuestions,
+                    lastError ? lastError.message : null
+                );
 
-            sourceKey: source.key,
-            sourceWork: source.work,
-            sourceReference: source.reference,
-            sourceConcept: source.concept,
-            sourceIdea: source.sourceIdea,
-            debateAngle: source.debateAngle,
+                challengeData = {
+                    id: `daily-${philosopher.id}-${dateString}`,
+                    date: dateString,
+                    philosopherId: philosopher.id,
+                    philosopherName: philosopher.name,
 
-            // Keeps compatibility if your Swift UI still expects "theme".
-            theme: source.concept,
+                    sourceKey: source.key,
+                    sourceWork: source.work,
+                    sourceReference: source.reference,
+                    sourceConcept: source.concept,
+                    sourceIdea: source.sourceIdea,
+                    debateAngle: source.debateAngle,
 
-            ...generated,
-        };
+                    questionMode: questionMode.id,
 
-        challengeData.philosopherId =
-            normalizePhilosopherId(challengeData.philosopherId) || philosopher.id;
+                    // Keeps compatibility if your Swift UI still expects "theme".
+                    theme: source.concept,
 
-        // Force authoritative backend values.
-        // Claude should not be allowed to override these.
-        challengeData.id = `daily-${philosopher.id}-${dateString}`;
-        challengeData.date = dateString;
-        challengeData.philosopherId = philosopher.id;
-        challengeData.philosopherName = philosopher.name;
+                    ...generated,
+                };
 
-        challengeData.sourceKey = source.key;
-        challengeData.sourceWork = source.work;
-        challengeData.sourceReference = source.reference;
-        challengeData.sourceConcept = source.concept;
-        challengeData.sourceIdea = source.sourceIdea;
-        challengeData.debateAngle = source.debateAngle;
-        challengeData.theme = source.concept;
+                challengeData.philosopherId =
+                    normalizePhilosopherId(challengeData.philosopherId) || philosopher.id;
 
-        validateChallenge(challengeData);
+                // Force authoritative backend values.
+                // Claude should not be allowed to override these.
+                challengeData.id = `daily-${philosopher.id}-${dateString}`;
+                challengeData.date = dateString;
+                challengeData.philosopherId = philosopher.id;
+                challengeData.philosopherName = philosopher.name;
 
-        console.log(`[DailyChallenge] Generated challenge for ${dateString}`);
-        console.log(`[DailyChallenge] philosopherId: ${challengeData.philosopherId}`);
-        console.log(`[DailyChallenge] philosopherName: ${challengeData.philosopherName}`);
-        console.log(`[DailyChallenge] sourceWork: ${challengeData.sourceWork}`);
-        console.log(`[DailyChallenge] sourceConcept: ${challengeData.sourceConcept}`);
-        console.log(`[DailyChallenge] challengeQuestion: ${challengeData.challengeQuestion}`);
-        console.log(`[DailyChallenge] morningNotification: ${challengeData.morningNotification}`);
-        console.log(`[DailyChallenge] afternoonNotification: ${challengeData.afternoonNotification}`);
-        console.log(`[DailyChallenge] eveningNotification: ${challengeData.eveningNotification}`);
-        console.log('[DailyChallenge] Validation: PASSED');
+                challengeData.sourceKey = source.key;
+                challengeData.sourceWork = source.work;
+                challengeData.sourceReference = source.reference;
+                challengeData.sourceConcept = source.concept;
+                challengeData.sourceIdea = source.sourceIdea;
+                challengeData.debateAngle = source.debateAngle;
+                challengeData.questionMode = questionMode.id;
+                challengeData.difficulty = scheduledDifficulty;
+                challengeData.theme = source.concept;
+
+                validateChallenge(challengeData);
+
+                console.log(`[DailyChallenge] Generated challenge for ${dateString}`);
+                console.log(`[DailyChallenge] generationAttempt: ${attempt}`);
+                console.log(`[DailyChallenge] model: ${DAILY_CHALLENGE_MODEL}`);
+                console.log(`[DailyChallenge] philosopherId: ${challengeData.philosopherId}`);
+                console.log(`[DailyChallenge] philosopherName: ${challengeData.philosopherName}`);
+                console.log(`[DailyChallenge] sourceWork: ${challengeData.sourceWork}`);
+                console.log(`[DailyChallenge] sourceConcept: ${challengeData.sourceConcept}`);
+                console.log(`[DailyChallenge] questionMode: ${challengeData.questionMode}`);
+                console.log(`[DailyChallenge] difficulty: ${challengeData.difficulty}`);
+                console.log(`[DailyChallenge] challengeQuestion: ${challengeData.challengeQuestion}`);
+                console.log(`[DailyChallenge] morningNotification: ${challengeData.morningNotification}`);
+                console.log(`[DailyChallenge] afternoonNotification: ${challengeData.afternoonNotification}`);
+                console.log(`[DailyChallenge] eveningNotification: ${challengeData.eveningNotification}`);
+                console.log('[DailyChallenge] Validation: PASSED');
+
+                break;
+            } catch (attemptErr) {
+                lastError = attemptErr;
+                challengeData = null;
+
+                console.warn(
+                    `[DailyChallenge] Generation attempt ${attempt} failed for ${dateString}:`,
+                    attemptErr.message
+                );
+            }
+        }
+
+        if (!challengeData) {
+            throw lastError || new Error('Generation failed without a specific error.');
+        }
 
     } catch (genErr) {
-        console.error('[DailyChallenge] Generation or validation failed:', genErr.message);
+        console.error('[DailyChallenge] Generation or validation failed after retry:', genErr.message);
         console.log('[DailyChallenge] Validation: FAILED — using fallback');
 
         challengeData = getFallback(philosopher, dateString, null);
@@ -1443,7 +2452,9 @@ export function createDailyChallengeRouter(pool) {
                         philosopherName: challenge.philosopherName,
                         sourceWork: challenge.sourceWork,
                         sourceConcept: challenge.sourceConcept,
+                        questionMode: challenge.questionMode,
                         title: challenge.title,
+                        difficulty: challenge.difficulty,
                         challengeQuestion: challenge.challengeQuestion,
                         morningNotification: challenge.morningNotification,
                         afternoonNotification: challenge.afternoonNotification,
