@@ -47,6 +47,7 @@ const MODEL_BY_JOB_TYPE = {
     daily_opening: DEFAULT_CLAUDE_MODEL,
     daily_reply: DEFAULT_CLAUDE_MODEL,
     debate_report: DEFAULT_CLAUDE_MODEL,
+    debate_report_insight: DEFAULT_CLAUDE_MODEL,
 };
 
 const MAX_TOKENS_BY_JOB_TYPE = {
@@ -55,6 +56,7 @@ const MAX_TOKENS_BY_JOB_TYPE = {
     daily_opening: 900,
     daily_reply: 900,
     debate_report: 2200,
+    debate_report_insight: 850,
 };
 
 const TEMPERATURE_BY_JOB_TYPE = {
@@ -63,6 +65,7 @@ const TEMPERATURE_BY_JOB_TYPE = {
     daily_opening: 0.7,
     daily_reply: 0.7,
     debate_report: 0.25,
+    debate_report_insight: 0.25,
 };
 
 const ALLOWED_JOB_TYPES = new Set(Object.keys(MODEL_BY_JOB_TYPE));
@@ -116,10 +119,35 @@ function publicJob(row) {
     };
 }
 
-function isRetryableAnthropicError(err) {
+function isRateLimitAnthropicError(err) {
+    const statusCode = Number(err?.statusCode || err?.status || 0);
+    const type = String(err?.type || '').toLowerCase();
     const message = String(err?.message || err || '').toLowerCase();
 
     return (
+        statusCode === 429 ||
+        type.includes('rate_limit') ||
+        message.includes('rate limited') ||
+        message.includes('rate limit') ||
+        message.includes('rate_limit') ||
+        message.includes('too many requests') ||
+        message.includes('type 2a')
+    );
+}
+
+function isRetryableAnthropicError(err) {
+    const statusCode = Number(err?.statusCode || err?.status || 0);
+    const message = String(err?.message || err || '').toLowerCase();
+
+    return (
+        isRateLimitAnthropicError(err) ||
+        statusCode === 408 ||
+        statusCode === 409 ||
+        statusCode === 500 ||
+        statusCode === 502 ||
+        statusCode === 503 ||
+        statusCode === 504 ||
+        statusCode === 529 ||
         message.includes('premature close') ||
         message.includes('socket hang up') ||
         message.includes('network') ||
@@ -133,6 +161,60 @@ function isRetryableAnthropicError(err) {
         message.includes('529') ||
         message.includes('overloaded')
     );
+}
+
+function retryAfterMsFromResponse(res) {
+    const rawRetryAfter = res?.headers?.['retry-after'];
+
+    if (!rawRetryAfter) {
+        return null;
+    }
+
+    const seconds = Number(rawRetryAfter);
+
+    if (Number.isFinite(seconds) && seconds >= 0) {
+        return Math.min(seconds * 1000, 45_000);
+    }
+
+    const dateMs = Date.parse(rawRetryAfter);
+
+    if (Number.isFinite(dateMs)) {
+        return Math.min(Math.max(dateMs - Date.now(), 0), 45_000);
+    }
+
+    return null;
+}
+
+function retryDelayMs(err, attempt) {
+    const retryAfterMs = Number(err?.retryAfterMs);
+
+    if (Number.isFinite(retryAfterMs) && retryAfterMs > 0) {
+        return Math.min(retryAfterMs, 45_000);
+    }
+
+    const jitterMs = Math.floor(Math.random() * 350);
+
+    if (isRateLimitAnthropicError(err)) {
+        const rateLimitBackoffMs = [2_500, 5_000, 10_000, 20_000, 35_000];
+        return rateLimitBackoffMs[Math.min(attempt - 1, rateLimitBackoffMs.length - 1)] + jitterMs;
+    }
+
+    return Math.min(1_000 * attempt, 5_000) + jitterMs;
+}
+
+function anthropicErrorFromResponse(parsed, statusCode, retryAfterMs) {
+    const message =
+        parsed?.error?.message ||
+        parsed?.message ||
+        `Anthropic request failed with status ${statusCode}`;
+
+    const err = new Error(message);
+
+    err.statusCode = statusCode;
+    err.type = parsed?.error?.type || parsed?.type || null;
+    err.retryAfterMs = retryAfterMs;
+
+    return err;
 }
 
 // MARK: - Raw Anthropic HTTPS client
@@ -198,12 +280,13 @@ function callAnthropicMessagesRaw(payload, label = 'ai job') {
                 }
 
                 if (statusCode < 200 || statusCode >= 300) {
-                    const message =
-                        parsed?.error?.message ||
-                        parsed?.message ||
-                        `Anthropic request failed with status ${statusCode}`;
-
-                    reject(new Error(message));
+                    reject(
+                        anthropicErrorFromResponse(
+                            parsed,
+                            statusCode,
+                            retryAfterMsFromResponse(res)
+                        )
+                    );
                     return;
                 }
 
@@ -226,25 +309,31 @@ function callAnthropicMessagesRaw(payload, label = 'ai job') {
 
 async function createClaudeMessageWithRetry(args, label = 'ai job') {
     let lastError;
+    const maxAttempts = 5;
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
         try {
             return await callAnthropicMessagesRaw(args, label);
         } catch (err) {
             lastError = err;
 
             const retryable = isRetryableAnthropicError(err);
+            const delayMs = retryDelayMs(err, attempt);
 
             console.error(
-                `[AIJobs] Claude ${label} attempt ${attempt}/3 failed:`,
+                `[AIJobs] Claude ${label} attempt ${attempt}/${maxAttempts} failed:`,
                 err?.message || err
             );
 
-            if (!retryable || attempt === 3) {
+            if (!retryable || attempt === maxAttempts) {
                 throw err;
             }
 
-            await sleep(900 * attempt);
+            console.warn(
+                `[AIJobs] Retrying ${label} in ${Math.round(delayMs / 1000)}s...`
+            );
+
+            await sleep(delayMs);
         }
     }
 
@@ -359,6 +448,7 @@ export async function processAIJob(jobId) {
                 SET
                     status = $2,
                     error_message = $3,
+                    processing_started_at = NULL,
                     failed_at = CASE WHEN $2 = 'failed' THEN NOW() ELSE failed_at END
                 WHERE id = $1
                 `,
@@ -395,7 +485,14 @@ export async function processQueuedAIJobs(limit = 3) {
             FROM ai_generation_jobs
             WHERE status = 'pending'
               AND attempts < max_attempts
-            ORDER BY created_at ASC
+            ORDER BY
+                CASE
+                    WHEN job_type IN ('debate_opening', 'debate_reply', 'daily_opening', 'daily_reply') THEN 0
+                    WHEN job_type = 'debate_report' THEN 1
+                    WHEN job_type = 'debate_report_insight' THEN 2
+                    ELSE 3
+                END ASC,
+                created_at ASC
             LIMIT $1
             `,
             [limit]
@@ -499,14 +596,22 @@ router.post('/api/ai-jobs', async (req, res) => {
         const job = result.rows[0];
 
         if (job.status === 'pending' || job.status === 'failed') {
-            setImmediate(() => {
-                processAIJob(job.id).catch((err) => {
-                    console.error(
-                        '[AIJobs] Immediate processing error:',
-                        err.message
-                    );
+            const shouldProcessImmediately = cleanJobType !== 'debate_report_insight';
+
+            if (shouldProcessImmediately) {
+                setImmediate(() => {
+                    processAIJob(job.id).catch((err) => {
+                        console.error(
+                            '[AIJobs] Immediate processing error:',
+                            err.message
+                        );
+                    });
                 });
-            });
+            } else {
+                console.log(
+                    `[AIJobs] Queued low-priority insight job: ${job.id}`
+                );
+            }
         }
 
         return res.status(202).json({
