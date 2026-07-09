@@ -253,8 +253,9 @@ async function upsertPushToken(pool, {
     try {
         await client.query('BEGIN');
 
-        // Insert/update by the true APNs token + environment.
-        // Then prune older active tokens for the same userId/installId.
+        // Insert/update by installId + environment.
+        // This handles app deletion/reinstall cases where the APNs token changes
+        // but the backend still has the same install/environment row.
         const result = await client.query(
             `INSERT INTO push_tokens (
                 device_token,
@@ -290,15 +291,16 @@ async function upsertPushToken(pool, {
                 NULL,
                 NULL
              )
-             ON CONFLICT (device_token, apns_environment)
+             ON CONFLICT ON CONSTRAINT push_tokens_install_env_unique
              DO UPDATE SET
-                install_id = COALESCE(EXCLUDED.install_id, push_tokens.install_id),
+                device_token = EXCLUDED.device_token,
                 platform = EXCLUDED.platform,
                 timezone = EXCLUDED.timezone,
                 notifications_enabled = true,
                 user_id = COALESCE(EXCLUDED.user_id, push_tokens.user_id),
                 app_version = EXCLUDED.app_version,
                 build_number = EXCLUDED.build_number,
+                apns_environment = EXCLUDED.apns_environment,
                 last_registered_at = now(),
                 updated_at = now(),
                 last_failure_at = NULL,
