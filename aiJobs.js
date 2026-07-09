@@ -38,6 +38,11 @@ pool.on('error', (err) => {
 const DEFAULT_CLAUDE_MODEL =
     process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929';
 
+// Temporary Pro/Opus routing model.
+// Keep this in Railway as PRO_CLAUDE_MODEL=claude-opus-4-6.
+const PRO_CLAUDE_MODEL =
+    process.env.PRO_CLAUDE_MODEL || 'claude-opus-4-6';
+
 const ANTHROPIC_VERSION =
     process.env.ANTHROPIC_VERSION || '2023-06-01';
 
@@ -69,6 +74,93 @@ const TEMPERATURE_BY_JOB_TYPE = {
 };
 
 const ALLOWED_JOB_TYPES = new Set(Object.keys(MODEL_BY_JOB_TYPE));
+
+const PRO_MODEL_JOB_TYPES = new Set([
+    'debate_opening',
+    'debate_reply',
+    'daily_opening',
+    'daily_reply',
+]);
+
+function truthyMetadataValue(value) {
+    if (value === true) return true;
+
+    if (typeof value === 'string') {
+        const normalized = value.trim().toLowerCase();
+        return (
+            normalized === 'true' ||
+            normalized === '1' ||
+            normalized === 'yes' ||
+            normalized === 'pro'
+        );
+    }
+
+    return false;
+}
+
+function jobMetadata(job) {
+    const metadata = job?.metadata;
+
+    if (!metadata) {
+        return {};
+    }
+
+    if (typeof metadata === 'object' && !Array.isArray(metadata)) {
+        return metadata;
+    }
+
+    if (typeof metadata === 'string') {
+        try {
+            const parsed = JSON.parse(metadata);
+            return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                ? parsed
+                : {};
+        } catch {
+            return {};
+        }
+    }
+
+    return {};
+}
+
+function shouldUseProModelForJob(job) {
+    if (!PRO_MODEL_JOB_TYPES.has(job?.job_type)) {
+        return false;
+    }
+
+    const metadata = jobMetadata(job);
+
+    return (
+        String(metadata.accessTier || '').trim().toLowerCase() === 'pro' ||
+        truthyMetadataValue(metadata.isPro) ||
+        truthyMetadataValue(metadata.sendsProMetadata)
+    );
+}
+
+function modelForJob(job) {
+    const defaultModel = MODEL_BY_JOB_TYPE[job?.job_type] || DEFAULT_CLAUDE_MODEL;
+
+    if (shouldUseProModelForJob(job)) {
+        return PRO_CLAUDE_MODEL;
+    }
+
+    return defaultModel;
+}
+
+function logSelectedModel(job, model, fallbackUsed = false) {
+    const metadata = jobMetadata(job);
+
+    console.log('[AIJobs] Selected Claude model:', {
+        jobId: job?.id,
+        jobType: job?.job_type,
+        model,
+        fallbackUsed,
+        accessTier: metadata.accessTier,
+        isPro: metadata.isPro,
+        opusDeviceTest: metadata.opusDeviceTest,
+        modelRoutingReason: metadata.modelRoutingReason,
+    });
+}
 
 // MARK: - Helpers
 
@@ -352,32 +444,67 @@ async function callClaudeForJob(job) {
         throw new Error('No messages supplied for AI job.');
     }
 
-    const model = MODEL_BY_JOB_TYPE[job.job_type] || DEFAULT_CLAUDE_MODEL;
+    const model = modelForJob(job);
     const maxTokens = MAX_TOKENS_BY_JOB_TYPE[job.job_type] || 900;
     const temperature = TEMPERATURE_BY_JOB_TYPE[job.job_type] ?? 0.7;
 
-    const response = await createClaudeMessageWithRetry(
-        {
-            model,
-            max_tokens: maxTokens,
-            temperature,
-            system: systemPrompt,
-            messages,
-        },
-        `${job.job_type} ${job.id} using ${model}`
-    );
+    logSelectedModel(job, model, false);
 
-    const text = (response.content || [])
-        .filter((part) => part.type === 'text')
-        .map((part) => part.text)
-        .join('\n')
-        .trim();
+    async function runWithModel(selectedModel, fallbackUsed = false) {
+        const response = await createClaudeMessageWithRetry(
+            {
+                model: selectedModel,
+                max_tokens: maxTokens,
+                temperature,
+                system: systemPrompt,
+                messages,
+            },
+            `${job.job_type} ${job.id} using ${selectedModel}`
+        );
 
-    if (!text) {
-        throw new Error('Claude returned an empty response.');
+        const text = (response.content || [])
+            .filter((part) => part.type === 'text')
+            .map((part) => part.text)
+            .join('\n')
+            .trim();
+
+        if (!text) {
+            throw new Error('Claude returned an empty response.');
+        }
+
+        if (fallbackUsed) {
+            console.warn('[AIJobs] Completed with fallback model:', {
+                jobId: job.id,
+                jobType: job.job_type,
+                fallbackModel: selectedModel,
+            });
+        }
+
+        return text;
     }
 
-    return text;
+    try {
+        return await runWithModel(model, false);
+    } catch (err) {
+        const shouldFallbackToDefault =
+            model !== DEFAULT_CLAUDE_MODEL &&
+            isRetryableAnthropicError(err);
+
+        if (!shouldFallbackToDefault) {
+            throw err;
+        }
+
+        console.warn('[AIJobs] Falling back to default Claude model:', {
+            jobId: job.id,
+            jobType: job.job_type,
+            failedModel: model,
+            fallbackModel: DEFAULT_CLAUDE_MODEL,
+            error: err?.message || String(err),
+        });
+
+        logSelectedModel(job, DEFAULT_CLAUDE_MODEL, true);
+        return await runWithModel(DEFAULT_CLAUDE_MODEL, true);
+    }
 }
 
 export async function processAIJob(jobId) {
