@@ -291,7 +291,7 @@ async function upsertPushToken(pool, {
                 NULL,
                 NULL
              )
-             ON CONFLICT ON CONSTRAINT push_tokens_install_env_unique
+             ON CONFLICT (install_id, apns_environment)
              DO UPDATE SET
                 device_token = EXCLUDED.device_token,
                 platform = EXCLUDED.platform,
