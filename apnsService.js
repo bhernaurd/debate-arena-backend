@@ -52,12 +52,28 @@ export async function sendPush(deviceToken, title, body, data = {}) {
     const bundleId = process.env.APNS_BUNDLE_ID || 'com.bhernaurd.TheAgora';
 
     const note = new apn.Notification();
+
+    // Keep notification valid for 1 hour.
     note.expiry = Math.floor(Date.now() / 1000) + 3600;
+
+    // Explicit visible-alert delivery settings.
+    // This makes the push an immediate visible notification instead of relying
+    // on APNs/package defaults.
+    note.priority = 10;
+    note.pushType = 'alert';
+
     note.badge = 1;
     note.sound = 'default';
-    note.alert = { title, body };
+    note.alert = {
+        title,
+        body,
+    };
+
     note.topic = bundleId;
-    note.payload = { ...data, source: 'daily_challenge' };
+    note.payload = {
+        ...data,
+        source: 'daily_challenge',
+    };
 
     try {
         const result = await p.send(note, deviceToken);
