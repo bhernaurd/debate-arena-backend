@@ -180,39 +180,29 @@ function chooseBiggestDropOff(data) {
   };
 }
 
-function chooseReportLoadingNote({
-  reportsTimed,
-  reportViews,
-  averageReportLoadSeconds,
-  slowestReportLoadSeconds,
+function chooseReportGenerationNote({
+  reportsGeneratedWithTiming,
+  averageGenerationSeconds,
+  slowestGenerationSeconds,
 }) {
-  const timed = toNumber(reportsTimed);
-  const views = toNumber(reportViews);
-
-  if (views === 0) {
-    return "No report views recorded.";
-  }
+  const timed = toNumber(reportsGeneratedWithTiming);
 
   if (timed === 0) {
-    return "No report load-time data yet. This is expected until users are on the updated app version.";
+    return "No completed report-generation timing recorded for this day.";
   }
 
-  const average = Number(averageReportLoadSeconds || 0);
-  const slowest = Number(slowestReportLoadSeconds || 0);
+  const average = Number(averageGenerationSeconds || 0);
+  const slowest = Number(slowestGenerationSeconds || 0);
 
   if (average >= 10) {
-    return "Average report loading time is high. Prioritize reducing report generation latency.";
+    return "Average report generation time is high. Prioritize reducing report generation latency.";
   }
 
   if (slowest >= 20) {
-    return "One or more reports loaded very slowly. Check slowest report cases and backend latency.";
+    return "One or more reports generated very slowly. Check slowest report cases and backend latency.";
   }
 
-  if (timed < views) {
-    return "Some report views are missing timing data, likely from older app versions or reopened reports.";
-  }
-
-  return "Report loading looks healthy based on timed reports.";
+  return "Report generation timing looks healthy based on completed report generations.";
 }
 
 async function sendTelegramMessage(text) {
@@ -310,7 +300,7 @@ async function main() {
               AND user_events.metadata->>'isDailyChallenge' = 'false'
           ) AS unique_normal_debate_starters,
 
-          COUNT(*) FILTER (
+          COUNT(DISTINCT COALESCE(NULLIF(user_events.metadata->>'debateId', ''), user_events.id::text)) FILTER (
             WHERE event_name = 'debate_started'
               AND user_events.metadata->>'isDailyChallenge' = 'false'
           ) AS normal_debate_starts,
@@ -320,7 +310,7 @@ async function main() {
               AND user_events.metadata->>'isDailyChallenge' = 'false'
           ) AS unique_normal_debate_completers,
 
-          COUNT(*) FILTER (
+          COUNT(DISTINCT COALESCE(NULLIF(user_events.metadata->>'debateId', ''), user_events.id::text)) FILTER (
             WHERE event_name = 'debate_completed'
               AND user_events.metadata->>'isDailyChallenge' = 'false'
           ) AS normal_debate_completions,
@@ -345,86 +335,41 @@ async function main() {
         LEFT JOIN user_events
           ON user_events.created_at >= bounds.start_time
           AND user_events.created_at < bounds.end_time
-          AND user_events.user_id NOT IN (
-            SELECT user_id FROM excluded_analytics_users
+          AND NOT EXISTS (
+            SELECT 1 FROM excluded_analytics_users x
+            WHERE x.user_id = user_events.user_id
           )
         GROUP BY bounds.report_date
       ),
-      report_timing_events AS (
+      report_generation_timing_events AS (
         SELECT
           bounds.report_date,
           user_events.user_id,
-          user_events.event_name,
           CASE
-            WHEN user_events.metadata->>'reportLoadSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (user_events.metadata->>'reportLoadSeconds')::numeric
-
-            WHEN user_events.metadata->>'reportLoadTimeSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (user_events.metadata->>'reportLoadTimeSeconds')::numeric
-
-            WHEN user_events.metadata->>'loadTimeSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (user_events.metadata->>'loadTimeSeconds')::numeric
-
-            WHEN user_events.metadata->>'elapsedSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (user_events.metadata->>'elapsedSeconds')::numeric
-
-            WHEN user_events.metadata->>'reportGenerationSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (user_events.metadata->>'reportGenerationSeconds')::numeric
-
-            WHEN user_events.metadata->>'reportGenerationTimeSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (user_events.metadata->>'reportGenerationTimeSeconds')::numeric
-
-            WHEN user_events.metadata->>'generationSeconds' ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (user_events.metadata->>'generationSeconds')::numeric
-
-            WHEN user_events.metadata->>'reportLoadMs' ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (user_events.metadata->>'reportLoadMs')::numeric / 1000.0
-
-            WHEN user_events.metadata->>'reportLoadTimeMs' ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (user_events.metadata->>'reportLoadTimeMs')::numeric / 1000.0
-
-            WHEN user_events.metadata->>'loadTimeMs' ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (user_events.metadata->>'loadTimeMs')::numeric / 1000.0
-
             WHEN user_events.metadata->>'durationMs' ~ '^[0-9]+(\\.[0-9]+)?$'
               THEN (user_events.metadata->>'durationMs')::numeric / 1000.0
-
-            WHEN user_events.metadata->>'elapsedMs' ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (user_events.metadata->>'elapsedMs')::numeric / 1000.0
-
-            WHEN user_events.metadata->>'reportGenerationMs' ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (user_events.metadata->>'reportGenerationMs')::numeric / 1000.0
-
-            WHEN user_events.metadata->>'reportGenerationTimeMs' ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (user_events.metadata->>'reportGenerationTimeMs')::numeric / 1000.0
-
-            WHEN user_events.metadata->>'generationMs' ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (user_events.metadata->>'generationMs')::numeric / 1000.0
-
             ELSE NULL
-          END AS report_load_seconds
+          END AS generation_seconds
         FROM bounds
         JOIN user_events
           ON user_events.created_at >= bounds.start_time
           AND user_events.created_at < bounds.end_time
-          AND user_events.event_name IN (
-            'report_viewed',
-            'report_generation_completed'
-          )
-          AND user_events.user_id NOT IN (
-            SELECT user_id FROM excluded_analytics_users
+          AND user_events.event_name = 'report_generation_completed'
+          AND NOT EXISTS (
+            SELECT 1 FROM excluded_analytics_users x
+            WHERE x.user_id = user_events.user_id
           )
       ),
-      report_timing_summary AS (
+      report_generation_timing_summary AS (
         SELECT
           bounds.report_date,
-          COUNT(report_timing_events.report_load_seconds) AS reports_timed,
-          ROUND(AVG(report_timing_events.report_load_seconds), 2) AS average_report_load_seconds,
-          ROUND(MIN(report_timing_events.report_load_seconds), 2) AS fastest_report_load_seconds,
-          ROUND(MAX(report_timing_events.report_load_seconds), 2) AS slowest_report_load_seconds
+          COUNT(report_generation_timing_events.generation_seconds) AS reports_generated_with_timing,
+          ROUND(AVG(report_generation_timing_events.generation_seconds), 2) AS average_generation_seconds,
+          ROUND(MIN(report_generation_timing_events.generation_seconds), 2) AS fastest_generation_seconds,
+          ROUND(MAX(report_generation_timing_events.generation_seconds), 2) AS slowest_generation_seconds
         FROM bounds
-        LEFT JOIN report_timing_events
-          ON bounds.report_date = report_timing_events.report_date
+        LEFT JOIN report_generation_timing_events
+          ON bounds.report_date = report_generation_timing_events.report_date
         GROUP BY bounds.report_date
       ),
       first_seen AS (
@@ -432,8 +377,9 @@ async function main() {
           user_id,
           MIN(active_date) AS first_active_date
         FROM user_activity_days
-        WHERE user_id NOT IN (
-          SELECT user_id FROM excluded_analytics_users
+        WHERE NOT EXISTS (
+          SELECT 1 FROM excluded_analytics_users x
+          WHERE x.user_id = user_activity_days.user_id
         )
         GROUP BY user_id
       ),
@@ -444,8 +390,9 @@ async function main() {
         FROM user_activity_days
         CROSS JOIN params
         WHERE user_activity_days.active_date = params.report_date
-          AND user_activity_days.user_id NOT IN (
-            SELECT user_id FROM excluded_analytics_users
+          AND NOT EXISTS (
+            SELECT 1 FROM excluded_analytics_users x
+            WHERE x.user_id = user_activity_days.user_id
           )
       ),
       activity_summary AS (
@@ -497,16 +444,16 @@ async function main() {
         event_summary.unique_share_card_creators,
         event_summary.share_cards_created,
 
-        report_timing_summary.reports_timed,
-        report_timing_summary.average_report_load_seconds,
-        report_timing_summary.fastest_report_load_seconds,
-        report_timing_summary.slowest_report_load_seconds
+        report_generation_timing_summary.reports_generated_with_timing,
+        report_generation_timing_summary.average_generation_seconds,
+        report_generation_timing_summary.fastest_generation_seconds,
+        report_generation_timing_summary.slowest_generation_seconds
 
       FROM activity_summary
       JOIN event_summary
         ON activity_summary.report_date = event_summary.report_date
-      JOIN report_timing_summary
-        ON activity_summary.report_date = report_timing_summary.report_date;
+      JOIN report_generation_timing_summary
+        ON activity_summary.report_date = report_generation_timing_summary.report_date;
     `);
 
     const sevenDayResult = await client.query(`
@@ -529,8 +476,9 @@ async function main() {
           user_id,
           MIN(active_date) AS first_active_date
         FROM user_activity_days
-        WHERE user_id NOT IN (
-          SELECT user_id FROM excluded_analytics_users
+        WHERE NOT EXISTS (
+          SELECT 1 FROM excluded_analytics_users x
+          WHERE x.user_id = user_activity_days.user_id
         )
         GROUP BY user_id
       ),
@@ -539,8 +487,9 @@ async function main() {
           active_date,
           COUNT(DISTINCT user_id) AS daily_active_users
         FROM user_activity_days
-        WHERE user_id NOT IN (
-          SELECT user_id FROM excluded_analytics_users
+        WHERE NOT EXISTS (
+          SELECT 1 FROM excluded_analytics_users x
+          WHERE x.user_id = user_activity_days.user_id
         )
         GROUP BY active_date
       ),
@@ -595,10 +544,10 @@ async function main() {
     const uniqueShareCardCreators = toNumber(row.unique_share_card_creators);
     const shareCardsCreated = toNumber(row.share_cards_created);
 
-    const reportsTimed = toNumber(row.reports_timed);
-    const averageReportLoadSeconds = row.average_report_load_seconds;
-    const fastestReportLoadSeconds = row.fastest_report_load_seconds;
-    const slowestReportLoadSeconds = row.slowest_report_load_seconds;
+    const reportsGeneratedWithTiming = toNumber(row.reports_generated_with_timing);
+    const averageGenerationSeconds = row.average_generation_seconds;
+    const fastestGenerationSeconds = row.fastest_generation_seconds;
+    const slowestGenerationSeconds = row.slowest_generation_seconds;
 
     const dailyChallengeVisibilityRate = percent(
       dailyChallengeViewers,
@@ -665,11 +614,10 @@ async function main() {
       shareCardsCreated,
     });
 
-    const reportLoadingNote = chooseReportLoadingNote({
-      reportsTimed,
-      reportViews,
-      averageReportLoadSeconds,
-      slowestReportLoadSeconds,
+    const reportGenerationNote = chooseReportGenerationNote({
+      reportsGeneratedWithTiming,
+      averageGenerationSeconds,
+      slowestGenerationSeconds,
     });
 
     const message = [
@@ -717,12 +665,12 @@ async function main() {
       `<b>Total report-to-share rate:</b> ${totalReportToShareRate}`,
       `<b>Unique report-to-share rate:</b> ${uniqueReportToShareRate}`,
       ``,
-      `<b>Report Loading</b>`,
-      `<b>Report views:</b> ${reportViews} total`,
-      `<b>Reports timed:</b> ${reportsTimed} / ${reportViews}`,
-      `<b>Average report load time:</b> ${formatSeconds(averageReportLoadSeconds)}`,
-      `<b>Fastest / slowest report:</b> ${formatSeconds(fastestReportLoadSeconds)} / ${formatSeconds(slowestReportLoadSeconds)}`,
-      `<b>Report loading note:</b> ${reportLoadingNote}`,
+      `<b>Report Generation Time</b>`,
+      `<b>Reports viewed:</b> ${reportViews} total`,
+      `<b>Reports with generation timing:</b> ${reportsGeneratedWithTiming}`,
+      `<b>Average generation time:</b> ${formatSeconds(averageGenerationSeconds)}`,
+      `<b>Fastest / slowest generation:</b> ${formatSeconds(fastestGenerationSeconds)} / ${formatSeconds(slowestGenerationSeconds)}`,
+      `<b>Generation timing note:</b> ${reportGenerationNote}`,
       ``,
       `<b>Biggest funnel drop-off:</b> ${biggestDropOff}`,
       `<b>One recommended action:</b> ${recommendedAction}`,
