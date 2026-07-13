@@ -128,7 +128,13 @@ export function createAnalyticsRouter(pool, options = {}) {
            COUNT(DISTINCT a.user_id) FILTER (WHERE a.active_date = t.today)        AS dau,
            COUNT(DISTINCT a.user_id) FILTER (WHERE a.active_date >= t.today - 6)   AS wau,
            COUNT(DISTINCT a.user_id) FILTER (WHERE a.active_date >= t.today - 29)  AS mau
-         FROM user_activity_days a CROSS JOIN t`,
+         FROM user_activity_days a
+         CROSS JOIN t
+         WHERE NOT EXISTS (
+           SELECT 1
+           FROM excluded_analytics_users x
+           WHERE x.user_id = a.user_id
+         )`,
         [tz]
       );
 
@@ -141,15 +147,26 @@ export function createAnalyticsRouter(pool, options = {}) {
            COUNT(*) FILTER (WHERE event_name = 'report_generation_started')     AS report_generation_started_today,
            COUNT(*) FILTER (WHERE event_name = 'report_generation_completed')   AS report_generation_completed_today,
            COUNT(*) FILTER (WHERE event_name = 'report_generation_failed')      AS report_generation_failed_today
-         FROM user_events
-         WHERE (created_at AT TIME ZONE $1)::date = (now() AT TIME ZONE $1)::date`,
+         FROM user_events e
+         WHERE (e.created_at AT TIME ZONE $1)::date = (now() AT TIME ZONE $1)::date
+           AND NOT EXISTS (
+             SELECT 1
+             FROM excluded_analytics_users x
+             WHERE x.user_id = e.user_id
+           )`,
         [tz]
       );
 
       const retentionQ = pool.query(
         `WITH first_seen AS (
-           SELECT user_id, MIN(active_date) AS cohort_date
-           FROM user_activity_days GROUP BY user_id
+           SELECT a.user_id, MIN(a.active_date) AS cohort_date
+           FROM user_activity_days a
+           WHERE NOT EXISTS (
+             SELECT 1
+             FROM excluded_analytics_users x
+             WHERE x.user_id = a.user_id
+           )
+           GROUP BY a.user_id
          ),
          spans AS (
            SELECT fs.user_id, (ua.active_date - fs.cohort_date) AS day_n
