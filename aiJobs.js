@@ -19,6 +19,14 @@
 import express from 'express';
 import pg from 'pg';
 import https from 'https';
+import {
+    ExpandedAgoraAccessError,
+    authorizeAIJobCreate,
+    createExpandedAgoraAccessRouter,
+    markExpandedOpeningAuthorized,
+    markExpandedOpeningFailed,
+    reactivateExpandedOpeningForRetry,
+} from './expandedAgoraAccess.js';
 
 const router = express.Router();
 const { Pool } = pg;
@@ -33,6 +41,18 @@ const pool = new Pool({
 pool.on('error', (err) => {
     console.error('[AIJobs] Postgres pool error:', err.message);
 });
+
+router.use('/api/expanded-agora', createExpandedAgoraAccessRouter(pool));
+
+const USER_ID_RE = /^[A-Za-z0-9-]{8,128}$/;
+
+// Keep this FALSE while the existing App Store build does not send the
+// X-Installation-ID header on every AI job request. After the iOS migration
+// is live, set AI_JOB_REQUIRE_INSTALLATION_HEADER=true in Railway.
+const REQUIRE_INSTALLATION_HEADER =
+    String(process.env.AI_JOB_REQUIRE_INSTALLATION_HEADER || 'false')
+        .trim()
+        .toLowerCase() === 'true';
 
 // Keep this model consistent with the rest of your backend.
 const DEFAULT_CLAUDE_MODEL =
@@ -171,6 +191,63 @@ function sleep(ms) {
 function cleanString(value, maxLength = 20000) {
     if (typeof value !== 'string') return '';
     return value.trim().slice(0, maxLength);
+}
+
+function isValidUserId(value) {
+    return typeof value === 'string' && USER_ID_RE.test(value);
+}
+
+function requestInstallationId(req, bodyUserId = '') {
+    const headerUserId = cleanString(req.get('x-installation-id'), 128);
+    const cleanBodyUserId = cleanString(bodyUserId, 128);
+
+    if (headerUserId && cleanBodyUserId && headerUserId !== cleanBodyUserId) {
+        throw new ExpandedAgoraAccessError(
+            'The installation ID header does not match the request body.',
+            403,
+            'installation_id_mismatch'
+        );
+    }
+
+    const resolved = headerUserId || cleanBodyUserId;
+
+    if (REQUIRE_INSTALLATION_HEADER && !headerUserId) {
+        throw new ExpandedAgoraAccessError(
+            'X-Installation-ID is required.',
+            401,
+            'installation_header_required'
+        );
+    }
+
+    if (resolved && !isValidUserId(resolved)) {
+        throw new ExpandedAgoraAccessError(
+            'Invalid installation ID.',
+            400,
+            'invalid_installation_id'
+        );
+    }
+
+    return resolved;
+}
+
+function requestIosBuild(req) {
+    const raw = req.get('x-ios-build');
+
+    if (!raw) return null;
+
+    const parsed = Number(raw);
+    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function accessErrorResponse(res, err, fallbackMessage) {
+    const statusCode = Number(err?.statusCode || 500);
+
+    return res.status(statusCode).json({
+        success: false,
+        error: err?.message || fallbackMessage,
+        code: err?.code || 'request_failed',
+        details: err?.details || null,
+    });
 }
 
 function normalizeMessages(messages) {
@@ -540,25 +617,46 @@ export async function processAIJob(jobId) {
 
         const resultText = await callClaudeForJob(claimedJob);
 
-        const completeResult = await pool.query(
-            `
-            UPDATE ai_generation_jobs
-            SET
-                status = 'completed',
-                result_text = $2,
-                error_message = NULL,
-                completed_at = NOW()
-            WHERE id = $1
-            RETURNING *
-            `,
-            [claimedJob.id, resultText]
-        );
+        const completionClient = await pool.connect();
+        let completedJob;
+
+        try {
+            await completionClient.query('BEGIN');
+
+            const completeResult = await completionClient.query(
+                `
+                UPDATE ai_generation_jobs
+                SET
+                    status = 'completed',
+                    result_text = $2,
+                    error_message = NULL,
+                    completed_at = NOW()
+                WHERE id = $1
+                RETURNING *
+                `,
+                [claimedJob.id, resultText]
+            );
+
+            completedJob = completeResult.rows[0];
+
+            await markExpandedOpeningAuthorized(
+                completionClient,
+                completedJob
+            );
+
+            await completionClient.query('COMMIT');
+        } catch (completionErr) {
+            await completionClient.query('ROLLBACK');
+            throw completionErr;
+        } finally {
+            completionClient.release();
+        }
 
         console.log(
             `[AIJobs] Completed ${claimedJob.job_type}: ${claimedJob.id}`
         );
 
-        return publicJob(completeResult.rows[0]);
+        return publicJob(completedJob);
     } catch (err) {
         const message = err?.message || 'Unknown AI job error';
 
@@ -569,22 +667,46 @@ export async function processAIJob(jobId) {
             const maxAttempts = Number(claimedJob.max_attempts || 3);
             const shouldFinalFail = currentAttempts >= maxAttempts;
 
-            await pool.query(
-                `
-                UPDATE ai_generation_jobs
-                SET
-                    status = $2,
-                    error_message = $3,
-                    processing_started_at = NULL,
-                    failed_at = CASE WHEN $2 = 'failed' THEN NOW() ELSE failed_at END
-                WHERE id = $1
-                `,
-                [
-                    claimedJob.id,
-                    shouldFinalFail ? 'failed' : 'pending',
-                    message,
-                ]
-            );
+            const failureClient = await pool.connect();
+
+            try {
+                await failureClient.query('BEGIN');
+
+                await failureClient.query(
+                    `
+                    UPDATE ai_generation_jobs
+                    SET
+                        status = $2,
+                        error_message = $3,
+                        processing_started_at = NULL,
+                        failed_at = CASE WHEN $2 = 'failed' THEN NOW() ELSE failed_at END
+                    WHERE id = $1
+                    `,
+                    [
+                        claimedJob.id,
+                        shouldFinalFail ? 'failed' : 'pending',
+                        message,
+                    ]
+                );
+
+                if (shouldFinalFail) {
+                    await markExpandedOpeningFailed(
+                        failureClient,
+                        claimedJob,
+                        message
+                    );
+                }
+
+                await failureClient.query('COMMIT');
+            } catch (failureUpdateErr) {
+                await failureClient.query('ROLLBACK');
+                console.error(
+                    '[AIJobs] Failed to persist job failure state:',
+                    failureUpdateErr?.message || failureUpdateErr
+                );
+            } finally {
+                failureClient.release();
+            }
         }
 
         return null;
@@ -644,6 +766,8 @@ export async function processQueuedAIJobs(limit = 3) {
 // MARK: - Create or resume AI job
 
 router.post('/api/ai-jobs', async (req, res) => {
+    let client = null;
+
     try {
         const {
             clientRequestId,
@@ -658,7 +782,7 @@ router.post('/api/ai-jobs', async (req, res) => {
         const cleanClientRequestId = cleanString(clientRequestId, 200);
         const cleanJobType = cleanString(jobType, 80);
         const cleanDebateId = cleanString(debateId, 200);
-        const cleanUserId = cleanString(userId, 200);
+        const cleanUserId = requestInstallationId(req, userId);
         const normalizedMessages = normalizeMessages(messages);
         const cleanSystemPrompt = cleanString(systemPrompt, 50000);
 
@@ -693,7 +817,59 @@ router.post('/api/ai-jobs', async (req, res) => {
                 ? metadata
                 : {};
 
-        const result = await pool.query(
+        client = await pool.connect();
+        await client.query('BEGIN');
+
+        const existingResult = await client.query(
+            `
+            SELECT *
+            FROM ai_generation_jobs
+            WHERE client_request_id = $1
+            LIMIT 1
+            `,
+            [cleanClientRequestId]
+        );
+
+        const existingJob = existingResult.rows[0];
+
+        if (existingJob) {
+            if (
+                cleanUserId &&
+                existingJob.user_id &&
+                existingJob.user_id !== cleanUserId
+            ) {
+                throw new ExpandedAgoraAccessError(
+                    'This client request belongs to another installation.',
+                    409,
+                    'client_request_owner_conflict'
+                );
+            }
+
+            await client.query('COMMIT');
+            client.release();
+            client = null;
+
+            return res.status(200).json({
+                success: true,
+                job: publicJob(existingJob),
+            });
+        }
+
+        // Strict Pro verification is added in the subscription-verification
+        // phase. Until then, Expanded Agora enforcement remains OFF in Railway.
+        const isVerifiedPro = false;
+
+        const accessDecision = await authorizeAIJobCreate(client, {
+            jobType: cleanJobType,
+            userId: cleanUserId,
+            debateId: cleanDebateId,
+            clientRequestId: cleanClientRequestId,
+            metadata: safeMetadata,
+            iosBuild: requestIosBuild(req),
+            isVerifiedPro,
+        });
+
+        const result = await client.query(
             `
             INSERT INTO ai_generation_jobs (
                 client_request_id,
@@ -705,9 +881,7 @@ router.post('/api/ai-jobs', async (req, res) => {
                 metadata
             )
             VALUES ($1, $2, $3, $4, 'pending', $5::jsonb, $6::jsonb)
-            ON CONFLICT (client_request_id)
-            DO UPDATE SET
-                metadata = ai_generation_jobs.metadata || EXCLUDED.metadata
+            ON CONFLICT (client_request_id) DO NOTHING
             RETURNING *
             `,
             [
@@ -716,11 +890,49 @@ router.post('/api/ai-jobs', async (req, res) => {
                 cleanDebateId || null,
                 cleanUserId || null,
                 JSON.stringify(payload),
-                JSON.stringify(safeMetadata),
+                JSON.stringify({
+                    ...safeMetadata,
+                    expandedAgoraAccessReason: accessDecision.reason,
+                }),
             ]
         );
 
-        const job = result.rows[0];
+        let job = result.rows[0];
+        let responseStatus = 202;
+
+        if (!job) {
+            const conflictResult = await client.query(
+                `
+                SELECT *
+                FROM ai_generation_jobs
+                WHERE client_request_id = $1
+                LIMIT 1
+                `,
+                [cleanClientRequestId]
+            );
+
+            job = conflictResult.rows[0];
+
+            if (!job) {
+                throw new Error(
+                    'AI job insert conflicted, but the existing job could not be loaded.'
+                );
+            }
+
+            if (cleanUserId && job.user_id && job.user_id !== cleanUserId) {
+                throw new ExpandedAgoraAccessError(
+                    'This client request belongs to another installation.',
+                    409,
+                    'client_request_owner_conflict'
+                );
+            }
+
+            responseStatus = 200;
+        }
+
+        await client.query('COMMIT');
+        client.release();
+        client = null;
 
         if (job.status === 'pending' || job.status === 'failed') {
             const shouldProcessImmediately = cleanJobType !== 'debate_report_insight';
@@ -741,12 +953,29 @@ router.post('/api/ai-jobs', async (req, res) => {
             }
         }
 
-        return res.status(202).json({
+        return res.status(responseStatus).json({
             success: true,
             job: publicJob(job),
         });
     } catch (err) {
-        console.error('[AIJobs] Create job error:', err.message);
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackErr) {
+                console.error(
+                    '[AIJobs] Create job rollback error:',
+                    rollbackErr.message
+                );
+            }
+
+            client.release();
+        }
+
+        console.error('[AIJobs] Create job error:', err?.message || err);
+
+        if (err instanceof ExpandedAgoraAccessError) {
+            return accessErrorResponse(res, err, 'Failed to create AI job.');
+        }
 
         return res.status(500).json({
             success: false,
@@ -759,14 +988,24 @@ router.post('/api/ai-jobs', async (req, res) => {
 
 router.get('/api/ai-jobs/:jobId', async (req, res) => {
     try {
+        const installationId = requestInstallationId(req);
+        const values = [req.params.jobId];
+        let ownershipClause = '';
+
+        if (installationId) {
+            values.push(installationId);
+            ownershipClause = `AND user_id = $${values.length}`;
+        }
+
         const result = await pool.query(
             `
             SELECT *
             FROM ai_generation_jobs
             WHERE id = $1
+              ${ownershipClause}
             LIMIT 1
             `,
-            [req.params.jobId]
+            values
         );
 
         const job = result.rows[0];
@@ -783,7 +1022,11 @@ router.get('/api/ai-jobs/:jobId', async (req, res) => {
             job: publicJob(job),
         });
     } catch (err) {
-        console.error('[AIJobs] Get job error:', err.message);
+        console.error('[AIJobs] Get job error:', err?.message || err);
+
+        if (err instanceof ExpandedAgoraAccessError) {
+            return accessErrorResponse(res, err, 'Failed to fetch AI job.');
+        }
 
         return res.status(500).json({
             success: false,
@@ -796,14 +1039,24 @@ router.get('/api/ai-jobs/:jobId', async (req, res) => {
 
 router.get('/api/ai-jobs/client/:clientRequestId', async (req, res) => {
     try {
+        const installationId = requestInstallationId(req);
+        const values = [req.params.clientRequestId];
+        let ownershipClause = '';
+
+        if (installationId) {
+            values.push(installationId);
+            ownershipClause = `AND user_id = $${values.length}`;
+        }
+
         const result = await pool.query(
             `
             SELECT *
             FROM ai_generation_jobs
             WHERE client_request_id = $1
+              ${ownershipClause}
             LIMIT 1
             `,
-            [req.params.clientRequestId]
+            values
         );
 
         const job = result.rows[0];
@@ -820,7 +1073,14 @@ router.get('/api/ai-jobs/client/:clientRequestId', async (req, res) => {
             job: publicJob(job),
         });
     } catch (err) {
-        console.error('[AIJobs] Get job by client id error:', err.message);
+        console.error(
+            '[AIJobs] Get job by client id error:',
+            err?.message || err
+        );
+
+        if (err instanceof ExpandedAgoraAccessError) {
+            return accessErrorResponse(res, err, 'Failed to fetch AI job.');
+        }
 
         return res.status(500).json({
             success: false,
@@ -832,8 +1092,50 @@ router.get('/api/ai-jobs/client/:clientRequestId', async (req, res) => {
 // MARK: - Retry failed AI job
 
 router.post('/api/ai-jobs/:jobId/retry', async (req, res) => {
+    let client = null;
+
     try {
-        const result = await pool.query(
+        const installationId = requestInstallationId(req, req.body?.userId);
+
+        client = await pool.connect();
+        await client.query('BEGIN');
+
+        const values = [req.params.jobId];
+        let ownershipClause = '';
+
+        if (installationId) {
+            values.push(installationId);
+            ownershipClause = `AND user_id = $${values.length}`;
+        }
+
+        const existingResult = await client.query(
+            `
+            SELECT *
+            FROM ai_generation_jobs
+            WHERE id = $1
+              AND status = 'failed'
+              ${ownershipClause}
+            FOR UPDATE
+            `,
+            values
+        );
+
+        const existingJob = existingResult.rows[0];
+
+        if (!existingJob) {
+            await client.query('ROLLBACK');
+            client.release();
+            client = null;
+
+            return res.status(404).json({
+                success: false,
+                error: 'Failed job not found.',
+            });
+        }
+
+        await reactivateExpandedOpeningForRetry(client, existingJob);
+
+        const result = await client.query(
             `
             UPDATE ai_generation_jobs
             SET
@@ -843,20 +1145,16 @@ router.post('/api/ai-jobs/:jobId/retry', async (req, res) => {
                 failed_at = NULL,
                 processing_started_at = NULL
             WHERE id = $1
-              AND status = 'failed'
             RETURNING *
             `,
             [req.params.jobId]
         );
 
-        const job = result.rows[0];
+        await client.query('COMMIT');
+        client.release();
+        client = null;
 
-        if (!job) {
-            return res.status(404).json({
-                success: false,
-                error: 'Failed job not found.',
-            });
-        }
+        const job = result.rows[0];
 
         setImmediate(() => {
             processAIJob(job.id).catch((err) => {
@@ -869,7 +1167,24 @@ router.post('/api/ai-jobs/:jobId/retry', async (req, res) => {
             job: publicJob(job),
         });
     } catch (err) {
-        console.error('[AIJobs] Retry job error:', err.message);
+        if (client) {
+            try {
+                await client.query('ROLLBACK');
+            } catch (rollbackErr) {
+                console.error(
+                    '[AIJobs] Retry rollback error:',
+                    rollbackErr.message
+                );
+            }
+
+            client.release();
+        }
+
+        console.error('[AIJobs] Retry job error:', err?.message || err);
+
+        if (err instanceof ExpandedAgoraAccessError) {
+            return accessErrorResponse(res, err, 'Failed to retry AI job.');
+        }
 
         return res.status(500).json({
             success: false,
