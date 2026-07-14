@@ -27,6 +27,9 @@ import {
     markExpandedOpeningFailed,
     reactivateExpandedOpeningForRetry,
 } from './expandedAgoraAccess.js';
+import {
+    verifyAgoraProTransactionJWS,
+} from './appStoreSubscriptionVerifier.js';
 
 const router = express.Router();
 const { Pool } = pg;
@@ -102,6 +105,18 @@ const PRO_MODEL_JOB_TYPES = new Set([
     'daily_reply',
 ]);
 
+// During the migration, a server-verified App Store transaction always grants
+// Pro model routing. Legacy client metadata remains available only while this
+// flag is false, so the currently distributed app is not broken before the
+// signed-transaction build reaches users.
+const REQUIRE_SERVER_VERIFIED_PRO_FOR_MODEL =
+    String(
+        process.env.PRO_MODEL_REQUIRE_SERVER_VERIFIED_SUBSCRIPTION ||
+        'false'
+    )
+        .trim()
+        .toLowerCase() === 'true';
+
 function truthyMetadataValue(value) {
     if (value === true) return true;
 
@@ -150,6 +165,17 @@ function shouldUseProModelForJob(job) {
 
     const metadata = jobMetadata(job);
 
+    if (truthyMetadataValue(metadata.serverVerifiedPro)) {
+        return true;
+    }
+
+    if (REQUIRE_SERVER_VERIFIED_PRO_FOR_MODEL) {
+        return false;
+    }
+
+    // Temporary compatibility path for app builds that predate signed
+    // App Store transaction proof. Remove this fallback after the updated
+    // iOS build is broadly distributed.
     return (
         String(metadata.accessTier || '').trim().toLowerCase() === 'pro' ||
         truthyMetadataValue(metadata.isPro) ||
@@ -177,6 +203,10 @@ function logSelectedModel(job, model, fallbackUsed = false) {
         fallbackUsed,
         accessTier: metadata.accessTier,
         isPro: metadata.isPro,
+        serverVerifiedPro: metadata.serverVerifiedPro,
+        proVerificationReason: metadata.proVerificationReason,
+        proVerificationEnvironment: metadata.proVerificationEnvironment,
+        proVerificationProductId: metadata.proVerificationProductId,
         opusDeviceTest: metadata.opusDeviceTest,
         modelRoutingReason: metadata.modelRoutingReason,
     });
@@ -191,6 +221,30 @@ function sleep(ms) {
 function cleanString(value, maxLength = 20000) {
     if (typeof value !== 'string') return '';
     return value.trim().slice(0, maxLength);
+}
+
+async function verifyProAccessForJob(jobType, proTransactionJWS) {
+    if (!PRO_MODEL_JOB_TYPES.has(jobType)) {
+        return {
+            isVerifiedPro: false,
+            reason: 'not_required_for_job_type',
+        };
+    }
+
+    const verification = await verifyAgoraProTransactionJWS(
+        cleanString(proTransactionJWS, 50000)
+    );
+
+    console.log('[AIJobs] App Store Pro verification:', {
+        jobType,
+        isVerifiedPro: verification.isVerifiedPro === true,
+        reason: verification.reason,
+        environment: verification.environment || null,
+        productId: verification.productId || null,
+        expiresDate: verification.expiresDate || null,
+    });
+
+    return verification;
 }
 
 function isValidUserId(value) {
@@ -777,6 +831,7 @@ router.post('/api/ai-jobs', async (req, res) => {
             messages,
             systemPrompt,
             metadata,
+            proTransactionJWS,
         } = req.body || {};
 
         const cleanClientRequestId = cleanString(clientRequestId, 200);
@@ -817,6 +872,16 @@ router.post('/api/ai-jobs', async (req, res) => {
                 ? metadata
                 : {};
 
+        // Verify Apple-signed subscription proof before opening a database
+        // transaction. The raw JWS is never stored in Postgres.
+        const proVerification = await verifyProAccessForJob(
+            cleanJobType,
+            proTransactionJWS
+        );
+
+        const isVerifiedPro =
+            proVerification.isVerifiedPro === true;
+
         client = await pool.connect();
         await client.query('BEGIN');
 
@@ -855,10 +920,6 @@ router.post('/api/ai-jobs', async (req, res) => {
             });
         }
 
-        // Strict Pro verification is added in the subscription-verification
-        // phase. Until then, Expanded Agora enforcement remains OFF in Railway.
-        const isVerifiedPro = false;
-
         const accessDecision = await authorizeAIJobCreate(client, {
             jobType: cleanJobType,
             userId: cleanUserId,
@@ -892,6 +953,19 @@ router.post('/api/ai-jobs', async (req, res) => {
                 JSON.stringify(payload),
                 JSON.stringify({
                     ...safeMetadata,
+
+                    // These values are produced by the backend and deliberately
+                    // overwrite any same-named client metadata.
+                    serverVerifiedPro: isVerifiedPro,
+                    proVerificationReason:
+                        proVerification.reason || 'unknown',
+                    proVerificationEnvironment:
+                        proVerification.environment || null,
+                    proVerificationProductId:
+                        proVerification.productId || null,
+                    proVerificationExpiresDate:
+                        proVerification.expiresDate || null,
+
                     expandedAgoraAccessReason: accessDecision.reason,
                 }),
             ]
