@@ -61,10 +61,11 @@ const REQUIRE_INSTALLATION_HEADER =
 const DEFAULT_CLAUDE_MODEL =
     process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929';
 
-// Temporary Pro/Opus routing model.
-// Keep this in Railway as PRO_CLAUDE_MODEL=claude-opus-4-6.
+// Optional Pro model override.
+// When no separate Pro model is configured, Pro uses the same Sonnet model
+// as every other supported AI job.
 const PRO_CLAUDE_MODEL =
-    process.env.PRO_CLAUDE_MODEL || 'claude-opus-4-6';
+    process.env.PRO_CLAUDE_MODEL || DEFAULT_CLAUDE_MODEL;
 
 const ANTHROPIC_VERSION =
     process.env.ANTHROPIC_VERSION || '2023-06-01';
@@ -207,8 +208,6 @@ function logSelectedModel(job, model, fallbackUsed = false) {
         proVerificationReason: metadata.proVerificationReason,
         proVerificationEnvironment: metadata.proVerificationEnvironment,
         proVerificationProductId: metadata.proVerificationProductId,
-        opusDeviceTest: metadata.opusDeviceTest,
-        modelRoutingReason: metadata.modelRoutingReason,
     });
 }
 
