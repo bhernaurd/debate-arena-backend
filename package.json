@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@apple/app-store-server-library": "^3.1.0",
     "apn": "^2.2.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
