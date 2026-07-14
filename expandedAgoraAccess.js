@@ -29,6 +29,14 @@ const STANDARD_PHILOSOPHER_IDS = new Set([
     'carl_jung',
 ]);
 
+// Camus predates the scheduled-release engine. Keep his existing access
+// behavior untouched when global enforcement is enabled.
+const LEGACY_EXPANDED_PHILOSOPHER_IDS = new Set([
+    'camus',
+    'albert-camus',
+    'albert_camus',
+]);
+
 const ACCESS_RELEVANT_JOB_TYPES = new Set([
     'debate_opening',
     'debate_reply',
@@ -46,14 +54,16 @@ export const EXPANDED_AGORA_ENFORCEMENT_ENABLED =
 const EXPANDED_AGORA_ENFORCEMENT_TEST_USER_IDS = new Set(
     String(process.env.EXPANDED_AGORA_ENFORCEMENT_TEST_USER_IDS || '')
         .split(',')
-        .map((value) => value.trim())
+        .map((value) => value.trim().toLowerCase())
         .filter(Boolean)
 );
 
 function expandedAgoraEnforcementEnabledForUser(userId) {
+    const normalizedUserId = cleanString(userId, 128).toLowerCase();
+
     return (
         EXPANDED_AGORA_ENFORCEMENT_ENABLED ||
-        EXPANDED_AGORA_ENFORCEMENT_TEST_USER_IDS.has(userId)
+        EXPANDED_AGORA_ENFORCEMENT_TEST_USER_IDS.has(normalizedUserId)
     );
 }
 
@@ -192,6 +202,32 @@ async function getAnyReleaseRow(db, philosopherId) {
     );
 
     return result.rows[0] || null;
+}
+
+// Older App Store builds may not send philosopherId on every debate job.
+// Once an enabled scheduled release has minimum_ios_build set, builds at or
+// above that threshold must send philosopherId; older or unknown builds remain
+// compatible.
+async function philosopherIdRequiredForBuild(db, iosBuild) {
+    if (!iosBuild) return false;
+
+    const result = await db.query(
+        `
+        SELECT MIN(minimum_ios_build)::int AS minimum_strict_build
+        FROM expanded_philosopher_release_schedule
+        WHERE is_enabled = TRUE
+          AND minimum_ios_build IS NOT NULL
+        `
+    );
+
+    const minimumStrictBuild = Number(
+        result.rows[0]?.minimum_strict_build || 0
+    );
+
+    return (
+        minimumStrictBuild > 0 &&
+        iosBuild >= minimumStrictBuild
+    );
 }
 
 async function getUsageByPhilosopher(db, userId) {
@@ -461,9 +497,12 @@ async function authorizeExpandedOpening(
         clientRequestId,
         iosBuild,
         isVerifiedPro,
+        release: suppliedRelease = null,
     }
 ) {
-    const release = await getAnyReleaseRow(db, philosopherId);
+    const release =
+        suppliedRelease ||
+        await getAnyReleaseRow(db, philosopherId);
 
     if (!release) {
         throw new ExpandedAgoraAccessError(
@@ -687,20 +726,26 @@ export async function authorizeAIJobCreate(
     }
 
     const philosopherId = philosopherIdFromMetadata(metadata);
+    const enforcementEnabled =
+        expandedAgoraEnforcementEnabledForUser(userId);
 
     if (!philosopherId) {
-        if (!expandedAgoraEnforcementEnabledForUser(userId)) {
-            return {
-                allowed: true,
-                reason: 'legacy_missing_philosopher_id',
-            };
+        const mustSendPhilosopherId =
+            enforcementEnabled &&
+            await philosopherIdRequiredForBuild(db, iosBuild);
+
+        if (mustSendPhilosopherId) {
+            throw new ExpandedAgoraAccessError(
+                'philosopherId is required for debate AI jobs.',
+                400,
+                'missing_philosopher_id'
+            );
         }
 
-        throw new ExpandedAgoraAccessError(
-            'philosopherId is required for debate AI jobs.',
-            400,
-            'missing_philosopher_id'
-        );
+        return {
+            allowed: true,
+            reason: 'legacy_missing_philosopher_id',
+        };
     }
 
     if (!isValidPhilosopherId(philosopherId)) {
@@ -718,7 +763,28 @@ export async function authorizeAIJobCreate(
         };
     }
 
-    if (!expandedAgoraEnforcementEnabledForUser(userId)) {
+    if (LEGACY_EXPANDED_PHILOSOPHER_IDS.has(philosopherId)) {
+        return {
+            allowed: true,
+            reason: 'legacy_expanded_philosopher',
+            philosopherId,
+        };
+    }
+
+    // Only philosophers represented in the scheduled-release table are
+    // governed by this engine. This keeps existing or experimental Expanded
+    // Agora philosophers from being blocked accidentally.
+    const release = await getAnyReleaseRow(db, philosopherId);
+
+    if (!release) {
+        return {
+            allowed: true,
+            reason: 'unscheduled_expanded_philosopher',
+            philosopherId,
+        };
+    }
+
+    if (!enforcementEnabled) {
         return {
             allowed: true,
             reason: 'expanded_enforcement_disabled',
@@ -750,6 +816,7 @@ export async function authorizeAIJobCreate(
             clientRequestId,
             iosBuild,
             isVerifiedPro,
+            release,
         });
     }
 
@@ -767,7 +834,8 @@ export async function markExpandedOpeningAuthorized(db, job) {
 
     if (
         !philosopherId ||
-        STANDARD_PHILOSOPHER_IDS.has(philosopherId)
+        STANDARD_PHILOSOPHER_IDS.has(philosopherId) ||
+        LEGACY_EXPANDED_PHILOSOPHER_IDS.has(philosopherId)
     ) {
         return;
     }
@@ -803,7 +871,8 @@ export async function markExpandedOpeningFailed(
 
     if (
         !philosopherId ||
-        STANDARD_PHILOSOPHER_IDS.has(philosopherId)
+        STANDARD_PHILOSOPHER_IDS.has(philosopherId) ||
+        LEGACY_EXPANDED_PHILOSOPHER_IDS.has(philosopherId)
     ) {
         return;
     }
@@ -840,7 +909,8 @@ export async function reactivateExpandedOpeningForRetry(
 
     if (
         !philosopherId ||
-        STANDARD_PHILOSOPHER_IDS.has(philosopherId)
+        STANDARD_PHILOSOPHER_IDS.has(philosopherId) ||
+        LEGACY_EXPANDED_PHILOSOPHER_IDS.has(philosopherId)
     ) {
         return;
     }
