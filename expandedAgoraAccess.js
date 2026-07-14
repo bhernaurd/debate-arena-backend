@@ -39,8 +39,31 @@ export const EXPANDED_AGORA_ENFORCEMENT_ENABLED =
         .trim()
         .toLowerCase() === 'true';
 
+// Safe production testing:
+// Keep global enforcement disabled while the live Pro-verification path is
+// unfinished, but enforce access for specific installation IDs listed in:
+// EXPANDED_AGORA_ENFORCEMENT_TEST_USER_IDS=id1,id2
+const EXPANDED_AGORA_ENFORCEMENT_TEST_USER_IDS = new Set(
+    String(process.env.EXPANDED_AGORA_ENFORCEMENT_TEST_USER_IDS || '')
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean)
+);
+
+function expandedAgoraEnforcementEnabledForUser(userId) {
+    return (
+        EXPANDED_AGORA_ENFORCEMENT_ENABLED ||
+        EXPANDED_AGORA_ENFORCEMENT_TEST_USER_IDS.has(userId)
+    );
+}
+
 export class ExpandedAgoraAccessError extends Error {
-    constructor(message, statusCode = 403, code = 'expanded_agora_locked', details = null) {
+    constructor(
+        message,
+        statusCode = 403,
+        code = 'expanded_agora_locked',
+        details = null
+    ) {
         super(message);
         this.name = 'ExpandedAgoraAccessError';
         this.statusCode = statusCode;
@@ -178,11 +201,11 @@ async function getUsageByPhilosopher(db, userId) {
             philosopher_id,
             COUNT(*) FILTER (
                 WHERE authorization_source = 'free_event'
-                  AND status IN ('reserved', 'authorized')
+                  AND status = 'authorized'
             )::int AS event_debates,
             COUNT(*) FILTER (
                 WHERE authorization_source = 'grace_preview'
-                  AND status IN ('reserved', 'authorized')
+                  AND status = 'authorized'
             )::int AS grace_debates
         FROM expanded_debate_authorizations
         WHERE user_id = $1
@@ -213,17 +236,21 @@ function buildReleaseStatus({
     const buildSatisfied = minimumBuildSatisfied(release, iosBuild);
     const eligibilityCutoff = new Date(release.grace_eligibility_cutoff_at);
     const firstSeenDate = firstSeenAt ? new Date(firstSeenAt) : null;
+
     const eligibleForGrace = Boolean(
-        firstSeenDate && firstSeenDate.getTime() < eligibilityCutoff.getTime()
+        firstSeenDate &&
+        firstSeenDate.getTime() < eligibilityCutoff.getTime()
     );
 
     const eventDebates = usage?.eventDebates || 0;
     const graceDebates = usage?.graceDebates || 0;
     const previewLimit = Number(release.preview_debate_limit || 0);
-    const totalCountedDebates = eventDebates + graceDebates;
+
+    // Open Access Event debates are unlimited and never reduce the later
+    // three-debate preview. Only successfully authorized grace previews count.
     const previewDebatesRemaining = Math.max(
         0,
-        previewLimit - totalCountedDebates
+        previewLimit - graceDebates
     );
 
     let freeAccess = 'none';
@@ -247,7 +274,10 @@ function buildReleaseStatus({
         accessReason = 'pro_early_access';
     } else if (phase === 'grace_period' && !eligibleForGrace) {
         accessReason = 'not_grace_eligible';
-    } else if (phase === 'grace_period' && previewDebatesRemaining === 0) {
+    } else if (
+        phase === 'grace_period' &&
+        previewDebatesRemaining === 0
+    ) {
         accessReason = 'preview_exhausted';
     }
 
@@ -292,7 +322,11 @@ export async function getExpandedAgoraAccessSnapshot(
 
     const now = new Date();
 
-    const [releases, firstSeenAt, usageByPhilosopher] = await Promise.all([
+    const [
+        releases,
+        firstSeenAt,
+        usageByPhilosopher,
+    ] = await Promise.all([
         getEnabledReleaseRows(db),
         getFirstSeenAt(db, userId),
         getUsageByPhilosopher(db, userId),
@@ -319,8 +353,10 @@ export async function getExpandedAgoraAccessSnapshot(
     return {
         serverTime: now.toISOString(),
         installationFirstSeenAt: isoOrNull(firstSeenAt),
-        enforcementEnabled: EXPANDED_AGORA_ENFORCEMENT_ENABLED,
-        specialEventPhilosopherId: eventPhilosopher?.philosopherId || null,
+        enforcementEnabled:
+            expandedAgoraEnforcementEnabledForUser(userId),
+        specialEventPhilosopherId:
+            eventPhilosopher?.philosopherId || null,
         previewPhilosopherIds,
         philosophers,
     };
@@ -404,7 +440,13 @@ async function insertOpeningReservation(
         VALUES ($1, $2, $3, $4, $5, 'reserved')
         RETURNING *
         `,
-        [userId, philosopherId, debateId, clientRequestId, source]
+        [
+            userId,
+            philosopherId,
+            debateId,
+            clientRequestId,
+            source,
+        ]
     );
 
     return result.rows[0];
@@ -505,9 +547,14 @@ async function authorizeExpandedOpening(
 
         const firstSeenAt = await getFirstSeenAt(db, userId);
         const cutoff = new Date(release.grace_eligibility_cutoff_at);
-        const firstSeenDate = firstSeenAt ? new Date(firstSeenAt) : null;
+        const firstSeenDate = firstSeenAt
+            ? new Date(firstSeenAt)
+            : null;
 
-        if (!firstSeenDate || firstSeenDate.getTime() >= cutoff.getTime()) {
+        if (
+            !firstSeenDate ||
+            firstSeenDate.getTime() >= cutoff.getTime()
+        ) {
             throw new ExpandedAgoraAccessError(
                 'This installation is not eligible for the grace preview.',
                 403,
@@ -543,7 +590,7 @@ async function authorizeExpandedOpening(
             FROM expanded_debate_authorizations
             WHERE user_id = $1
               AND philosopher_id = $2
-              AND authorization_source IN ('free_event', 'grace_preview')
+              AND authorization_source = 'grace_preview'
               AND status IN ('reserved', 'authorized')
             `,
             [userId, philosopherId]
@@ -575,7 +622,10 @@ async function authorizeExpandedOpening(
         return {
             allowed: true,
             reason: 'grace_preview',
-            previewDebatesRemaining: Math.max(0, limit - used - 1),
+            previewDebatesRemaining: Math.max(
+                0,
+                limit - used - 1
+            ),
             authorization: reservation,
         };
     }
@@ -583,7 +633,9 @@ async function authorizeExpandedOpening(
     throw new ExpandedAgoraAccessError(
         'Agora Pro is required to start a new debate with this philosopher.',
         403,
-        phase === 'pro_early_access' ? 'pro_early_access' : 'pro_required'
+        phase === 'pro_early_access'
+            ? 'pro_early_access'
+            : 'pro_required'
     );
 }
 
@@ -597,7 +649,10 @@ async function authorizeExpandedReply(
         debateId,
     });
 
-    if (!authorization || authorization.status !== 'authorized') {
+    if (
+        !authorization ||
+        authorization.status !== 'authorized'
+    ) {
         throw new ExpandedAgoraAccessError(
             'This Expanded Agora debate was not previously authorized.',
             403,
@@ -634,7 +689,7 @@ export async function authorizeAIJobCreate(
     const philosopherId = philosopherIdFromMetadata(metadata);
 
     if (!philosopherId) {
-        if (!EXPANDED_AGORA_ENFORCEMENT_ENABLED) {
+        if (!expandedAgoraEnforcementEnabledForUser(userId)) {
             return {
                 allowed: true,
                 reason: 'legacy_missing_philosopher_id',
@@ -663,7 +718,7 @@ export async function authorizeAIJobCreate(
         };
     }
 
-    if (!EXPANDED_AGORA_ENFORCEMENT_ENABLED) {
+    if (!expandedAgoraEnforcementEnabledForUser(userId)) {
         return {
             allowed: true,
             reason: 'expanded_enforcement_disabled',
@@ -710,7 +765,10 @@ export async function markExpandedOpeningAuthorized(db, job) {
 
     const philosopherId = philosopherIdFromMetadata(job.metadata);
 
-    if (!philosopherId || STANDARD_PHILOSOPHER_IDS.has(philosopherId)) {
+    if (
+        !philosopherId ||
+        STANDARD_PHILOSOPHER_IDS.has(philosopherId)
+    ) {
         return;
     }
 
@@ -726,16 +784,27 @@ export async function markExpandedOpeningAuthorized(db, job) {
           AND user_id = $2
           AND philosopher_id = $3
         `,
-        [job.client_request_id, job.user_id, philosopherId]
+        [
+            job.client_request_id,
+            job.user_id,
+            philosopherId,
+        ]
     );
 }
 
-export async function markExpandedOpeningFailed(db, job, failureReason) {
+export async function markExpandedOpeningFailed(
+    db,
+    job,
+    failureReason
+) {
     if (job?.job_type !== 'debate_opening') return;
 
     const philosopherId = philosopherIdFromMetadata(job.metadata);
 
-    if (!philosopherId || STANDARD_PHILOSOPHER_IDS.has(philosopherId)) {
+    if (
+        !philosopherId ||
+        STANDARD_PHILOSOPHER_IDS.has(philosopherId)
+    ) {
         return;
     }
 
@@ -755,17 +824,24 @@ export async function markExpandedOpeningFailed(db, job, failureReason) {
             job.client_request_id,
             job.user_id,
             philosopherId,
-            cleanString(failureReason, 1000) || 'Opening generation failed.',
+            cleanString(failureReason, 1000) ||
+                'Opening generation failed.',
         ]
     );
 }
 
-export async function reactivateExpandedOpeningForRetry(db, job) {
+export async function reactivateExpandedOpeningForRetry(
+    db,
+    job
+) {
     if (job?.job_type !== 'debate_opening') return;
 
     const philosopherId = philosopherIdFromMetadata(job.metadata);
 
-    if (!philosopherId || STANDARD_PHILOSOPHER_IDS.has(philosopherId)) {
+    if (
+        !philosopherId ||
+        STANDARD_PHILOSOPHER_IDS.has(philosopherId)
+    ) {
         return;
     }
 
@@ -782,7 +858,11 @@ export async function reactivateExpandedOpeningForRetry(db, job) {
           AND philosopher_id = $3
           AND status = 'failed'
         `,
-        [job.client_request_id, job.user_id, philosopherId]
+        [
+            job.client_request_id,
+            job.user_id,
+            philosopherId,
+        ]
     );
 }
 
@@ -792,29 +872,34 @@ export function createExpandedAgoraAccessRouter(pool) {
     router.get('/access', async (req, res) => {
         try {
             const userId = cleanString(
-                req.get('x-installation-id') || req.query?.userId,
+                req.get('x-installation-id') ||
+                    req.query?.userId,
                 128
             );
 
             if (!isValidUserId(userId)) {
                 return res.status(400).json({
                     success: false,
-                    error: 'A valid X-Installation-ID header is required.',
+                    error:
+                        'A valid X-Installation-ID header is required.',
                     code: 'invalid_installation_id',
                 });
             }
 
-            const snapshot = await getExpandedAgoraAccessSnapshot(pool, {
-                userId,
-                iosBuild: iosBuildFromRequest(req),
-            });
+            const snapshot =
+                await getExpandedAgoraAccessSnapshot(pool, {
+                    userId,
+                    iosBuild: iosBuildFromRequest(req),
+                });
 
             return res.json({
                 success: true,
                 ...snapshot,
             });
         } catch (err) {
-            const statusCode = Number(err?.statusCode || 500);
+            const statusCode = Number(
+                err?.statusCode || 500
+            );
 
             console.error(
                 '[ExpandedAgora] Access snapshot error:',
@@ -823,8 +908,12 @@ export function createExpandedAgoraAccessRouter(pool) {
 
             return res.status(statusCode).json({
                 success: false,
-                error: err?.message || 'Failed to load Expanded Agora access.',
-                code: err?.code || 'expanded_agora_access_failed',
+                error:
+                    err?.message ||
+                    'Failed to load Expanded Agora access.',
+                code:
+                    err?.code ||
+                    'expanded_agora_access_failed',
                 details: err?.details || null,
             });
         }
