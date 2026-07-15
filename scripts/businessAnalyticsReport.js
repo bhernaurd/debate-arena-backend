@@ -43,7 +43,13 @@ export async function buildDailyBusinessAnalytics(client) {
     ranked AS (
       SELECT
         e.user_id,
-        COALESCE(e.metadata->>'analyticsAccessTier', 'legacy_unknown') AS tier,
+        CASE
+          WHEN NULLIF(BTRIM(e.metadata->>'analyticsAccessTier'), '') IN (
+            'free', 'trial', 'paid_pro', 'legacy_pro'
+          )
+            THEN NULLIF(BTRIM(e.metadata->>'analyticsAccessTier'), '')
+          ELSE 'legacy_unknown'
+        END AS tier,
         ROW_NUMBER() OVER (PARTITION BY e.user_id ORDER BY e.created_at DESC) AS rn
       FROM user_events e
       CROSS JOIN bounds
@@ -61,7 +67,13 @@ export async function buildDailyBusinessAnalytics(client) {
     ),
     event_counts AS (
       SELECT
-        COALESCE(e.metadata->>'analyticsAccessTier', 'legacy_unknown') AS tier,
+        CASE
+          WHEN NULLIF(BTRIM(e.metadata->>'analyticsAccessTier'), '') IN (
+            'free', 'trial', 'paid_pro', 'legacy_pro'
+          )
+            THEN NULLIF(BTRIM(e.metadata->>'analyticsAccessTier'), '')
+          ELSE 'legacy_unknown'
+        END AS tier,
         COUNT(DISTINCT COALESCE(NULLIF(e.metadata->>'debateId', ''), e.id::text)) FILTER (
           WHERE e.event_name = 'debate_completed'
         ) AS debate_completions,
@@ -92,6 +104,28 @@ export async function buildDailyBusinessAnalytics(client) {
       SELECT
         (((NOW() AT TIME ZONE 'America/Chicago')::date - 1)::timestamp AT TIME ZONE 'America/Chicago') AS start_time,
         (((NOW() AT TIME ZONE 'America/Chicago')::date)::timestamp AT TIME ZONE 'America/Chicago') AS end_time
+    ),
+    events AS (
+      SELECT e.*
+      FROM user_events e
+      CROSS JOIN bounds b
+      WHERE e.created_at >= b.start_time
+        AND e.created_at < b.end_time
+        AND NOT EXISTS (
+          SELECT 1 FROM excluded_analytics_users x WHERE x.user_id = e.user_id
+        )
+    ),
+    started_sessions AS (
+      SELECT DISTINCT NULLIF(BTRIM(metadata->>'paywallSessionId'), '') AS session_id
+      FROM events
+      WHERE event_name = 'purchase_started'
+        AND NULLIF(BTRIM(metadata->>'paywallSessionId'), '') IS NOT NULL
+    ),
+    completed_sessions AS (
+      SELECT DISTINCT NULLIF(BTRIM(metadata->>'paywallSessionId'), '') AS session_id
+      FROM events
+      WHERE event_name = 'purchase_completed'
+        AND NULLIF(BTRIM(metadata->>'paywallSessionId'), '') IS NOT NULL
     )
     SELECT
       COUNT(*) FILTER (WHERE event_name = 'paywall_viewed') AS paywall_views,
@@ -106,14 +140,19 @@ export async function buildDailyBusinessAnalytics(client) {
       COUNT(*) FILTER (
         WHERE event_name = 'restore_completed'
           AND metadata->>'activeSubscriptionFound' = 'true'
-      ) AS successful_restores
-    FROM user_events e
-    CROSS JOIN bounds
-    WHERE e.created_at >= bounds.start_time
-      AND e.created_at < bounds.end_time
-      AND NOT EXISTS (
-        SELECT 1 FROM excluded_analytics_users x WHERE x.user_id = e.user_id
-      );
+      ) AS successful_restores,
+      (SELECT COUNT(*) FROM started_sessions) AS purchase_start_sessions,
+      (SELECT COUNT(*) FROM completed_sessions) AS purchase_completed_sessions,
+      (
+        SELECT COUNT(*)
+        FROM started_sessions s
+        WHERE EXISTS (
+          SELECT 1
+          FROM completed_sessions c
+          WHERE c.session_id = s.session_id
+        )
+      ) AS completed_started_sessions
+    FROM events;
   `);
 
   const subscriptionResult = await client.query(`
@@ -323,7 +362,13 @@ export async function buildDailyBusinessAnalytics(client) {
     ),
     jobs AS (
       SELECT
-        COALESCE(metadata->>'analyticsAccessTier', 'legacy_unknown') AS tier,
+        CASE
+          WHEN NULLIF(BTRIM(metadata->>'analyticsAccessTier'), '') IN (
+            'free', 'trial', 'paid_pro', 'legacy_pro'
+          )
+            THEN NULLIF(BTRIM(metadata->>'analyticsAccessTier'), '')
+          ELSE 'legacy_unknown'
+        END AS tier,
         status,
         EXTRACT(EPOCH FROM (completed_at - processing_started_at)) AS seconds
       FROM ai_generation_jobs j
@@ -355,15 +400,28 @@ export async function buildDailyBusinessAnalytics(client) {
         (((NOW() AT TIME ZONE 'America/Chicago')::date - 1)::timestamp AT TIME ZONE 'America/Chicago') AS start_time,
         (((NOW() AT TIME ZONE 'America/Chicago')::date)::timestamp AT TIME ZONE 'America/Chicago') AS end_time
     ),
-    events AS (
+    ranked_events AS (
       SELECT
-        COALESCE(e.metadata->>'analyticsAccessTier', 'legacy_unknown') AS tier,
+        CASE
+          WHEN NULLIF(BTRIM(e.metadata->>'analyticsAccessTier'), '') IN (
+            'free', 'trial', 'paid_pro', 'legacy_pro'
+          )
+            THEN NULLIF(BTRIM(e.metadata->>'analyticsAccessTier'), '')
+          ELSE 'legacy_unknown'
+        END AS tier,
         e.event_name,
         CASE
           WHEN e.metadata->>'durationMs' ~ '^[0-9]+(\\.[0-9]+)?$'
             THEN (e.metadata->>'durationMs')::numeric / 1000.0
           ELSE NULL
-        END AS seconds
+        END AS seconds,
+        ROW_NUMBER() OVER (
+          PARTITION BY
+            e.user_id,
+            COALESCE(NULLIF(BTRIM(e.metadata->>'debateId'), ''), e.id::text),
+            e.event_name
+          ORDER BY e.created_at DESC, e.id DESC
+        ) AS rn
       FROM user_events e
       CROSS JOIN bounds b
       WHERE e.created_at >= b.start_time
@@ -375,6 +433,11 @@ export async function buildDailyBusinessAnalytics(client) {
         AND NOT EXISTS (
           SELECT 1 FROM excluded_analytics_users x WHERE x.user_id = e.user_id
         )
+    ),
+    events AS (
+      SELECT tier, event_name, seconds
+      FROM ranked_events
+      WHERE rn = 1
     )
     SELECT
       tier,
@@ -470,12 +533,18 @@ export async function buildDailyBusinessAnalytics(client) {
       COUNT(*) FILTER (WHERE metadata ? 'analyticsAccessTier') AS tier_stamped_events,
       COUNT(*) FILTER (
         WHERE event_name IN (
-          'debate_started', 'debate_completed', 'report_generation_started',
-          'report_generation_completed', 'report_generation_failed', 'report_viewed',
-          'share_card_created'
+          'debate_started',
+          'debate_completed',
+          'report_generation_started',
+          'report_generation_completed',
+          'report_generation_failed'
         )
-        AND COALESCE(metadata->>'debateId', '') = ''
-      ) AS lifecycle_events_missing_debate_id,
+          AND NULLIF(BTRIM(metadata->>'debateId'), '') IS NULL
+      ) AS critical_lifecycle_events_missing_debate_id,
+      COUNT(*) FILTER (
+        WHERE event_name IN ('report_viewed', 'share_card_created')
+          AND NULLIF(BTRIM(metadata->>'debateId'), '') IS NULL
+      ) AS legacy_report_actions_missing_debate_id,
       COUNT(*) FILTER (
         WHERE event_name = 'report_generation_completed'
           AND COALESCE(metadata->>'durationMs', '') !~ '^[0-9]+(\\.[0-9]+)?$'
@@ -530,7 +599,9 @@ export async function buildDailyBusinessAnalytics(client) {
     `<b>Paywall Funnel</b>`,
     `<b>Views:</b> ${toNumber(paywall.paywall_views)} (${toNumber(paywall.unique_paywall_viewers)} users)`,
     `<b>Plan selections:</b> ${toNumber(paywall.plan_selections)}`,
-    `<b>Purchase starts/completions:</b> ${toNumber(paywall.purchase_starts)} / ${toNumber(paywall.purchase_completions)} (${percent(paywall.purchase_completions, paywall.purchase_starts)})`,
+    `<b>Raw purchase start/completion events:</b> ${toNumber(paywall.purchase_starts)} / ${toNumber(paywall.purchase_completions)}`,
+    `<b>Session-linked purchase completion:</b> ${toNumber(paywall.completed_started_sessions)} of ${toNumber(paywall.purchase_start_sessions)} started sessions (${percent(paywall.completed_started_sessions, paywall.purchase_start_sessions)})`,
+    `<b>Completed sessions observed:</b> ${toNumber(paywall.purchase_completed_sessions)}`,
     `<b>Cancelled / pending / failed:</b> ${toNumber(paywall.purchase_cancellations)} / ${toNumber(paywall.purchase_pending)} / ${toNumber(paywall.purchase_failures)}`,
     `<b>Successful restores:</b> ${toNumber(paywall.successful_restores)} of ${toNumber(paywall.restore_starts)} attempts`,
     ``,
@@ -549,7 +620,8 @@ export async function buildDailyBusinessAnalytics(client) {
     ``,
     `<b>Analytics Data Quality</b>`,
     `<b>Tier-stamped events:</b> ${toNumber(quality.tier_stamped_events)} / ${toNumber(quality.total_events)}`,
-    `<b>Lifecycle events missing debateId:</b> ${toNumber(quality.lifecycle_events_missing_debate_id)}`,
+    `<b>Critical lifecycle events missing debateId:</b> ${toNumber(quality.critical_lifecycle_events_missing_debate_id)}`,
+    `<b>Legacy report views/shares missing debateId:</b> ${toNumber(quality.legacy_report_actions_missing_debate_id)}`,
     `<b>Completed reports missing duration:</b> ${toNumber(quality.completed_reports_missing_duration)}`,
   ].join('\n');
 }
@@ -573,7 +645,13 @@ export async function buildMonthlyBusinessAnalytics(client, reportMonthOverride 
     latest_tier AS (
       SELECT DISTINCT ON (e.user_id)
         e.user_id,
-        COALESCE(e.metadata->>'analyticsAccessTier', 'legacy_unknown') AS tier
+        CASE
+          WHEN NULLIF(BTRIM(e.metadata->>'analyticsAccessTier'), '') IN (
+            'free', 'trial', 'paid_pro', 'legacy_pro'
+          )
+            THEN NULLIF(BTRIM(e.metadata->>'analyticsAccessTier'), '')
+          ELSE 'legacy_unknown'
+        END AS tier
       FROM user_events e
       CROSS JOIN bounds b
       WHERE e.created_at >= b.start_time
@@ -591,14 +669,8 @@ export async function buildMonthlyBusinessAnalytics(client, reportMonthOverride 
         COUNT(*) FILTER (WHERE tier IN ('legacy_pro', 'legacy_unknown')) AS legacy_unknown_mau
       FROM latest_tier
     ),
-    paywall AS (
-      SELECT
-        COUNT(*) FILTER (WHERE event_name = 'paywall_viewed') AS paywall_views,
-        COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'paywall_viewed') AS unique_viewers,
-        COUNT(*) FILTER (WHERE event_name = 'purchase_started') AS purchase_starts,
-        COUNT(*) FILTER (WHERE event_name = 'purchase_completed') AS purchase_completions,
-        COUNT(*) FILTER (WHERE event_name = 'purchase_cancelled') AS purchase_cancellations,
-        COUNT(*) FILTER (WHERE event_name = 'purchase_failed') AS purchase_failures
+    paywall_events AS (
+      SELECT e.*
       FROM user_events e
       CROSS JOIN bounds b
       WHERE e.created_at >= b.start_time
@@ -606,6 +678,39 @@ export async function buildMonthlyBusinessAnalytics(client, reportMonthOverride 
         AND NOT EXISTS (
           SELECT 1 FROM excluded_analytics_users x WHERE x.user_id = e.user_id
         )
+    ),
+    paywall_started_sessions AS (
+      SELECT DISTINCT NULLIF(BTRIM(metadata->>'paywallSessionId'), '') AS session_id
+      FROM paywall_events
+      WHERE event_name = 'purchase_started'
+        AND NULLIF(BTRIM(metadata->>'paywallSessionId'), '') IS NOT NULL
+    ),
+    paywall_completed_sessions AS (
+      SELECT DISTINCT NULLIF(BTRIM(metadata->>'paywallSessionId'), '') AS session_id
+      FROM paywall_events
+      WHERE event_name = 'purchase_completed'
+        AND NULLIF(BTRIM(metadata->>'paywallSessionId'), '') IS NOT NULL
+    ),
+    paywall AS (
+      SELECT
+        COUNT(*) FILTER (WHERE event_name = 'paywall_viewed') AS paywall_views,
+        COUNT(DISTINCT user_id) FILTER (WHERE event_name = 'paywall_viewed') AS unique_viewers,
+        COUNT(*) FILTER (WHERE event_name = 'purchase_started') AS purchase_starts,
+        COUNT(*) FILTER (WHERE event_name = 'purchase_completed') AS purchase_completions,
+        COUNT(*) FILTER (WHERE event_name = 'purchase_cancelled') AS purchase_cancellations,
+        COUNT(*) FILTER (WHERE event_name = 'purchase_failed') AS purchase_failures,
+        (SELECT COUNT(*) FROM paywall_started_sessions) AS purchase_start_sessions,
+        (SELECT COUNT(*) FROM paywall_completed_sessions) AS purchase_completed_sessions,
+        (
+          SELECT COUNT(*)
+          FROM paywall_started_sessions s
+          WHERE EXISTS (
+            SELECT 1
+            FROM paywall_completed_sessions c
+            WHERE c.session_id = s.session_id
+          )
+        ) AS completed_started_sessions
+      FROM paywall_events
     ),
     first_paid AS (
       SELECT t.original_transaction_id, MIN(t.purchase_date) AS first_paid_date
@@ -878,9 +983,23 @@ export async function buildMonthlyBusinessAnalytics(client, reportMonthOverride 
         COUNT(*) AS total_events,
         COUNT(*) FILTER (WHERE metadata ? 'analyticsAccessTier') AS tier_stamped,
         COUNT(*) FILTER (
-          WHERE event_name IN ('debate_started','debate_completed','report_generation_completed','report_viewed','share_card_created')
-            AND COALESCE(metadata->>'debateId','') = ''
-        ) AS missing_debate_id
+          WHERE event_name IN (
+            'debate_started',
+            'debate_completed',
+            'report_generation_started',
+            'report_generation_completed',
+            'report_generation_failed'
+          )
+            AND NULLIF(BTRIM(metadata->>'debateId'), '') IS NULL
+        ) AS critical_lifecycle_events_missing_debate_id,
+        COUNT(*) FILTER (
+          WHERE event_name IN ('report_viewed', 'share_card_created')
+            AND NULLIF(BTRIM(metadata->>'debateId'), '') IS NULL
+        ) AS legacy_report_actions_missing_debate_id,
+        COUNT(*) FILTER (
+          WHERE event_name = 'report_generation_completed'
+            AND COALESCE(metadata->>'durationMs', '') !~ '^[0-9]+(\\.[0-9]+)?$'
+        ) AS completed_reports_missing_duration
       FROM user_events e
       CROSS JOIN bounds b
       WHERE e.created_at >= b.start_time
@@ -923,7 +1042,13 @@ export async function buildMonthlyBusinessAnalytics(client, reportMonthOverride 
     ),
     jobs AS (
       SELECT
-        COALESCE(metadata->>'analyticsAccessTier', 'legacy_unknown') AS tier,
+        CASE
+          WHEN NULLIF(BTRIM(metadata->>'analyticsAccessTier'), '') IN (
+            'free', 'trial', 'paid_pro', 'legacy_pro'
+          )
+            THEN NULLIF(BTRIM(metadata->>'analyticsAccessTier'), '')
+          ELSE 'legacy_unknown'
+        END AS tier,
         status,
         EXTRACT(EPOCH FROM (completed_at - processing_started_at)) AS seconds
       FROM ai_generation_jobs j
@@ -962,15 +1087,28 @@ export async function buildMonthlyBusinessAnalytics(client, reportMonthOverride 
         (month_start + INTERVAL '1 month')::timestamp AT TIME ZONE 'America/Chicago' AS end_time
       FROM runtime
     ),
-    events AS (
+    ranked_events AS (
       SELECT
-        COALESCE(e.metadata->>'analyticsAccessTier', 'legacy_unknown') AS tier,
+        CASE
+          WHEN NULLIF(BTRIM(e.metadata->>'analyticsAccessTier'), '') IN (
+            'free', 'trial', 'paid_pro', 'legacy_pro'
+          )
+            THEN NULLIF(BTRIM(e.metadata->>'analyticsAccessTier'), '')
+          ELSE 'legacy_unknown'
+        END AS tier,
         e.event_name,
         CASE
           WHEN e.metadata->>'durationMs' ~ '^[0-9]+(\\.[0-9]+)?$'
             THEN (e.metadata->>'durationMs')::numeric / 1000.0
           ELSE NULL
-        END AS seconds
+        END AS seconds,
+        ROW_NUMBER() OVER (
+          PARTITION BY
+            e.user_id,
+            COALESCE(NULLIF(BTRIM(e.metadata->>'debateId'), ''), e.id::text),
+            e.event_name
+          ORDER BY e.created_at DESC, e.id DESC
+        ) AS rn
       FROM user_events e
       CROSS JOIN bounds b
       WHERE e.created_at >= b.start_time
@@ -982,6 +1120,11 @@ export async function buildMonthlyBusinessAnalytics(client, reportMonthOverride 
         AND NOT EXISTS (
           SELECT 1 FROM excluded_analytics_users x WHERE x.user_id = e.user_id
         )
+    ),
+    events AS (
+      SELECT tier, event_name, seconds
+      FROM ranked_events
+      WHERE rn = 1
     )
     SELECT
       tier,
@@ -1048,7 +1191,9 @@ export async function buildMonthlyBusinessAnalytics(client, reportMonthOverride 
     ``,
     `<b>Monthly Paywall Funnel</b>`,
     `<b>Views:</b> ${toNumber(row.paywall_views)} (${toNumber(row.unique_viewers)} users)`,
-    `<b>Purchase starts/completions:</b> ${toNumber(row.purchase_starts)} / ${toNumber(row.purchase_completions)} (${percent(row.purchase_completions, row.purchase_starts)})`,
+    `<b>Raw purchase start/completion events:</b> ${toNumber(row.purchase_starts)} / ${toNumber(row.purchase_completions)}`,
+    `<b>Session-linked purchase completion:</b> ${toNumber(row.completed_started_sessions)} of ${toNumber(row.purchase_start_sessions)} started sessions (${percent(row.completed_started_sessions, row.purchase_start_sessions)})`,
+    `<b>Completed sessions observed:</b> ${toNumber(row.purchase_completed_sessions)}`,
     `<b>Cancelled / failed:</b> ${toNumber(row.purchase_cancellations)} / ${toNumber(row.purchase_failures)}`,
     ``,
     `<b>End-to-End Report Wait by Tier</b>`,
@@ -1059,7 +1204,9 @@ export async function buildMonthlyBusinessAnalytics(client, reportMonthOverride 
     ``,
     `<b>Analytics Data Quality</b>`,
     `<b>Tier-stamped events:</b> ${toNumber(row.tier_stamped)} / ${toNumber(row.total_events)}`,
-    `<b>Lifecycle events missing debateId:</b> ${toNumber(row.missing_debate_id)}`,
+    `<b>Critical lifecycle events missing debateId:</b> ${toNumber(row.critical_lifecycle_events_missing_debate_id)}`,
+    `<b>Legacy report views/shares missing debateId:</b> ${toNumber(row.legacy_report_actions_missing_debate_id)}`,
+    `<b>Completed reports missing duration:</b> ${toNumber(row.completed_reports_missing_duration)}`,
     ...(String(row.report_month || '').includes('July 2026')
       ? [
           `<b>Coverage note:</b> Subscription and Free/Trial/Paid Pro analytics begin with the July 31 release. August is the first full comparable month.`,
