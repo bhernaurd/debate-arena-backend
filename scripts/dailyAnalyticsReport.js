@@ -63,13 +63,13 @@ function chooseBiggestDropOff(data) {
 
     if (start <= 0) return;
 
-    const dropRate = Math.max(0, (start - end) / start);
+    const dropRate = (start - Math.min(end, start)) / start;
 
     candidates.push({
       key,
       label,
       from: start,
-      to: end,
+      to: Math.min(end, start),
       fromLabel,
       toLabel,
       dropRate,
@@ -81,93 +81,93 @@ function chooseBiggestDropOff(data) {
     key: "daily_challenge_visibility",
     label: "Daily Active Users → Daily Challenge viewers",
     from: data.dailyActiveUsers,
-    to: data.dailyChallengeViewers,
+    to: data.dailyChallengeActiveViewers,
     fromLabel: "active users",
-    toLabel: "viewers",
+    toLabel: "matched viewers",
     action:
-      "Review Daily Challenge presentation logic and onboarding eligibility. Make sure every eligible user sees the Daily Challenge when they reach the app.",
+      "Review Daily Challenge presentation logic and onboarding eligibility. Make sure every eligible active user sees the Daily Challenge when they reach the app.",
   });
 
   addCandidate({
     key: "daily_challenge_start",
-    label: "Daily Challenge viewers → starters",
+    label: "Daily Challenge viewers → same-day starters",
     from: data.dailyChallengeViewers,
-    to: data.dailyChallengeStarters,
+    to: data.dailyChallengeViewerStarters,
     fromLabel: "viewers",
-    toLabel: "starters",
+    toLabel: "matched starters",
     action:
       "Improve the Daily Challenge intro. Make the prompt more compelling and make the Enter the Agora button feel like the obvious next step.",
   });
 
   addCandidate({
     key: "daily_challenge_completion",
-    label: "Daily Challenge starters → completions",
+    label: "Daily Challenge starters → same-day completions",
     from: data.dailyChallengeStarters,
-    to: data.dailyChallengeCompletions,
+    to: data.dailyChallengeStarterCompletions,
     fromLabel: "starters",
-    toLabel: "completions",
+    toLabel: "matched completions",
     action:
       "Review the Daily Challenge debate flow. Make the Finish Debate button more obvious once the user has exchanged at least one round, and make the report payoff feel immediate.",
   });
 
   addCandidate({
     key: "philosopher_to_topic",
-    label: "Philosopher selectors → topic selectors",
+    label: "Philosopher selectors → same-day topic selectors",
     from: data.philosopherSelectors,
-    to: data.topicSelectors,
+    to: data.philosopherTopicOverlap,
     fromLabel: "users",
-    toLabel: "users",
+    toLabel: "matched users",
     action:
       "Improve the topic selection step. Make the questions more immediately compelling after a user selects a philosopher, and consider making generated topics more prominent.",
   });
 
   addCandidate({
     key: "topic_to_difficulty",
-    label: "Topic selectors → difficulty selectors",
+    label: "Topic selectors → same-day difficulty selectors",
     from: data.topicSelectors,
-    to: data.difficultySelectors,
+    to: data.topicDifficultyOverlap,
     fromLabel: "users",
-    toLabel: "users",
+    toLabel: "matched users",
     action:
       "Review the difficulty selection screen. Make the difference between Guided, Balanced, and Relentless instantly clear and reduce hesitation before starting.",
   });
 
   addCandidate({
     key: "difficulty_to_normal_start",
-    label: "Difficulty selectors → normal debate starters",
+    label: "Difficulty selectors → same-day normal debate starters",
     from: data.difficultySelectors,
-    to: data.uniqueNormalDebateStarters,
+    to: data.difficultyStartOverlap,
     fromLabel: "users",
-    toLabel: "users",
+    toLabel: "matched users",
     action:
       "Check the handoff from difficulty selection into the debate screen. Make sure the debate starts quickly and the opening loading state feels intentional.",
   });
 
   addCandidate({
     key: "normal_start_to_completion",
-    label: "Normal debate starts → normal debate completions",
-    from: data.normalDebateStarts,
-    to: data.normalDebateCompletions,
-    fromLabel: "debates",
-    toLabel: "debates",
+    label: "Tracked normal debate starts → same-day matched completions",
+    from: data.trackedNormalDebateStarts,
+    to: data.matchedNormalDebateCompletions,
+    fromLabel: "tracked starts",
+    toLabel: "matched completions",
     action:
       "Review normal debate completion. Make the Finish Debate button visible after a real exchange and make the report feel like the reward for finishing.",
   });
 
   addCandidate({
     key: "report_to_share",
-    label: "Report views → share cards created",
-    from: data.reportViews,
-    to: data.shareCardsCreated,
-    fromLabel: "report views",
-    toLabel: "share cards",
+    label: "Tracked report views → reports shared",
+    from: data.trackedReportViews,
+    to: data.matchedReportShares,
+    fromLabel: "viewed reports",
+    toLabel: "shared reports",
     action:
       "Improve the share-card CTA. Show it immediately after the report score and make the generated card feel worth saving or posting.",
   });
 
   if (candidates.length === 0) {
     return {
-      biggestDropOff: "No usable funnel data for this day.",
+      biggestDropOff: "No usable matched funnel data for this day.",
       recommendedAction:
         "No action needed yet. Keep collecting data and check tomorrow's report.",
     };
@@ -246,7 +246,7 @@ async function main() {
   try {
     const result = await client.query(`
       WITH params AS (
-        SELECT 
+        SELECT
           ((NOW() AT TIME ZONE 'America/Chicago')::date - INTERVAL '1 day')::date AS report_date
       ),
       bounds AS (
@@ -256,122 +256,19 @@ async function main() {
           (report_date + INTERVAL '1 day')::timestamp AT TIME ZONE 'America/Chicago' AS end_time
         FROM params
       ),
-      event_summary AS (
+      eligible_events AS (
         SELECT
-          bounds.report_date,
-
-          COUNT(DISTINCT user_events.user_id) FILTER (
-            WHERE event_name = 'daily_challenge_viewed'
-          ) AS daily_challenge_viewers,
-
-          COUNT(DISTINCT user_events.user_id) FILTER (
-            WHERE event_name = 'daily_challenge_started'
-          ) AS daily_challenge_starters,
-
-          COUNT(DISTINCT user_events.user_id) FILTER (
-            WHERE event_name = 'daily_challenge_completed'
-          ) AS daily_challenge_completions,
-
-          COUNT(DISTINCT user_events.user_id) FILTER (
-            WHERE event_name = 'philosopher_selected'
-          ) AS philosopher_selectors,
-
-          COUNT(*) FILTER (
-            WHERE event_name = 'philosopher_selected'
-          ) AS philosopher_selections,
-
-          COUNT(DISTINCT user_events.user_id) FILTER (
-            WHERE event_name = 'topic_selected'
-          ) AS topic_selectors,
-
-          COUNT(*) FILTER (
-            WHERE event_name = 'topic_selected'
-          ) AS topic_selections,
-
-          COUNT(DISTINCT user_events.user_id) FILTER (
-            WHERE event_name = 'difficulty_selected'
-          ) AS difficulty_selectors,
-
-          COUNT(*) FILTER (
-            WHERE event_name = 'difficulty_selected'
-          ) AS difficulty_selections,
-
-          COUNT(DISTINCT user_events.user_id) FILTER (
-            WHERE event_name = 'debate_started'
-              AND user_events.metadata->>'isDailyChallenge' = 'false'
-          ) AS unique_normal_debate_starters,
-
-          COUNT(DISTINCT COALESCE(NULLIF(user_events.metadata->>'debateId', ''), user_events.id::text)) FILTER (
-            WHERE event_name = 'debate_started'
-              AND user_events.metadata->>'isDailyChallenge' = 'false'
-          ) AS normal_debate_starts,
-
-          COUNT(DISTINCT user_events.user_id) FILTER (
-            WHERE event_name = 'debate_completed'
-              AND user_events.metadata->>'isDailyChallenge' = 'false'
-          ) AS unique_normal_debate_completers,
-
-          COUNT(DISTINCT COALESCE(NULLIF(user_events.metadata->>'debateId', ''), user_events.id::text)) FILTER (
-            WHERE event_name = 'debate_completed'
-              AND user_events.metadata->>'isDailyChallenge' = 'false'
-          ) AS normal_debate_completions,
-
-          COUNT(DISTINCT user_events.user_id) FILTER (
-            WHERE event_name = 'report_viewed'
-          ) AS unique_report_viewers,
-
-          COUNT(*) FILTER (
-            WHERE event_name = 'report_viewed'
-          ) AS report_views,
-
-          COUNT(DISTINCT user_events.user_id) FILTER (
-            WHERE event_name = 'share_card_created'
-          ) AS unique_share_card_creators,
-
-          COUNT(*) FILTER (
-            WHERE event_name = 'share_card_created'
-          ) AS share_cards_created
-
-        FROM bounds
-        LEFT JOIN user_events
-          ON user_events.created_at >= bounds.start_time
-          AND user_events.created_at < bounds.end_time
+          e.*,
+          NULLIF(BTRIM(e.metadata->>'debateId'), '') AS analytics_debate_id
+        FROM user_events e
+        CROSS JOIN bounds b
+        WHERE e.created_at >= b.start_time
+          AND e.created_at < b.end_time
           AND NOT EXISTS (
-            SELECT 1 FROM excluded_analytics_users x
-            WHERE x.user_id = user_events.user_id
+            SELECT 1
+            FROM excluded_analytics_users x
+            WHERE x.user_id = e.user_id
           )
-        GROUP BY bounds.report_date
-      ),
-      report_generation_timing_events AS (
-        SELECT
-          bounds.report_date,
-          user_events.user_id,
-          CASE
-            WHEN user_events.metadata->>'durationMs' ~ '^[0-9]+(\\.[0-9]+)?$'
-              THEN (user_events.metadata->>'durationMs')::numeric / 1000.0
-            ELSE NULL
-          END AS generation_seconds
-        FROM bounds
-        JOIN user_events
-          ON user_events.created_at >= bounds.start_time
-          AND user_events.created_at < bounds.end_time
-          AND user_events.event_name = 'report_generation_completed'
-          AND NOT EXISTS (
-            SELECT 1 FROM excluded_analytics_users x
-            WHERE x.user_id = user_events.user_id
-          )
-      ),
-      report_generation_timing_summary AS (
-        SELECT
-          bounds.report_date,
-          COUNT(report_generation_timing_events.generation_seconds) AS reports_generated_with_timing,
-          ROUND(AVG(report_generation_timing_events.generation_seconds), 2) AS average_generation_seconds,
-          ROUND(MIN(report_generation_timing_events.generation_seconds), 2) AS fastest_generation_seconds,
-          ROUND(MAX(report_generation_timing_events.generation_seconds), 2) AS slowest_generation_seconds
-        FROM bounds
-        LEFT JOIN report_generation_timing_events
-          ON bounds.report_date = report_generation_timing_events.report_date
-        GROUP BY bounds.report_date
       ),
       first_seen AS (
         SELECT
@@ -379,82 +276,310 @@ async function main() {
           MIN(active_date) AS first_active_date
         FROM user_activity_days
         WHERE NOT EXISTS (
-          SELECT 1 FROM excluded_analytics_users x
+          SELECT 1
+          FROM excluded_analytics_users x
           WHERE x.user_id = user_activity_days.user_id
         )
         GROUP BY user_id
       ),
       report_day_users AS (
         SELECT DISTINCT
-          user_activity_days.user_id,
-          user_activity_days.active_date
-        FROM user_activity_days
-        CROSS JOIN params
-        WHERE user_activity_days.active_date = params.report_date
+          uad.user_id,
+          uad.active_date
+        FROM user_activity_days uad
+        CROSS JOIN params p
+        WHERE uad.active_date = p.report_date
           AND NOT EXISTS (
-            SELECT 1 FROM excluded_analytics_users x
-            WHERE x.user_id = user_activity_days.user_id
+            SELECT 1
+            FROM excluded_analytics_users x
+            WHERE x.user_id = uad.user_id
           )
       ),
       activity_summary AS (
         SELECT
-          params.report_date,
-
-          COUNT(report_day_users.user_id) AS daily_active_users,
-
-          COUNT(report_day_users.user_id) FILTER (
-            WHERE first_seen.first_active_date = params.report_date
+          p.report_date,
+          COUNT(rdu.user_id) AS daily_active_users,
+          COUNT(rdu.user_id) FILTER (
+            WHERE fs.first_active_date = p.report_date
           ) AS new_users,
-
-          COUNT(report_day_users.user_id) FILTER (
-            WHERE first_seen.first_active_date < params.report_date
+          COUNT(rdu.user_id) FILTER (
+            WHERE fs.first_active_date < p.report_date
           ) AS returning_users
-
-        FROM params
-        LEFT JOIN report_day_users
-          ON true
-        LEFT JOIN first_seen
-          ON report_day_users.user_id = first_seen.user_id
-        GROUP BY params.report_date
+        FROM params p
+        LEFT JOIN report_day_users rdu ON true
+        LEFT JOIN first_seen fs ON rdu.user_id = fs.user_id
+        GROUP BY p.report_date
+      ),
+      event_summary AS (
+        SELECT
+          b.report_date,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.event_name = 'daily_challenge_viewed'
+          ) AS daily_challenge_viewers,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.event_name = 'daily_challenge_started'
+          ) AS daily_challenge_starters,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.event_name = 'daily_challenge_completed'
+          ) AS daily_challenge_completions,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.event_name = 'philosopher_selected'
+          ) AS philosopher_selectors,
+          COUNT(*) FILTER (
+            WHERE e.event_name = 'philosopher_selected'
+          ) AS philosopher_selections,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.event_name = 'topic_selected'
+          ) AS topic_selectors,
+          COUNT(*) FILTER (
+            WHERE e.event_name = 'topic_selected'
+          ) AS topic_selections,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.event_name = 'difficulty_selected'
+          ) AS difficulty_selectors,
+          COUNT(*) FILTER (
+            WHERE e.event_name = 'difficulty_selected'
+          ) AS difficulty_selections,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.event_name = 'debate_started'
+              AND e.metadata->>'isDailyChallenge' = 'false'
+          ) AS unique_normal_debate_starters,
+          COUNT(DISTINCT COALESCE(e.analytics_debate_id, e.id::text)) FILTER (
+            WHERE e.event_name = 'debate_started'
+              AND e.metadata->>'isDailyChallenge' = 'false'
+          ) AS normal_debate_starts,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.event_name = 'debate_completed'
+              AND e.metadata->>'isDailyChallenge' = 'false'
+          ) AS unique_normal_debate_completers,
+          COUNT(DISTINCT COALESCE(e.analytics_debate_id, e.id::text)) FILTER (
+            WHERE e.event_name = 'debate_completed'
+              AND e.metadata->>'isDailyChallenge' = 'false'
+          ) AS normal_debate_completions,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.event_name = 'report_viewed'
+          ) AS unique_report_viewers,
+          COUNT(*) FILTER (
+            WHERE e.event_name = 'report_viewed'
+          ) AS report_views,
+          COUNT(DISTINCT e.user_id) FILTER (
+            WHERE e.event_name = 'share_card_created'
+          ) AS unique_share_card_creators,
+          COUNT(*) FILTER (
+            WHERE e.event_name = 'share_card_created'
+          ) AS share_cards_created
+        FROM bounds b
+        LEFT JOIN eligible_events e ON true
+        GROUP BY b.report_date
+      ),
+      stage_users AS (
+        SELECT DISTINCT e.user_id, e.event_name
+        FROM eligible_events e
+        WHERE e.event_name IN (
+          'daily_challenge_viewed',
+          'daily_challenge_started',
+          'daily_challenge_completed',
+          'philosopher_selected',
+          'topic_selected',
+          'difficulty_selected'
+        )
+      ),
+      normal_start_users AS (
+        SELECT DISTINCT e.user_id
+        FROM eligible_events e
+        WHERE e.event_name = 'debate_started'
+          AND e.metadata->>'isDailyChallenge' = 'false'
+      ),
+      funnel_overlap AS (
+        SELECT
+          (
+            SELECT COUNT(*)
+            FROM stage_users v
+            WHERE v.event_name = 'daily_challenge_viewed'
+              AND EXISTS (
+                SELECT 1
+                FROM report_day_users rdu
+                WHERE rdu.user_id = v.user_id
+              )
+          ) AS daily_challenge_active_viewers,
+          (
+            SELECT COUNT(*)
+            FROM stage_users s
+            WHERE s.event_name = 'daily_challenge_started'
+              AND EXISTS (
+                SELECT 1
+                FROM stage_users v
+                WHERE v.user_id = s.user_id
+                  AND v.event_name = 'daily_challenge_viewed'
+              )
+          ) AS daily_challenge_viewer_starters,
+          (
+            SELECT COUNT(*)
+            FROM stage_users c
+            WHERE c.event_name = 'daily_challenge_completed'
+              AND EXISTS (
+                SELECT 1
+                FROM stage_users s
+                WHERE s.user_id = c.user_id
+                  AND s.event_name = 'daily_challenge_started'
+              )
+          ) AS daily_challenge_starter_completions,
+          (
+            SELECT COUNT(*)
+            FROM stage_users c
+            WHERE c.event_name = 'daily_challenge_completed'
+              AND EXISTS (
+                SELECT 1
+                FROM stage_users v
+                WHERE v.user_id = c.user_id
+                  AND v.event_name = 'daily_challenge_viewed'
+              )
+          ) AS daily_challenge_viewer_completions,
+          (
+            SELECT COUNT(*)
+            FROM stage_users t
+            WHERE t.event_name = 'topic_selected'
+              AND EXISTS (
+                SELECT 1
+                FROM stage_users p
+                WHERE p.user_id = t.user_id
+                  AND p.event_name = 'philosopher_selected'
+              )
+          ) AS philosopher_topic_overlap,
+          (
+            SELECT COUNT(*)
+            FROM stage_users d
+            WHERE d.event_name = 'difficulty_selected'
+              AND EXISTS (
+                SELECT 1
+                FROM stage_users t
+                WHERE t.user_id = d.user_id
+                  AND t.event_name = 'topic_selected'
+              )
+          ) AS topic_difficulty_overlap,
+          (
+            SELECT COUNT(*)
+            FROM normal_start_users n
+            WHERE EXISTS (
+              SELECT 1
+              FROM stage_users d
+              WHERE d.user_id = n.user_id
+                AND d.event_name = 'difficulty_selected'
+            )
+          ) AS difficulty_start_overlap
+      ),
+      normal_started_debates AS (
+        SELECT
+          e.user_id,
+          e.analytics_debate_id AS debate_id,
+          MIN(e.created_at) AS started_at
+        FROM eligible_events e
+        WHERE e.event_name = 'debate_started'
+          AND e.metadata->>'isDailyChallenge' = 'false'
+          AND e.analytics_debate_id IS NOT NULL
+        GROUP BY e.user_id, e.analytics_debate_id
+      ),
+      normal_completed_debates AS (
+        SELECT
+          e.user_id,
+          e.analytics_debate_id AS debate_id,
+          MIN(e.created_at) AS completed_at
+        FROM eligible_events e
+        WHERE e.event_name = 'debate_completed'
+          AND e.metadata->>'isDailyChallenge' = 'false'
+          AND e.analytics_debate_id IS NOT NULL
+        GROUP BY e.user_id, e.analytics_debate_id
+      ),
+      normal_debate_conversion AS (
+        SELECT
+          COUNT(*) AS tracked_normal_debate_starts,
+          COUNT(*) FILTER (
+            WHERE EXISTS (
+              SELECT 1
+              FROM normal_completed_debates c
+              WHERE c.user_id = s.user_id
+                AND c.debate_id = s.debate_id
+                AND c.completed_at >= s.started_at
+            )
+          ) AS matched_normal_debate_completions
+        FROM normal_started_debates s
+      ),
+      viewed_report_debates AS (
+        SELECT DISTINCT e.user_id, e.analytics_debate_id AS debate_id
+        FROM eligible_events e
+        WHERE e.event_name = 'report_viewed'
+          AND e.analytics_debate_id IS NOT NULL
+      ),
+      shared_report_debates AS (
+        SELECT DISTINCT e.user_id, e.analytics_debate_id AS debate_id
+        FROM eligible_events e
+        WHERE e.event_name = 'share_card_created'
+          AND e.analytics_debate_id IS NOT NULL
+      ),
+      report_share_conversion AS (
+        SELECT
+          COUNT(*) AS tracked_report_views,
+          COUNT(*) FILTER (
+            WHERE EXISTS (
+              SELECT 1
+              FROM shared_report_debates s
+              WHERE s.user_id = v.user_id
+                AND s.debate_id = v.debate_id
+            )
+          ) AS matched_report_shares
+        FROM viewed_report_debates v
+      ),
+      ranked_timing_events AS (
+        SELECT
+          e.user_id,
+          COALESCE(e.analytics_debate_id, e.id::text) AS report_key,
+          CASE
+            WHEN e.metadata->>'durationMs' ~ '^[0-9]+(\\.[0-9]+)?$'
+              THEN (e.metadata->>'durationMs')::numeric / 1000.0
+            ELSE NULL
+          END AS generation_seconds,
+          ROW_NUMBER() OVER (
+            PARTITION BY e.user_id, COALESCE(e.analytics_debate_id, e.id::text)
+            ORDER BY e.created_at DESC, e.id DESC
+          ) AS rn
+        FROM eligible_events e
+        WHERE e.event_name = 'report_generation_completed'
+      ),
+      report_generation_timing_events AS (
+        SELECT generation_seconds
+        FROM ranked_timing_events
+        WHERE rn = 1
+      ),
+      report_generation_timing_summary AS (
+        SELECT
+          b.report_date,
+          COUNT(t.generation_seconds) AS reports_generated_with_timing,
+          ROUND(AVG(t.generation_seconds), 2) AS average_generation_seconds,
+          ROUND(MIN(t.generation_seconds), 2) AS fastest_generation_seconds,
+          ROUND(MAX(t.generation_seconds), 2) AS slowest_generation_seconds
+        FROM bounds b
+        LEFT JOIN report_generation_timing_events t ON true
+        GROUP BY b.report_date
       )
       SELECT
-        TO_CHAR(activity_summary.report_date, 'YYYY-MM-DD') AS report_date,
-
-        activity_summary.daily_active_users,
-        activity_summary.new_users,
-        activity_summary.returning_users,
-
-        event_summary.daily_challenge_viewers,
-        event_summary.daily_challenge_starters,
-        event_summary.daily_challenge_completions,
-
-        event_summary.philosopher_selectors,
-        event_summary.philosopher_selections,
-        event_summary.topic_selectors,
-        event_summary.topic_selections,
-        event_summary.difficulty_selectors,
-        event_summary.difficulty_selections,
-
-        event_summary.unique_normal_debate_starters,
-        event_summary.normal_debate_starts,
-        event_summary.unique_normal_debate_completers,
-        event_summary.normal_debate_completions,
-
-        event_summary.unique_report_viewers,
-        event_summary.report_views,
-        event_summary.unique_share_card_creators,
-        event_summary.share_cards_created,
-
-        report_generation_timing_summary.reports_generated_with_timing,
-        report_generation_timing_summary.average_generation_seconds,
-        report_generation_timing_summary.fastest_generation_seconds,
-        report_generation_timing_summary.slowest_generation_seconds
-
-      FROM activity_summary
-      JOIN event_summary
-        ON activity_summary.report_date = event_summary.report_date
-      JOIN report_generation_timing_summary
-        ON activity_summary.report_date = report_generation_timing_summary.report_date;
+        TO_CHAR(a.report_date, 'YYYY-MM-DD') AS report_date,
+        a.daily_active_users,
+        a.new_users,
+        a.returning_users,
+        es.*,
+        fo.*,
+        ndc.*,
+        rsc.*,
+        rgt.reports_generated_with_timing,
+        rgt.average_generation_seconds,
+        rgt.fastest_generation_seconds,
+        rgt.slowest_generation_seconds
+      FROM activity_summary a
+      JOIN event_summary es ON a.report_date = es.report_date
+      CROSS JOIN funnel_overlap fo
+      CROSS JOIN normal_debate_conversion ndc
+      CROSS JOIN report_share_conversion rsc
+      JOIN report_generation_timing_summary rgt ON a.report_date = rgt.report_date;
     `);
 
     const sevenDayResult = await client.query(`
@@ -527,6 +652,10 @@ async function main() {
     const dailyChallengeViewers = toNumber(row.daily_challenge_viewers);
     const dailyChallengeStarters = toNumber(row.daily_challenge_starters);
     const dailyChallengeCompletions = toNumber(row.daily_challenge_completions);
+    const dailyChallengeActiveViewers = toNumber(row.daily_challenge_active_viewers);
+    const dailyChallengeViewerStarters = toNumber(row.daily_challenge_viewer_starters);
+    const dailyChallengeStarterCompletions = toNumber(row.daily_challenge_starter_completions);
+    const dailyChallengeViewerCompletions = toNumber(row.daily_challenge_viewer_completions);
 
     const philosopherSelectors = toNumber(row.philosopher_selectors);
     const philosopherSelections = toNumber(row.philosopher_selections);
@@ -534,16 +663,23 @@ async function main() {
     const topicSelections = toNumber(row.topic_selections);
     const difficultySelectors = toNumber(row.difficulty_selectors);
     const difficultySelections = toNumber(row.difficulty_selections);
+    const philosopherTopicOverlap = toNumber(row.philosopher_topic_overlap);
+    const topicDifficultyOverlap = toNumber(row.topic_difficulty_overlap);
+    const difficultyStartOverlap = toNumber(row.difficulty_start_overlap);
 
     const uniqueNormalDebateStarters = toNumber(row.unique_normal_debate_starters);
     const normalDebateStarts = toNumber(row.normal_debate_starts);
     const uniqueNormalDebateCompleters = toNumber(row.unique_normal_debate_completers);
     const normalDebateCompletions = toNumber(row.normal_debate_completions);
+    const trackedNormalDebateStarts = toNumber(row.tracked_normal_debate_starts);
+    const matchedNormalDebateCompletions = toNumber(row.matched_normal_debate_completions);
 
     const uniqueReportViewers = toNumber(row.unique_report_viewers);
     const reportViews = toNumber(row.report_views);
     const uniqueShareCardCreators = toNumber(row.unique_share_card_creators);
     const shareCardsCreated = toNumber(row.share_cards_created);
+    const trackedReportViews = toNumber(row.tracked_report_views);
+    const matchedReportShares = toNumber(row.matched_report_shares);
 
     const reportsGeneratedWithTiming = toNumber(row.reports_generated_with_timing);
     const averageGenerationSeconds = row.average_generation_seconds;
@@ -551,68 +687,67 @@ async function main() {
     const slowestGenerationSeconds = row.slowest_generation_seconds;
 
     const dailyChallengeVisibilityRate = percent(
-      dailyChallengeViewers,
+      dailyChallengeActiveViewers,
       dailyActiveUsers
     );
 
     const dailyChallengeViewerToStarterRate = percent(
-      dailyChallengeStarters,
+      dailyChallengeViewerStarters,
       dailyChallengeViewers
     );
 
     const dailyChallengeStarterToCompletionRate = percent(
-      dailyChallengeCompletions,
+      dailyChallengeStarterCompletions,
       dailyChallengeStarters
     );
 
     const dailyChallengeViewerToCompletionRate = percent(
-      dailyChallengeCompletions,
+      dailyChallengeViewerCompletions,
       dailyChallengeViewers
     );
 
     const philosopherToTopicRate = percent(
-      topicSelectors,
+      philosopherTopicOverlap,
       philosopherSelectors
     );
 
     const topicToDifficultyRate = percent(
-      difficultySelectors,
+      topicDifficultyOverlap,
       topicSelectors
     );
 
     const difficultyToNormalDebateStartRate = percent(
-      uniqueNormalDebateStarters,
+      difficultyStartOverlap,
       difficultySelectors
     );
 
     const normalDebateCompletionRate = percent(
-      normalDebateCompletions,
-      normalDebateStarts
+      matchedNormalDebateCompletions,
+      trackedNormalDebateStarts
     );
 
-    const totalReportToShareRate = percent(
-      shareCardsCreated,
-      reportViews
-    );
-
-    const uniqueReportToShareRate = percent(
-      uniqueShareCardCreators,
-      uniqueReportViewers
+    const reportToShareRate = percent(
+      matchedReportShares,
+      trackedReportViews
     );
 
     const { biggestDropOff, recommendedAction } = chooseBiggestDropOff({
       dailyActiveUsers,
+      dailyChallengeActiveViewers,
       dailyChallengeViewers,
+      dailyChallengeViewerStarters,
       dailyChallengeStarters,
-      dailyChallengeCompletions,
+      dailyChallengeStarterCompletions,
       philosopherSelectors,
+      philosopherTopicOverlap,
       topicSelectors,
+      topicDifficultyOverlap,
       difficultySelectors,
-      uniqueNormalDebateStarters,
-      normalDebateStarts,
-      normalDebateCompletions,
-      reportViews,
-      shareCardsCreated,
+      difficultyStartOverlap,
+      trackedNormalDebateStarts,
+      matchedNormalDebateCompletions,
+      trackedReportViews,
+      matchedReportShares,
     });
 
     const reportGenerationNote = chooseReportGenerationNote({
@@ -632,13 +767,13 @@ async function main() {
       `<b>Returning users:</b> ${returningUsers}`,
       ``,
       `<b>Daily Challenge Funnel</b>`,
-      `<b>Daily Challenge viewers:</b> ${dailyChallengeViewers} / ${dailyActiveUsers} active users`,
-      `<b>Daily Challenge visibility rate:</b> ${dailyChallengeVisibilityRate}`,
-      `<b>Daily Challenge starters:</b> ${dailyChallengeStarters}`,
-      `<b>Daily Challenge completions:</b> ${dailyChallengeCompletions}`,
-      `<b>Viewer → starter rate:</b> ${dailyChallengeViewerToStarterRate}`,
-      `<b>Starter → completion rate:</b> ${dailyChallengeStarterToCompletionRate}`,
-      `<b>Viewer → completion rate:</b> ${dailyChallengeViewerToCompletionRate}`,
+      `<b>Daily Challenge viewers:</b> ${dailyChallengeViewers} users`,
+      `<b>Daily Challenge starters:</b> ${dailyChallengeStarters} users`,
+      `<b>Daily Challenge completions:</b> ${dailyChallengeCompletions} users`,
+      `<b>Active-user visibility overlap:</b> ${dailyChallengeActiveViewers} of ${dailyActiveUsers} active users (${dailyChallengeVisibilityRate})`,
+      `<b>Same-day viewer → starter overlap:</b> ${dailyChallengeViewerStarters} of ${dailyChallengeViewers} viewers (${dailyChallengeViewerToStarterRate})`,
+      `<b>Same-day starter → completion overlap:</b> ${dailyChallengeStarterCompletions} of ${dailyChallengeStarters} starters (${dailyChallengeStarterToCompletionRate})`,
+      `<b>Same-day viewer → completion overlap:</b> ${dailyChallengeViewerCompletions} of ${dailyChallengeViewers} viewers (${dailyChallengeViewerToCompletionRate})`,
       ``,
       `<b>Normal Debate Funnel</b>`,
       `<b>Philosopher selectors:</b> ${philosopherSelectors} users`,
@@ -653,28 +788,31 @@ async function main() {
       `<b>Normal debate completions:</b> ${normalDebateCompletions} debates`,
       `<b>Unique normal debate completers:</b> ${uniqueNormalDebateCompleters} users`,
       ``,
-      `<b>Philosopher → topic rate:</b> ${philosopherToTopicRate}`,
-      `<b>Topic → difficulty rate:</b> ${topicToDifficultyRate}`,
-      `<b>Difficulty → normal debate start rate:</b> ${difficultyToNormalDebateStartRate}`,
-      `<b>Normal debate completion rate:</b> ${normalDebateCompletionRate}`,
+      `<b>Same-day philosopher → topic overlap:</b> ${philosopherTopicOverlap} of ${philosopherSelectors} users (${philosopherToTopicRate})`,
+      `<b>Same-day topic → difficulty overlap:</b> ${topicDifficultyOverlap} of ${topicSelectors} users (${topicToDifficultyRate})`,
+      `<b>Same-day difficulty → normal start overlap:</b> ${difficultyStartOverlap} of ${difficultySelectors} users (${difficultyToNormalDebateStartRate})`,
+      `<b>Tracked normal starts with debateId:</b> ${trackedNormalDebateStarts}`,
+      `<b>Tracked starts completed the same day:</b> ${matchedNormalDebateCompletions} of ${trackedNormalDebateStarts} (${normalDebateCompletionRate})`,
       ``,
       `<b>Reports / Sharing</b>`,
       `<b>Reports viewed:</b> ${reportViews} total`,
       `<b>Unique report viewers:</b> ${uniqueReportViewers} users`,
       `<b>Share cards created:</b> ${shareCardsCreated} total`,
       `<b>Unique share-card creators:</b> ${uniqueShareCardCreators} users`,
-      `<b>Total report-to-share rate:</b> ${totalReportToShareRate}`,
-      `<b>Unique report-to-share rate:</b> ${uniqueReportToShareRate}`,
+      `<b>Viewed reports with debateId:</b> ${trackedReportViews}`,
+      `<b>Viewed reports with at least one share:</b> ${matchedReportShares} of ${trackedReportViews} (${reportToShareRate})`,
       ``,
       `<b>Report Generation Time</b>`,
       `<b>Reports viewed:</b> ${reportViews} total`,
-      `<b>Reports with generation timing:</b> ${reportsGeneratedWithTiming}`,
+      `<b>Deduplicated reports with generation timing:</b> ${reportsGeneratedWithTiming}`,
       `<b>Average generation time:</b> ${formatSeconds(averageGenerationSeconds)}`,
       `<b>Fastest / slowest generation:</b> ${formatSeconds(fastestGenerationSeconds)} / ${formatSeconds(slowestGenerationSeconds)}`,
       `<b>Generation timing note:</b> ${reportGenerationNote}`,
       ``,
-      `<b>Biggest funnel drop-off:</b> ${biggestDropOff}`,
+      `<b>Biggest matched funnel drop-off:</b> ${biggestDropOff}`,
       `<b>One recommended action:</b> ${recommendedAction}`,
+      ``,
+      `<b>Measurement note:</b> Funnel percentages use same-day matched users or matching debateId values. Raw activity totals remain listed separately.`,
     ].join("\n");
 
     const sevenDayLines = sevenDayResult.rows.map((day) => {
