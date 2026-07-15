@@ -463,8 +463,8 @@ async function main() {
             FROM previous_month_users pmu
             WHERE NOT EXISTS (
               SELECT 1
-              FROM current_month_users current_user
-              WHERE current_user.user_id = pmu.user_id
+              FROM current_month_users current_month_user_row
+              WHERE current_month_user_row.user_id = pmu.user_id
             )
           ) AS lost_users_from_last_month
         FROM bounds b
