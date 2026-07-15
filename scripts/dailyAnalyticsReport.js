@@ -563,6 +563,10 @@ async function main() {
       )
       SELECT
         TO_CHAR(a.report_date, 'YYYY-MM-DD') AS report_date,
+        TO_CHAR(
+          a.report_date,
+          'FMDay, FMMonth FMDD, YYYY'
+        ) AS report_date_label,
         a.daily_active_users,
         a.new_users,
         a.returning_users,
@@ -760,7 +764,7 @@ async function main() {
       `🏛️ <b>The Oracle has spoken.</b>`,
       ``,
       `<b>The Agora Daily Report</b>`,
-      `For: <b>${row.report_date}</b>`,
+      `For: <b>${row.report_date_label}</b>`,
       ``,
       `<b>Daily Active Users:</b> ${dailyActiveUsers}`,
       `<b>New users:</b> ${newUsers}`,
@@ -846,7 +850,7 @@ async function main() {
       stripTelegramHtml(sevenDayMessage),
     ].join("\n");
 
-    const subject = `The Agora Daily Report — ${row.report_date}`;
+    const subject = `The Agora Daily Report — ${row.report_date_label}`;
 
     const deliveryResults = await Promise.allSettled([
       sendTelegramMessage(message),
