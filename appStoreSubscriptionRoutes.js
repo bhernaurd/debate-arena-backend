@@ -1,0 +1,1047 @@
+import { createHash } from 'node:crypto';
+import express from 'express';
+
+import {
+    AGORA_PRO_PRODUCT_IDS,
+    verifyAppStoreNotificationJWS,
+    verifyAppStoreRenewalInfoJWS,
+    verifyAppStoreTransactionJWS,
+} from './appStoreSubscriptionVerifier.js';
+
+const USER_ID_RE = /^[A-Za-z0-9-]{8,128}$/;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function cleanString(value, maxLength = 50000) {
+    if (typeof value !== 'string') return '';
+    return value.trim().slice(0, maxLength);
+}
+
+function normalizeUUID(value) {
+    const clean = cleanString(value, 64);
+    return UUID_RE.test(clean) ? clean.toUpperCase() : null;
+}
+
+function isValidUserId(value) {
+    return typeof value === 'string' && USER_ID_RE.test(value);
+}
+
+function requestInstallationId(req) {
+    const value = cleanString(req.get('x-installation-id'), 128);
+    return isValidUserId(value) ? value : null;
+}
+
+function toDate(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return null;
+    return new Date(numeric);
+}
+
+function enumText(value) {
+    if (value === undefined || value === null) return null;
+    return String(value);
+}
+
+function jsonSafe(value) {
+    if (value === undefined || value === null) return null;
+
+    return JSON.parse(
+        JSON.stringify(value, (_, item) =>
+            typeof item === 'bigint' ? item.toString() : item
+        )
+    );
+}
+
+function notificationForStorage(notification) {
+    const stored = jsonSafe(notification);
+
+    if (!stored || typeof stored !== 'object') {
+        return stored;
+    }
+
+    if (stored.data && typeof stored.data === 'object') {
+        const hadTransactionJWS =
+            typeof stored.data.signedTransactionInfo === 'string';
+        const hadRenewalJWS =
+            typeof stored.data.signedRenewalInfo === 'string';
+
+        delete stored.data.signedTransactionInfo;
+        delete stored.data.signedRenewalInfo;
+
+        stored.data.hadSignedTransactionInfo = hadTransactionJWS;
+        stored.data.hadSignedRenewalInfo = hadRenewalJWS;
+    }
+
+    return stored;
+}
+
+function isFreeTrial(transaction) {
+    const discountType = String(transaction?.offerDiscountType || '')
+        .trim()
+        .toUpperCase();
+
+    if (discountType === 'FREE_TRIAL') {
+        return true;
+    }
+
+    // The Agora currently has one introductory offer and it is the seven-day
+    // free trial. This fallback keeps trial classification working with older
+    // server-library payload models that may not expose offerDiscountType.
+    const offerType = transaction?.offerType;
+    const normalizedOfferType = String(offerType ?? '')
+        .trim()
+        .toUpperCase();
+
+    return (
+        offerType === 1 ||
+        normalizedOfferType === '1' ||
+        normalizedOfferType.includes('INTRODUCTORY')
+    );
+}
+
+function autoRenewEnabled(renewal) {
+    const raw = renewal?.autoRenewStatus;
+
+    if (raw === undefined || raw === null) return null;
+    if (raw === true || raw === 1 || raw === '1') return true;
+    if (raw === false || raw === 0 || raw === '0') return false;
+
+    const normalized = String(raw).trim().toUpperCase();
+
+    if (normalized.includes('ENABLED') || normalized === 'ON') return true;
+    if (normalized.includes('DISABLED') || normalized === 'OFF') return false;
+
+    return null;
+}
+
+function deriveStatus({
+    transaction,
+    renewal,
+    notificationType,
+    subtype,
+}) {
+    const now = Date.now();
+    const revocationDate = Number(transaction?.revocationDate || 0);
+    const expiresDate = Number(transaction?.expiresDate || 0);
+    const gracePeriodExpiresDate = Number(
+        renewal?.gracePeriodExpiresDate || 0
+    );
+    const isTrial = isFreeTrial(transaction);
+    const type = String(notificationType || '').toUpperCase();
+    const sub = String(subtype || '').toUpperCase();
+
+    if (
+        revocationDate > 0 ||
+        type === 'REFUND' ||
+        type === 'REVOKE'
+    ) {
+        return 'revoked';
+    }
+
+    if (transaction?.isUpgraded === true) {
+        return 'expired';
+    }
+
+    // EXPIRED means Apple has ended the subscription state. Process it before
+    // evaluating dates; stale delivery is handled separately by last_signed_date.
+    if (type === 'EXPIRED') {
+        return 'expired';
+    }
+
+    // When billing grace ends unsuccessfully, Apple continues attempting
+    // recovery in billing retry. Service is no longer entitled, but the chain
+    // should remain distinguishable from a final EXPIRED state.
+    if (type === 'GRACE_PERIOD_EXPIRED') {
+        return 'billing_retry';
+    }
+
+    if (
+        sub === 'GRACE_PERIOD' &&
+        gracePeriodExpiresDate > now
+    ) {
+        return 'grace_period';
+    }
+
+    if (expiresDate > now) {
+        return isTrial ? 'trial' : 'active';
+    }
+
+    if (
+        renewal?.isInBillingRetryPeriod === true ||
+        type === 'DID_FAIL_TO_RENEW'
+    ) {
+        return 'billing_retry';
+    }
+
+    return expiresDate > 0 ? 'expired' : 'unknown';
+}
+
+async function resolveExistingUserId(
+    client,
+    originalTransactionId,
+    environment
+) {
+    if (!originalTransactionId) return null;
+
+    const result = await client.query(
+        `
+        SELECT user_id
+        FROM (
+            SELECT
+                user_id,
+                1 AS priority,
+                updated_at AS seen_at
+            FROM subscription_entitlements
+            WHERE original_transaction_id = $1
+              AND environment = $2
+              AND user_id IS NOT NULL
+
+            UNION ALL
+
+            SELECT
+                user_id,
+                2 AS priority,
+                MIN(created_at) AS seen_at
+            FROM app_store_transactions
+            WHERE original_transaction_id = $1
+              AND environment = $2
+              AND user_id IS NOT NULL
+            GROUP BY user_id
+
+            UNION ALL
+
+            SELECT
+                user_id,
+                3 AS priority,
+                first_seen_at AS seen_at
+            FROM subscription_installation_links
+            WHERE original_transaction_id = $1
+              AND environment = $2
+              AND user_id IS NOT NULL
+        ) candidates
+        ORDER BY priority, seen_at ASC, user_id ASC
+        LIMIT 1
+        `,
+        [originalTransactionId, environment]
+    );
+
+    return result.rows[0]?.user_id || null;
+}
+
+async function resolveUserId({
+    client,
+    transaction,
+    requestedUserId,
+    environment,
+}) {
+    const existingUserId = await resolveExistingUserId(
+        client,
+        transaction?.originalTransactionId,
+        environment
+    );
+    const tokenUserId = normalizeUUID(transaction?.appAccountToken);
+
+    // Keep one stable canonical owner for the subscription chain. A verified
+    // entitlement may also be restored on another installation; that device is
+    // linked separately instead of replacing the canonical owner or failing.
+    return existingUserId || tokenUserId || requestedUserId || null;
+}
+
+async function upsertTransaction(client, {
+    transaction,
+    environment,
+    userId,
+}) {
+    const transactionId = cleanString(
+        transaction?.transactionId,
+        128
+    );
+    const originalTransactionId = cleanString(
+        transaction?.originalTransactionId,
+        128
+    );
+    const productId = cleanString(transaction?.productId, 200);
+
+    if (!transactionId || !originalTransactionId || !productId) {
+        throw new Error(
+            'Verified App Store transaction is missing required identifiers.'
+        );
+    }
+
+    if (!AGORA_PRO_PRODUCT_IDS.has(productId)) {
+        return null;
+    }
+
+    const appAccountToken = normalizeUUID(
+        transaction?.appAccountToken
+    );
+
+    await client.query(
+        `
+        INSERT INTO app_store_transactions (
+            transaction_id,
+            original_transaction_id,
+            user_id,
+            app_account_token,
+            product_id,
+            subscription_group_identifier,
+            environment,
+            transaction_type,
+            transaction_reason,
+            offer_type,
+            offer_identifier,
+            offer_discount_type,
+            is_trial,
+            ownership_type,
+            purchase_date,
+            original_purchase_date,
+            expires_date,
+            revocation_date,
+            signed_date,
+            storefront,
+            storefront_id,
+            currency,
+            price_milliunits,
+            quantity,
+            raw_transaction
+        )
+        VALUES (
+            $1, $2, $3, $4::uuid, $5, $6, $7, $8, $9, $10,
+            $11, $12, $13, $14, $15, $16, $17, $18, $19, $20,
+            $21, $22, $23, $24, $25::jsonb
+        )
+        ON CONFLICT (transaction_id, environment) DO UPDATE SET
+            original_transaction_id = EXCLUDED.original_transaction_id,
+            user_id = COALESCE(app_store_transactions.user_id, EXCLUDED.user_id),
+            app_account_token = COALESCE(EXCLUDED.app_account_token, app_store_transactions.app_account_token),
+            product_id = EXCLUDED.product_id,
+            subscription_group_identifier = COALESCE(EXCLUDED.subscription_group_identifier, app_store_transactions.subscription_group_identifier),
+            environment = EXCLUDED.environment,
+            transaction_type = COALESCE(EXCLUDED.transaction_type, app_store_transactions.transaction_type),
+            transaction_reason = COALESCE(EXCLUDED.transaction_reason, app_store_transactions.transaction_reason),
+            offer_type = COALESCE(EXCLUDED.offer_type, app_store_transactions.offer_type),
+            offer_identifier = COALESCE(EXCLUDED.offer_identifier, app_store_transactions.offer_identifier),
+            offer_discount_type = COALESCE(EXCLUDED.offer_discount_type, app_store_transactions.offer_discount_type),
+            is_trial = EXCLUDED.is_trial,
+            ownership_type = COALESCE(EXCLUDED.ownership_type, app_store_transactions.ownership_type),
+            purchase_date = COALESCE(EXCLUDED.purchase_date, app_store_transactions.purchase_date),
+            original_purchase_date = COALESCE(EXCLUDED.original_purchase_date, app_store_transactions.original_purchase_date),
+            expires_date = COALESCE(EXCLUDED.expires_date, app_store_transactions.expires_date),
+            revocation_date = COALESCE(EXCLUDED.revocation_date, app_store_transactions.revocation_date),
+            signed_date = COALESCE(EXCLUDED.signed_date, app_store_transactions.signed_date),
+            storefront = COALESCE(EXCLUDED.storefront, app_store_transactions.storefront),
+            storefront_id = COALESCE(EXCLUDED.storefront_id, app_store_transactions.storefront_id),
+            currency = COALESCE(EXCLUDED.currency, app_store_transactions.currency),
+            price_milliunits = COALESCE(EXCLUDED.price_milliunits, app_store_transactions.price_milliunits),
+            quantity = COALESCE(EXCLUDED.quantity, app_store_transactions.quantity),
+            raw_transaction = COALESCE(EXCLUDED.raw_transaction, app_store_transactions.raw_transaction),
+            updated_at = NOW()
+        WHERE
+            app_store_transactions.signed_date IS NULL OR
+            (
+                EXCLUDED.signed_date IS NOT NULL AND
+                EXCLUDED.signed_date >= app_store_transactions.signed_date
+            )
+        `,
+        [
+            transactionId,
+            originalTransactionId,
+            userId,
+            appAccountToken,
+            productId,
+            enumText(transaction?.subscriptionGroupIdentifier),
+            environment,
+            enumText(transaction?.type),
+            enumText(transaction?.transactionReason),
+            enumText(transaction?.offerType),
+            cleanString(transaction?.offerIdentifier, 200) || null,
+            enumText(transaction?.offerDiscountType),
+            isFreeTrial(transaction),
+            enumText(transaction?.inAppOwnershipType),
+            toDate(transaction?.purchaseDate),
+            toDate(transaction?.originalPurchaseDate),
+            toDate(transaction?.expiresDate),
+            toDate(transaction?.revocationDate),
+            toDate(transaction?.signedDate),
+            cleanString(transaction?.storefront, 32) || null,
+            cleanString(transaction?.storefrontId, 64) || null,
+            cleanString(transaction?.currency, 16) || null,
+            Number.isFinite(Number(transaction?.price))
+                ? Number(transaction.price)
+                : null,
+            Number.isFinite(Number(transaction?.quantity))
+                ? Number(transaction.quantity)
+                : null,
+            JSON.stringify(jsonSafe(transaction)),
+        ]
+    );
+
+    return {
+        transactionId,
+        originalTransactionId,
+        productId,
+        appAccountToken,
+    };
+}
+
+async function upsertEntitlement(client, {
+    transaction,
+    renewal,
+    environment,
+    userId,
+    notificationType,
+    subtype,
+    source,
+    snapshotSignedDate,
+}) {
+    const originalTransactionId = cleanString(
+        transaction?.originalTransactionId ||
+        renewal?.originalTransactionId,
+        128
+    );
+    const productId = cleanString(
+        transaction?.productId || renewal?.autoRenewProductId,
+        200
+    );
+
+    if (!originalTransactionId || !productId) {
+        return null;
+    }
+
+    if (!AGORA_PRO_PRODUCT_IDS.has(productId)) {
+        return null;
+    }
+
+    const status = deriveStatus({
+        transaction,
+        renewal,
+        notificationType,
+        subtype,
+    });
+    const trial = isFreeTrial(transaction);
+    const appAccountToken = normalizeUUID(
+        transaction?.appAccountToken || renewal?.appAccountToken
+    );
+    const autoRenew = autoRenewEnabled(renewal);
+
+    const upsertResult = await client.query(
+        `
+        INSERT INTO subscription_entitlements (
+            original_transaction_id,
+            user_id,
+            app_account_token,
+            product_id,
+            environment,
+            status,
+            is_trial,
+            auto_renew_enabled,
+            purchase_date,
+            original_purchase_date,
+            expires_date,
+            grace_period_expires_date,
+            revocation_date,
+            expiration_intent,
+            last_transaction_id,
+            last_notification_type,
+            last_notification_subtype,
+            source,
+            last_signed_date
+        )
+        VALUES (
+            $1, $2, $3::uuid, $4, $5, $6, $7, $8, $9,
+            $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+        )
+        ON CONFLICT (original_transaction_id, environment) DO UPDATE SET
+            user_id = COALESCE(subscription_entitlements.user_id, EXCLUDED.user_id),
+            app_account_token = COALESCE(EXCLUDED.app_account_token, subscription_entitlements.app_account_token),
+            product_id = EXCLUDED.product_id,
+            environment = EXCLUDED.environment,
+            status = EXCLUDED.status,
+            is_trial = EXCLUDED.is_trial,
+            auto_renew_enabled = COALESCE(EXCLUDED.auto_renew_enabled, subscription_entitlements.auto_renew_enabled),
+            purchase_date = COALESCE(EXCLUDED.purchase_date, subscription_entitlements.purchase_date),
+            original_purchase_date = COALESCE(EXCLUDED.original_purchase_date, subscription_entitlements.original_purchase_date),
+            expires_date = COALESCE(EXCLUDED.expires_date, subscription_entitlements.expires_date),
+            grace_period_expires_date = COALESCE(EXCLUDED.grace_period_expires_date, subscription_entitlements.grace_period_expires_date),
+            revocation_date = COALESCE(EXCLUDED.revocation_date, subscription_entitlements.revocation_date),
+            expiration_intent = COALESCE(EXCLUDED.expiration_intent, subscription_entitlements.expiration_intent),
+            last_transaction_id = COALESCE(EXCLUDED.last_transaction_id, subscription_entitlements.last_transaction_id),
+            last_notification_type = COALESCE(EXCLUDED.last_notification_type, subscription_entitlements.last_notification_type),
+            last_notification_subtype = COALESCE(EXCLUDED.last_notification_subtype, subscription_entitlements.last_notification_subtype),
+            source = CASE
+                WHEN EXCLUDED.source = 'apple_notification'
+                    THEN EXCLUDED.source
+                ELSE subscription_entitlements.source
+            END,
+            last_signed_date = EXCLUDED.last_signed_date,
+            updated_at = NOW()
+        WHERE
+            subscription_entitlements.last_signed_date IS NULL OR
+            EXCLUDED.last_signed_date >=
+                subscription_entitlements.last_signed_date
+        RETURNING
+            original_transaction_id,
+            product_id,
+            status,
+            is_trial,
+            auto_renew_enabled,
+            expires_date,
+            last_signed_date
+        `,
+        [
+            originalTransactionId,
+            userId,
+            appAccountToken,
+            productId,
+            environment,
+            status,
+            trial,
+            autoRenew,
+            toDate(transaction?.purchaseDate),
+            toDate(transaction?.originalPurchaseDate),
+            toDate(transaction?.expiresDate),
+            toDate(renewal?.gracePeriodExpiresDate),
+            toDate(transaction?.revocationDate),
+            Number.isFinite(Number(renewal?.expirationIntent))
+                ? Number(renewal.expirationIntent)
+                : null,
+            cleanString(transaction?.transactionId, 128) || null,
+            cleanString(notificationType, 100) || null,
+            cleanString(subtype, 100) || null,
+            source,
+            snapshotSignedDate ||
+                toDate(transaction?.signedDate) ||
+                new Date(),
+        ]
+    );
+
+    let canonicalRow = upsertResult.rows[0] || null;
+
+    // PostgreSQL returns no row when the ON CONFLICT ... WHERE guard rejects an
+    // older snapshot. Load the canonical entitlement so status_after reflects
+    // the state that actually remains after processing, not the stale incoming
+    // notification.
+    if (!canonicalRow) {
+        const currentResult = await client.query(
+            `
+            SELECT
+                original_transaction_id,
+                product_id,
+                status,
+                is_trial,
+                auto_renew_enabled,
+                expires_date,
+                last_signed_date
+            FROM subscription_entitlements
+            WHERE original_transaction_id = $1
+              AND environment = $2
+            LIMIT 1
+            `,
+            [originalTransactionId, environment]
+        );
+
+        canonicalRow = currentResult.rows[0] || null;
+    }
+
+    if (!canonicalRow) {
+        return null;
+    }
+
+    return {
+        originalTransactionId:
+            canonicalRow.original_transaction_id,
+        productId: canonicalRow.product_id,
+        status: canonicalRow.status,
+        isTrial: canonicalRow.is_trial === true,
+        autoRenewEnabled:
+            canonicalRow.auto_renew_enabled ?? null,
+        expiresDate: canonicalRow.expires_date || null,
+        lastSignedDate: canonicalRow.last_signed_date || null,
+    };
+}
+
+async function linkSubscriptionInstallations(client, {
+    originalTransactionId,
+    environment,
+    transaction,
+    requestedUserId,
+    canonicalUserId,
+    source,
+}) {
+    if (!originalTransactionId || !environment) return;
+
+    const tokenUserId = normalizeUUID(transaction?.appAccountToken);
+    const candidates = new Set(
+        [canonicalUserId, requestedUserId, tokenUserId]
+            .filter((value) => isValidUserId(value))
+    );
+
+    for (const userId of candidates) {
+        const candidateAppAccountToken =
+            userId === tokenUserId ? tokenUserId : null;
+
+        await client.query(
+            `
+            INSERT INTO subscription_installation_links (
+                original_transaction_id,
+                environment,
+                user_id,
+                app_account_token,
+                link_source
+            )
+            VALUES ($1, $2, $3, $4::uuid, $5)
+            ON CONFLICT (
+                original_transaction_id,
+                environment,
+                user_id
+            ) DO UPDATE SET
+                app_account_token = COALESCE(
+                    EXCLUDED.app_account_token,
+                    subscription_installation_links.app_account_token
+                ),
+                link_source = EXCLUDED.link_source,
+                last_seen_at = NOW()
+            `,
+            [
+                originalTransactionId,
+                environment,
+                userId,
+                candidateAppAccountToken,
+                source,
+            ]
+        );
+    }
+}
+
+async function insertSubscriptionEvent(client, {
+    eventKey,
+    notificationUUID,
+    source,
+    userId,
+    transaction,
+    entitlement,
+    notificationType,
+    subtype,
+    environment,
+    eventAt,
+    metadata,
+}) {
+    if (!entitlement) return;
+
+    await client.query(
+        `
+        INSERT INTO subscription_events (
+            event_key,
+            notification_uuid,
+            source,
+            user_id,
+            original_transaction_id,
+            transaction_id,
+            event_type,
+            subtype,
+            environment,
+            product_id,
+            status_after,
+            is_trial,
+            auto_renew_enabled,
+            expires_date,
+            event_at,
+            metadata
+        )
+        VALUES (
+            $1, $2, $3, $4, $5, $6, $7, $8,
+            $9, $10, $11, $12, $13, $14, $15, $16::jsonb
+        )
+        ON CONFLICT (event_key) DO NOTHING
+        `,
+        [
+            eventKey,
+            notificationUUID || null,
+            source,
+            userId,
+            entitlement.originalTransactionId,
+            cleanString(transaction?.transactionId, 128) || null,
+            notificationType,
+            subtype || null,
+            environment,
+            entitlement.productId,
+            entitlement.status,
+            entitlement.isTrial,
+            entitlement.autoRenewEnabled,
+            entitlement.expiresDate,
+            eventAt || new Date(),
+            JSON.stringify(jsonSafe(metadata) || {}),
+        ]
+    );
+}
+
+async function persistVerifiedSnapshot(client, {
+    transaction,
+    renewal = null,
+    environment,
+    requestedUserId = null,
+    notificationType,
+    subtype = null,
+    source,
+    eventKey,
+    notificationUUID = null,
+    eventAt = null,
+    metadata = null,
+}) {
+    const userId = await resolveUserId({
+        client,
+        transaction,
+        requestedUserId,
+        environment,
+    });
+
+    const storedTransaction = await upsertTransaction(client, {
+        transaction,
+        environment,
+        userId,
+    });
+
+    if (!storedTransaction) {
+        return {
+            ignored: true,
+            reason: 'non_agora_product',
+        };
+    }
+
+    const entitlement = await upsertEntitlement(client, {
+        transaction,
+        renewal,
+        environment,
+        userId,
+        notificationType,
+        subtype,
+        source,
+        snapshotSignedDate: eventAt,
+    });
+
+    await linkSubscriptionInstallations(client, {
+        originalTransactionId: storedTransaction.originalTransactionId,
+        environment,
+        transaction,
+        requestedUserId,
+        canonicalUserId: userId,
+        source,
+    });
+
+    await insertSubscriptionEvent(client, {
+        eventKey,
+        notificationUUID,
+        source,
+        userId,
+        transaction,
+        entitlement,
+        notificationType,
+        subtype,
+        environment,
+        eventAt,
+        metadata,
+    });
+
+    return {
+        ignored: false,
+        userId,
+        entitlement,
+    };
+}
+
+export function createAppStoreSubscriptionRouter(pool) {
+    const router = express.Router();
+
+    // Called by the iOS app after a locally verified purchase, restore, launch,
+    // or StoreKit transaction update. The JWS is verified again on the server.
+    router.post('/api/app-store/sync-transaction', async (req, res) => {
+        const requestedUserId = requestInstallationId(req);
+        const transactionJWS = cleanString(
+            req.body?.transactionJWS,
+            50000
+        );
+
+        if (!requestedUserId) {
+            return res.status(401).json({
+                success: false,
+                error: 'X-Installation-ID is required.',
+            });
+        }
+
+        if (!transactionJWS) {
+            return res.status(400).json({
+                success: false,
+                error: 'transactionJWS is required.',
+            });
+        }
+
+        let client;
+        let processingStarted = false;
+
+        try {
+            const {
+                decoded: transaction,
+                environment,
+            } = await verifyAppStoreTransactionJWS(transactionJWS);
+
+            processingStarted = true;
+            client = await pool.connect();
+            await client.query('BEGIN');
+
+            const transactionId = cleanString(
+                transaction?.transactionId,
+                128
+            );
+            const signedDate = Number(transaction?.signedDate || 0);
+            const eventKey = `client_sync:${environment}:${transactionId}:${signedDate || 'unknown'}`;
+
+            const result = await persistVerifiedSnapshot(client, {
+                transaction,
+                environment,
+                requestedUserId,
+                notificationType: 'CLIENT_SYNC',
+                source: 'client_sync',
+                eventKey,
+                eventAt: toDate(transaction?.signedDate) || new Date(),
+                metadata: {
+                    iosBuild: req.get('x-ios-build') || null,
+                },
+            });
+
+            await client.query('COMMIT');
+
+            return res.json({
+                success: true,
+                ignored: result.ignored,
+                reason: result.reason || null,
+                status: result.entitlement?.status || null,
+                analyticsAccessTier:
+                    result.entitlement?.isTrial &&
+                    ['trial', 'active', 'grace_period'].includes(
+                        result.entitlement?.status
+                    )
+                        ? 'trial'
+                        : result.entitlement?.status === 'active' ||
+                          result.entitlement?.status === 'grace_period'
+                            ? 'paid_pro'
+                            : 'free',
+            });
+        } catch (error) {
+            if (client) {
+                try {
+                    await client.query('ROLLBACK');
+                } catch {}
+            }
+
+            console.error(
+                '[AppStoreSubscriptions] Client sync failed:',
+                error?.message || error
+            );
+
+            const statusCode = Number(
+                error?.statusCode ||
+                (processingStarted ? 500 : 400)
+            );
+
+            return res.status(statusCode).json({
+                success: false,
+                error: processingStarted
+                    ? 'Transaction sync processing failed.'
+                    : (error?.message || 'Transaction verification failed.'),
+            });
+        } finally {
+            client?.release();
+        }
+    });
+
+    // App Store Server Notifications V2 endpoint.
+    router.post('/api/app-store/notifications', async (req, res) => {
+        const signedPayload = cleanString(
+            req.body?.signedPayload,
+            100000
+        );
+
+        if (!signedPayload) {
+            return res.status(400).json({
+                success: false,
+                error: 'signedPayload is required.',
+            });
+        }
+
+        let client;
+        let processingStarted = false;
+
+        try {
+            const {
+                decoded: notification,
+                environment: verifiedEnvironment,
+            } = await verifyAppStoreNotificationJWS(signedPayload);
+
+            const notificationUUID = cleanString(
+                notification?.notificationUUID,
+                128
+            );
+
+            if (!notificationUUID) {
+                throw new Error(
+                    'Verified notification is missing notificationUUID.'
+                );
+            }
+
+            const notificationType = cleanString(
+                notification?.notificationType,
+                100
+            ) || 'UNKNOWN';
+            const subtype = cleanString(
+                notification?.subtype,
+                100
+            ) || null;
+            const data = notification?.data || {};
+            const environment = cleanString(
+                data?.environment,
+                32
+            ) || verifiedEnvironment;
+
+            let transaction = null;
+            let renewal = null;
+
+            if (data?.signedTransactionInfo) {
+                const verifiedTransaction =
+                    await verifyAppStoreTransactionJWS(
+                        data.signedTransactionInfo
+                    );
+
+                if (verifiedTransaction.environment !== environment) {
+                    throw new Error(
+                        'Notification and transaction environments do not match.'
+                    );
+                }
+
+                transaction = verifiedTransaction.decoded;
+            }
+
+            if (data?.signedRenewalInfo) {
+                const verifiedRenewal =
+                    await verifyAppStoreRenewalInfoJWS(
+                        data.signedRenewalInfo
+                    );
+
+                if (verifiedRenewal.environment !== environment) {
+                    throw new Error(
+                        'Notification and renewal environments do not match.'
+                    );
+                }
+
+                renewal = verifiedRenewal.decoded;
+            }
+
+            processingStarted = true;
+            client = await pool.connect();
+            await client.query('BEGIN');
+
+            const insertNotification = await client.query(
+                `
+                INSERT INTO app_store_notifications (
+                    notification_uuid,
+                    notification_type,
+                    subtype,
+                    environment,
+                    signed_date,
+                    app_apple_id,
+                    bundle_id,
+                    version,
+                    signed_payload_sha256,
+                    decoded_payload
+                )
+                VALUES (
+                    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb
+                )
+                ON CONFLICT (notification_uuid) DO NOTHING
+                RETURNING notification_uuid
+                `,
+                [
+                    notificationUUID,
+                    notificationType,
+                    subtype,
+                    environment,
+                    toDate(notification?.signedDate),
+                    Number.isFinite(Number(data?.appAppleId))
+                        ? Number(data.appAppleId)
+                        : null,
+                    cleanString(data?.bundleId, 255) || null,
+                    cleanString(notification?.version, 32) || null,
+                    createHash('sha256')
+                        .update(signedPayload)
+                        .digest('hex'),
+                    JSON.stringify(notificationForStorage(notification)),
+                ]
+            );
+
+            if (insertNotification.rowCount === 0) {
+                await client.query('COMMIT');
+                return res.json({
+                    success: true,
+                    duplicate: true,
+                });
+            }
+
+            if (transaction) {
+                await persistVerifiedSnapshot(client, {
+                    transaction,
+                    renewal,
+                    environment,
+                    notificationType,
+                    subtype,
+                    source: 'apple_notification',
+                    eventKey: `apple:${notificationUUID}`,
+                    notificationUUID,
+                    eventAt: toDate(notification?.signedDate) || new Date(),
+                    metadata: {
+                        notificationType,
+                        subtype,
+                    },
+                });
+            }
+
+            await client.query(
+                `
+                UPDATE app_store_notifications
+                SET processed_at = NOW(), processing_error = NULL
+                WHERE notification_uuid = $1
+                `,
+                [notificationUUID]
+            );
+
+            await client.query('COMMIT');
+
+            return res.json({
+                success: true,
+                notificationUUID,
+            });
+        } catch (error) {
+            if (client) {
+                try {
+                    await client.query('ROLLBACK');
+                } catch {}
+            }
+
+            console.error(
+                '[AppStoreSubscriptions] Notification failed:',
+                error?.message || error
+            );
+
+            // Invalid/unverifiable payloads are client errors. Once cryptographic
+            // verification and payload validation have succeeded, database or
+            // persistence failures are server errors so Apple can retry them.
+            return res.status(processingStarted ? 500 : 400).json({
+                success: false,
+                error: processingStarted
+                    ? 'Notification processing failed.'
+                    : 'Notification verification failed.',
+            });
+        } finally {
+            client?.release();
+        }
+    });
+
+    return router;
+}

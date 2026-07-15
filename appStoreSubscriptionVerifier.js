@@ -56,7 +56,11 @@ const sandboxVerifier = new SignedDataVerifier(
     APP_STORE_BUNDLE_ID
 );
 
-function readClaimedEnvironment(jws) {
+function safeString(value) {
+    return typeof value === 'string' ? value : null;
+}
+
+function readUnverifiedPayload(jws) {
     try {
         const parts = String(jws).split('.');
 
@@ -64,66 +68,63 @@ function readClaimedEnvironment(jws) {
             return null;
         }
 
-        const payloadJSON = Buffer
-            .from(parts[1], 'base64url')
-            .toString('utf8');
-
-        const payload = JSON.parse(payloadJSON);
-
-        return typeof payload.environment === 'string'
-            ? payload.environment
-            : null;
+        return JSON.parse(
+            Buffer.from(parts[1], 'base64url').toString('utf8')
+        );
     } catch {
         return null;
     }
 }
 
-async function verifySignedTransaction(jws) {
+function readClaimedEnvironment(jws) {
+    const payload = readUnverifiedPayload(jws);
+
+    if (!payload || typeof payload !== 'object') {
+        return null;
+    }
+
+    return safeString(payload.environment) ||
+        safeString(payload.data?.environment) ||
+        null;
+}
+
+async function verifyByEnvironment({
+    jws,
+    productionMethod,
+    sandboxMethod,
+}) {
     const claimedEnvironment = readClaimedEnvironment(jws);
 
     // The unverified environment is used only to select the verifier.
-    // Access is granted only after cryptographic verification succeeds.
+    // Trust is granted only after cryptographic verification succeeds.
     if (claimedEnvironment === Environment.SANDBOX) {
-        const transaction =
-            await sandboxVerifier.verifyAndDecodeTransaction(jws);
-
         return {
-            transaction,
+            decoded: await sandboxMethod(jws),
             environment: Environment.SANDBOX,
         };
     }
 
     if (claimedEnvironment === Environment.PRODUCTION) {
-        const transaction =
-            await productionVerifier.verifyAndDecodeTransaction(jws);
-
         return {
-            transaction,
+            decoded: await productionMethod(jws),
             environment: Environment.PRODUCTION,
         };
     }
 
-    // Fallback for an unexpected or absent environment claim.
     try {
-        const transaction =
-            await productionVerifier.verifyAndDecodeTransaction(jws);
-
         return {
-            transaction,
+            decoded: await productionMethod(jws),
             environment: Environment.PRODUCTION,
         };
     } catch (productionError) {
         try {
-            const transaction =
-                await sandboxVerifier.verifyAndDecodeTransaction(jws);
-
             return {
-                transaction,
+                decoded: await sandboxMethod(jws),
                 environment: Environment.SANDBOX,
             };
         } catch (sandboxError) {
             const verificationError = new Error(
-                'The App Store transaction could not be verified.'
+                'The App Store signed payload could not be verified.'
             );
 
             verificationError.cause = {
@@ -134,6 +135,60 @@ async function verifySignedTransaction(jws) {
             throw verificationError;
         }
     }
+}
+
+export async function verifyAppStoreTransactionJWS(jws) {
+    return verifyByEnvironment({
+        jws,
+        productionMethod: (value) =>
+            productionVerifier.verifyAndDecodeTransaction(value),
+        sandboxMethod: (value) =>
+            sandboxVerifier.verifyAndDecodeTransaction(value),
+    });
+}
+
+export async function verifyAppStoreRenewalInfoJWS(jws) {
+    return verifyByEnvironment({
+        jws,
+        productionMethod: (value) =>
+            productionVerifier.verifyAndDecodeRenewalInfo(value),
+        sandboxMethod: (value) =>
+            sandboxVerifier.verifyAndDecodeRenewalInfo(value),
+    });
+}
+
+export async function verifyAppStoreNotificationJWS(jws) {
+    return verifyByEnvironment({
+        jws,
+        productionMethod: (value) =>
+            productionVerifier.verifyAndDecodeNotification(value),
+        sandboxMethod: (value) =>
+            sandboxVerifier.verifyAndDecodeNotification(value),
+    });
+}
+
+function isFreeTrialTransaction(transaction) {
+    const discountType = String(transaction?.offerDiscountType || '')
+        .trim()
+        .toUpperCase();
+
+    if (discountType === 'FREE_TRIAL') {
+        return true;
+    }
+
+    // The Agora currently has one introductory offer and it is the seven-day
+    // free trial. This fallback keeps trial classification working with older
+    // server-library payload models that may not expose offerDiscountType.
+    const offerType = transaction?.offerType;
+    const normalizedOfferType = String(offerType ?? '')
+        .trim()
+        .toUpperCase();
+
+    return (
+        offerType === 1 ||
+        normalizedOfferType === '1' ||
+        normalizedOfferType.includes('INTRODUCTORY')
+    );
 }
 
 export async function verifyAgoraProTransactionJWS(
@@ -151,9 +206,9 @@ export async function verifyAgoraProTransactionJWS(
 
     try {
         const {
-            transaction,
+            decoded: transaction,
             environment,
-        } = await verifySignedTransaction(
+        } = await verifyAppStoreTransactionJWS(
             proTransactionJWS.trim()
         );
 
@@ -177,11 +232,23 @@ export async function verifyAgoraProTransactionJWS(
                 reason: 'revoked_subscription',
                 environment,
                 productId,
+                revocationDate: Number(transaction.revocationDate) || null,
             };
         }
 
-        const expirationTimestamp =
-            Number(transaction.expiresDate);
+        if (transaction.isUpgraded === true) {
+            return {
+                isVerifiedPro: false,
+                reason: 'upgraded_transaction',
+                environment,
+                productId,
+                transactionId: transaction.transactionId ?? null,
+                originalTransactionId:
+                    transaction.originalTransactionId ?? null,
+            };
+        }
+
+        const expirationTimestamp = Number(transaction.expiresDate);
 
         if (
             !Number.isFinite(expirationTimestamp) ||
@@ -192,22 +259,48 @@ export async function verifyAgoraProTransactionJWS(
                 reason: 'expired_subscription',
                 environment,
                 productId,
+                transactionId:
+                    transaction.transactionId ?? null,
+                originalTransactionId:
+                    transaction.originalTransactionId ?? null,
+                appAccountToken:
+                    transaction.appAccountToken ?? null,
                 expiresDate: Number.isFinite(expirationTimestamp)
                     ? expirationTimestamp
                     : null,
             };
         }
 
+        const isTrial = isFreeTrialTransaction(transaction);
+
         return {
             isVerifiedPro: true,
             reason: 'verified_active_subscription',
+            analyticsAccessTier: isTrial ? 'trial' : 'paid_pro',
+            isTrial,
             environment,
             productId,
             transactionId:
                 transaction.transactionId ?? null,
             originalTransactionId:
                 transaction.originalTransactionId ?? null,
+            appAccountToken:
+                transaction.appAccountToken ?? null,
+            purchaseDate:
+                Number(transaction.purchaseDate) || null,
+            originalPurchaseDate:
+                Number(transaction.originalPurchaseDate) || null,
             expiresDate: expirationTimestamp,
+            offerType:
+                transaction.offerType ?? null,
+            offerIdentifier:
+                transaction.offerIdentifier ?? null,
+            offerDiscountType:
+                transaction.offerDiscountType ?? null,
+            transactionReason:
+                transaction.transactionReason ?? null,
+            signedDate:
+                Number(transaction.signedDate) || null,
         };
     } catch (error) {
         console.warn(
@@ -223,3 +316,9 @@ export async function verifyAgoraProTransactionJWS(
         };
     }
 }
+
+export {
+    AGORA_PRO_PRODUCT_IDS,
+    APP_STORE_APP_APPLE_ID,
+    APP_STORE_BUNDLE_ID,
+};

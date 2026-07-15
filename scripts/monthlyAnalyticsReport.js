@@ -1,4 +1,6 @@
 import pg from "pg";
+import { sendAnalyticsEmail } from "./emailReporter.js";
+import { buildMonthlyBusinessAnalytics } from "./businessAnalyticsReport.js";
 
 const { Pool } = pg;
 
@@ -52,6 +54,17 @@ function formatSeconds(value) {
   if (Number.isNaN(numberValue)) return "—";
 
   return `${numberValue.toFixed(2)}s`;
+}
+
+function stripTelegramHtml(value = "") {
+  return String(value)
+    .replaceAll("<b>", "")
+    .replaceAll("</b>", "")
+    .replaceAll("&amp;", "&")
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&#039;", "'");
 }
 
 function pluralize(count, singular, plural = `${singular}s`) {
@@ -281,6 +294,12 @@ function chooseTrackingNote({
   if (String(reportMonth || "").includes("June 2026")) {
     notes.push(
       "June should be treated as a transition month because analytics tracking was actively improved during the month."
+    );
+  }
+
+  if (String(reportMonth || "").includes("July 2026")) {
+    notes.push(
+      "Free/Trial/Paid Pro and subscription lifecycle analytics begin with the July 31 release, so July is only a partial rollout month. August is the first full comparable month."
     );
   }
 
@@ -827,7 +846,51 @@ async function main() {
       `<b>Tracking note:</b> ${trackingNote}`,
     ].join("\n");
 
-    await sendTelegramMessage(message);
+    const businessMessage = await buildMonthlyBusinessAnalytics(
+      client,
+      reportMonthOverride
+    );
+
+    const emailReport = [
+      stripTelegramHtml(message),
+      "",
+      "────────────────────────",
+      "",
+      stripTelegramHtml(businessMessage),
+    ].join("\n");
+
+    const subject = `The Agora Monthly Report — ${row.report_month}`;
+
+    const deliveryResults = await Promise.allSettled([
+      sendTelegramMessage(message),
+      sendTelegramMessage(businessMessage),
+      sendAnalyticsEmail({
+        subject,
+        reportText: emailReport,
+      }),
+    ]);
+
+    console.log("[monthlyAnalyticsReport] Delivery results:", deliveryResults);
+
+    const failedDeliveries = deliveryResults.filter((result) => {
+      if (result.status === "rejected") {
+        return true;
+      }
+
+      return (
+        result.value?.success === false ||
+        result.value?.skipped === true
+      );
+    });
+
+    if (failedDeliveries.length > 0) {
+      console.error(
+        "[monthlyAnalyticsReport] One or more deliveries failed:",
+        failedDeliveries
+      );
+      process.exitCode = 1;
+      return;
+    }
 
     console.log("Monthly analytics report sent successfully.");
   } catch (error) {

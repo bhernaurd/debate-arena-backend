@@ -222,17 +222,123 @@ function cleanString(value, maxLength = 20000) {
     return value.trim().slice(0, maxLength);
 }
 
-async function verifyProAccessForJob(jobType, proTransactionJWS) {
-    if (!PRO_MODEL_JOB_TYPES.has(jobType)) {
-        return {
-            isVerifiedPro: false,
-            reason: 'not_required_for_job_type',
-        };
+async function storedVerifiedProAccess(
+    userId,
+    environment,
+    originalTransactionId
+) {
+    if (
+        !isValidUserId(userId) ||
+        !environment ||
+        !originalTransactionId
+    ) {
+        return null;
     }
 
-    const verification = await verifyAgoraProTransactionJWS(
+    const result = await pool.query(
+        `
+        SELECT
+            se.original_transaction_id,
+            se.status,
+            se.is_trial,
+            se.product_id,
+            se.environment,
+            se.expires_date,
+            se.grace_period_expires_date
+        FROM subscription_entitlements se
+        WHERE se.environment = $2
+          AND se.original_transaction_id = $3
+          AND (
+            se.user_id = $1
+            OR EXISTS (
+                SELECT 1
+                FROM subscription_installation_links link
+                WHERE link.original_transaction_id = se.original_transaction_id
+                  AND link.environment = se.environment
+                  AND link.user_id = $1
+            )
+        )
+          AND (
+            (
+                se.status IN ('trial', 'active')
+                AND se.expires_date > NOW()
+            )
+            OR (
+                se.status = 'grace_period'
+                AND se.grace_period_expires_date > NOW()
+            )
+          )
+        ORDER BY
+            CASE WHEN se.environment = 'Production' THEN 0 ELSE 1 END,
+            se.updated_at DESC
+        LIMIT 1
+        `,
+        [userId, environment, originalTransactionId]
+    );
+
+    const entitlement = result.rows[0];
+
+    if (!entitlement) {
+        return null;
+    }
+
+    const isTrial = entitlement.is_trial === true;
+    const isGracePeriod = entitlement.status === 'grace_period';
+    const effectiveExpiry = isGracePeriod
+        ? entitlement.grace_period_expires_date
+        : entitlement.expires_date;
+
+    return {
+        isVerifiedPro: true,
+        reason: isGracePeriod
+            ? 'verified_stored_grace_period'
+            : 'verified_stored_entitlement',
+        analyticsAccessTier: isTrial ? 'trial' : 'paid_pro',
+        isTrial,
+        environment: entitlement.environment,
+        productId: entitlement.product_id,
+        originalTransactionId:
+            entitlement.original_transaction_id,
+        expiresDate: effectiveExpiry
+            ? new Date(effectiveExpiry).getTime()
+            : null,
+        verificationSource: 'verified_subscription_database',
+    };
+}
+
+async function verifyProAccessForJob(
+    jobType,
+    proTransactionJWS,
+    userId
+) {
+    // Verify every AI job type so report and report-insight performance can
+    // be segmented by an authoritative tier. Model routing still only uses
+    // PRO_MODEL_JOB_TYPES.
+    let verification = await verifyAgoraProTransactionJWS(
         cleanString(proTransactionJWS, 50000)
     );
+
+    // A StoreKit current-entitlement transaction can have an original
+    // expiration date in the past while Apple still grants service during a
+    // billing grace period. The transaction JWS alone has no renewal/grace
+    // date, so fall back only to a subscription state previously established
+    // by cryptographically verified client sync or Apple notifications.
+    if (
+        verification.isVerifiedPro !== true &&
+        verification.reason === 'expired_subscription' &&
+        verification.environment &&
+        verification.originalTransactionId
+    ) {
+        const storedVerification = await storedVerifiedProAccess(
+            userId,
+            verification.environment,
+            verification.originalTransactionId
+        );
+
+        if (storedVerification) {
+            verification = storedVerification;
+        }
+    }
 
     console.log('[AIJobs] App Store Pro verification:', {
         jobType,
@@ -240,7 +346,11 @@ async function verifyProAccessForJob(jobType, proTransactionJWS) {
         reason: verification.reason,
         environment: verification.environment || null,
         productId: verification.productId || null,
+        isTrial: verification.isTrial === true,
+        analyticsAccessTier: verification.analyticsAccessTier || null,
         expiresDate: verification.expiresDate || null,
+        verificationSource:
+            verification.verificationSource || 'transaction_jws',
     });
 
     return verification;
@@ -875,11 +985,22 @@ router.post('/api/ai-jobs', async (req, res) => {
         // transaction. The raw JWS is never stored in Postgres.
         const proVerification = await verifyProAccessForJob(
             cleanJobType,
-            proTransactionJWS
+            proTransactionJWS,
+            cleanUserId
         );
 
         const isVerifiedPro =
             proVerification.isVerifiedPro === true;
+
+        const clientReportedPro =
+            String(safeMetadata.accessTier || '').trim().toLowerCase() === 'pro' ||
+            truthyMetadataValue(safeMetadata.isPro) ||
+            truthyMetadataValue(safeMetadata.subscriptionPro);
+
+        const analyticsAccessTier = isVerifiedPro
+            ? (proVerification.analyticsAccessTier ||
+                (proVerification.isTrial ? 'trial' : 'paid_pro'))
+            : (clientReportedPro ? 'legacy_pro' : 'free');
 
         client = await pool.connect();
         await client.query('BEGIN');
@@ -964,6 +1085,18 @@ router.post('/api/ai-jobs', async (req, res) => {
                         proVerification.productId || null,
                     proVerificationExpiresDate:
                         proVerification.expiresDate || null,
+                    proVerificationIsTrial:
+                        proVerification.isTrial === true,
+                    proVerificationOriginalTransactionId:
+                        proVerification.originalTransactionId || null,
+                    proVerificationSource:
+                        proVerification.verificationSource || 'transaction_jws',
+                    analyticsAccessTier,
+                    analyticsTierSource: isVerifiedPro
+                        ? 'server_verified_storekit'
+                        : (clientReportedPro
+                            ? 'legacy_client_metadata'
+                            : 'free_no_verified_entitlement'),
 
                     expandedAgoraAccessReason: accessDecision.reason,
                 }),

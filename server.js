@@ -12,66 +12,75 @@ import { createPushRouter } from './pushRoutes.js';
 import questionsRouter from './questions.js';
 import { createAnalyticsRouter } from './analytics.js';
 import aiJobsRouter from './aiJobs.js';
+import { createAppStoreSubscriptionRouter } from './appStoreSubscriptionRoutes.js';
 
-import './pushScheduler.js';  // registers cron jobs on startup
-import './aiJobWorker.js';    // processes persistent AI jobs
+import './pushScheduler.js';
+import './aiJobWorker.js';
 
 const { Pool } = pg;
 
 const app = express();
-app.all("/tiktoksEj6XzEmPpvavjyCl6uI5SXIFhGYJ6hC.txt", (req, res) => {
-  res.setHeader("Content-Type", "text/plain; charset=utf-8");
-  res.setHeader("Cache-Control", "no-store");
+app.all('/tiktoksEj6XzEmPpvavjyCl6uI5SXIFhGYJ6hC.txt', (req, res) => {
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
 
   return res
     .status(200)
-    .send("tiktok-developers-site-verification=sEj6XzEmPpvavjyCl6uI5SXIFhGYJ6hC\n");
+    .send('tiktok-developers-site-verification=sEj6XzEmPpvavjyCl6uI5SXIFhGYJ6hC\n');
 });
-app.use(express.static("public"));
+app.use(express.static('public'));
 const PORT = process.env.PORT || 3000;
 
 const client = new Anthropic({
-  apiKey: process.env.ANTHROPIC_API_KEY
+  apiKey: process.env.ANTHROPIC_API_KEY,
 });
 
-// Shared Postgres pool
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL?.includes('railway')
     ? { rejectUnauthorized: false }
-    : false
+    : false,
 });
 
-// Required for Railway proxy + express-rate-limit.
-// Must come before rateLimit middleware.
 app.set('trust proxy', 1);
 
 app.use(cors());
+
+// App Store notification envelopes contain nested signed JWS payloads and can
+// be larger than ordinary app requests. Parse only this route family with the
+// larger limit, then preserve the existing 50 KB global limit everywhere else.
+app.use('/api/app-store', express.json({ limit: '128kb' }));
 app.use(express.json({ limit: '50kb' }));
 
-// Rate limiter for debate endpoint only
 const limiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: 'Too many requests. Please slow down.' }
+  message: { error: 'Too many requests. Please slow down.' },
+});
+
+const subscriptionSyncLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many subscription sync requests.' },
 });
 
 app.use('/debate', limiter);
+app.use('/api/app-store/sync-transaction', subscriptionSyncLimiter);
 
-// Routes
 app.use(createDailyChallengeRouter(pool));
 app.use(createPushRouter(pool));
 app.use(questionsRouter);
 app.use(aiJobsRouter);
+app.use(createAppStoreSubscriptionRouter(pool));
 
-// Analytics routes
 app.use('/analytics', createAnalyticsRouter(pool, {
-  adminKey: process.env.ANALYTICS_ADMIN_KEY
+  adminKey: process.env.ANALYTICS_ADMIN_KEY,
 }));
 
-// Summarize older messages using Haiku
 async function summarizeMessages(messages) {
   const response = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
@@ -82,15 +91,14 @@ async function summarizeMessages(messages) {
         content: `Summarize this philosophical debate exchange in under 200 words. 
 Preserve the core arguments, positions taken, key philosophical concepts, 
 and any important points of agreement or disagreement. This will be used 
-to maintain debate continuity:\n\n${JSON.stringify(messages)}`
-      }
-    ]
+to maintain debate continuity:\n\n${JSON.stringify(messages)}`,
+      },
+    ],
   });
 
-  return response.content?.find(b => b.type === 'text')?.text ?? '';
+  return response.content?.find((b) => b.type === 'text')?.text ?? '';
 }
 
-// Manage conversation history to prevent payload bloat
 async function manageHistory(messages) {
   if (messages.length <= 20) return messages;
 
@@ -101,13 +109,13 @@ async function manageHistory(messages) {
   return [
     {
       role: 'user',
-      content: `[Earlier debate summary: ${summary}]`
+      content: `[Earlier debate summary: ${summary}]`,
     },
     {
       role: 'assistant',
-      content: 'I recall our previous exchange. Let us continue from where we left off.'
+      content: 'I recall our previous exchange. Let us continue from where we left off.',
     },
-    ...recentMessages
+    ...recentMessages,
   ];
 }
 
@@ -122,7 +130,7 @@ app.post('/debate', async (req, res) => {
     return res.status(400).json({ error: 'system prompt is required.' });
   }
 
-  const validMessages = messages.filter(m =>
+  const validMessages = messages.filter((m) =>
     m &&
     typeof m.role === 'string' &&
     typeof m.content === 'string' &&
@@ -140,14 +148,14 @@ app.post('/debate', async (req, res) => {
       model: 'claude-sonnet-4-5-20250929',
       max_tokens: 1024,
       system,
-      messages: managedMessages
+      messages: managedMessages,
     });
 
-    const reply = response.content?.find(b => b.type === 'text')?.text ?? '';
+    const reply = response.content?.find((b) => b.type === 'text')?.text ?? '';
 
     return res.json({
       reply,
-      messages: managedMessages
+      messages: managedMessages,
     });
   } catch (error) {
     console.error('Anthropic API error:', error);

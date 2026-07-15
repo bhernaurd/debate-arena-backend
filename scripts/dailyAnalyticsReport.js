@@ -1,5 +1,6 @@
 import pg from "pg";
 import { sendAnalyticsEmail } from "./emailReporter.js";
+import { buildDailyBusinessAnalytics } from "./businessAnalyticsReport.js";
 
 const { Pool } = pg;
 
@@ -693,8 +694,14 @@ async function main() {
       sevenDayLines.join("\n\n"),
     ].join("\n");
 
+    const businessMessage = await buildDailyBusinessAnalytics(client);
+
     const emailReport = [
       stripTelegramHtml(message),
+      "",
+      "────────────────────────",
+      "",
+      stripTelegramHtml(businessMessage),
       "",
       "────────────────────────",
       "",
@@ -705,6 +712,7 @@ async function main() {
 
     const deliveryResults = await Promise.allSettled([
       sendTelegramMessage(message),
+      sendTelegramMessage(businessMessage),
       sendTelegramMessage(sevenDayMessage),
       sendAnalyticsEmail({
         subject,
@@ -714,9 +722,16 @@ async function main() {
 
     console.log("[dailyAnalyticsReport] Delivery results:", deliveryResults);
 
-    const failedDeliveries = deliveryResults.filter(
-      (result) => result.status === "rejected"
-    );
+    const failedDeliveries = deliveryResults.filter((result) => {
+      if (result.status === "rejected") {
+        return true;
+      }
+
+      return (
+        result.value?.success === false ||
+        result.value?.skipped === true
+      );
+    });
 
     if (failedDeliveries.length > 0) {
       console.error("[dailyAnalyticsReport] One or more deliveries failed:", failedDeliveries);
