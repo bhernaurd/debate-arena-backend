@@ -35,10 +35,73 @@ function formatSeconds(value) {
   return `${numberValue.toFixed(2)}s`;
 }
 
+function formatRevenueBreakdown(value) {
+  const entries = Array.isArray(value) ? value : [];
+
+  if (entries.length === 0) return "—";
+
+  return entries
+    .map((entry) => {
+      const currency = String(entry.currency || "UNKNOWN");
+      const cohort = String(entry.pricingCohort || "unknown");
+      const cohortLabel = cohort === "founding_2026"
+        ? "Founding"
+        : cohort === "standard"
+          ? "Standard"
+          : "Unknown";
+      const amount = Number(entry.priceMilliunits || 0) / 1000;
+      const transactions = Number(entry.transactions || 0);
+
+      return `${cohortLabel}: ${currency} ${amount.toFixed(2)} (${transactions} transaction${transactions === 1 ? "" : "s"})`;
+    })
+    .join("\n");
+}
+
+function splitTelegramMessage(text, maxLength = 3800) {
+  const lines = String(text || "").split("\n");
+  const chunks = [];
+  let current = "";
+
+  for (const line of lines) {
+    const candidate = current ? `${current}\n${line}` : line;
+
+    if (candidate.length <= maxLength) {
+      current = candidate;
+      continue;
+    }
+
+    if (current) {
+      chunks.push(current);
+      current = "";
+    }
+
+    if (line.length <= maxLength) {
+      current = line;
+      continue;
+    }
+
+    // This fallback is only for an unexpectedly long plain-text line. Normal
+    // report lines keep each HTML tag pair on the same line and never hit it.
+    const plainLine = stripTelegramHtml(line);
+
+    for (let index = 0; index < plainLine.length; index += maxLength) {
+      chunks.push(plainLine.slice(index, index + maxLength));
+    }
+  }
+
+  if (current) {
+    chunks.push(current);
+  }
+
+  return chunks.length > 0 ? chunks : [""];
+}
+
 function stripTelegramHtml(value = "") {
   return String(value)
     .replaceAll("<b>", "")
     .replaceAll("</b>", "")
+    .replaceAll("<i>", "")
+    .replaceAll("</i>", "")
     .replaceAll("&amp;", "&")
     .replaceAll("&lt;", "<")
     .replaceAll("&gt;", ">")
@@ -215,29 +278,39 @@ async function sendTelegramMessage(text) {
     throw new Error("Missing TELEGRAM_CHAT_ID");
   }
 
-  const response = await fetch(
-    `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        chat_id: TELEGRAM_CHAT_ID,
-        text,
-        parse_mode: "HTML",
-        disable_web_page_preview: true,
-      }),
+  const chunks = splitTelegramMessage(text);
+  const responses = [];
+
+  for (const chunk of chunks) {
+    const response = await fetch(
+      `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          chat_id: TELEGRAM_CHAT_ID,
+          text: chunk,
+          parse_mode: "HTML",
+          disable_web_page_preview: true,
+        }),
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok || !data.ok) {
+      throw new Error(`Telegram send failed: ${JSON.stringify(data)}`);
     }
-  );
 
-  const data = await response.json();
-
-  if (!response.ok || !data.ok) {
-    throw new Error(`Telegram send failed: ${JSON.stringify(data)}`);
+    responses.push(data);
   }
 
-  return data;
+  return {
+    success: true,
+    chunksSent: responses.length,
+  };
 }
 
 async function main() {
@@ -586,6 +659,194 @@ async function main() {
       JOIN report_generation_timing_summary rgt ON a.report_date = rgt.report_date;
     `);
 
+    const cohortResult = await client.query(`
+      WITH params AS (
+        SELECT
+          ((NOW() AT TIME ZONE 'America/Chicago')::date - INTERVAL '1 day')::date AS report_date
+      ),
+      bounds AS (
+        SELECT
+          report_date,
+          report_date::timestamp AT TIME ZONE 'America/Chicago' AS start_time,
+          (report_date + INTERVAL '1 day')::timestamp AT TIME ZONE 'America/Chicago' AS end_time
+        FROM params
+      ),
+      eligible_entitlements AS (
+        SELECT se.*
+        FROM subscription_entitlements se
+        WHERE se.environment = 'Production'
+          AND NOT EXISTS (
+            SELECT 1
+            FROM excluded_analytics_users x
+            WHERE x.user_id = se.user_id
+               OR EXISTS (
+                 SELECT 1
+                 FROM subscription_installation_links link
+                 WHERE link.original_transaction_id = se.original_transaction_id
+                   AND link.environment = se.environment
+                   AND link.user_id = x.user_id
+               )
+          )
+      ),
+      active_snapshot AS (
+        SELECT
+          COUNT(*) FILTER (
+            WHERE COALESCE(pricing_cohort, 'unknown') = 'founding_2026'
+              AND is_trial = true
+              AND (
+                (status = 'trial' AND expires_date > NOW()) OR
+                (status = 'grace_period' AND grace_period_expires_date > NOW())
+              )
+          ) AS active_founding_trials,
+          COUNT(*) FILTER (
+            WHERE COALESCE(pricing_cohort, 'unknown') = 'founding_2026'
+              AND is_trial = false
+              AND (
+                (status = 'active' AND expires_date > NOW()) OR
+                (status = 'grace_period' AND grace_period_expires_date > NOW())
+              )
+          ) AS active_founding_paid,
+          COUNT(*) FILTER (
+            WHERE COALESCE(pricing_cohort, 'unknown') = 'founding_2026'
+              AND product_id = 'agora_pro_monthly'
+              AND is_trial = false
+              AND (
+                (status = 'active' AND expires_date > NOW()) OR
+                (status = 'grace_period' AND grace_period_expires_date > NOW())
+              )
+          ) AS founding_paid_monthly,
+          COUNT(*) FILTER (
+            WHERE COALESCE(pricing_cohort, 'unknown') = 'founding_2026'
+              AND product_id = 'agora_pro_yearly'
+              AND is_trial = false
+              AND (
+                (status = 'active' AND expires_date > NOW()) OR
+                (status = 'grace_period' AND grace_period_expires_date > NOW())
+              )
+          ) AS founding_paid_yearly,
+          COUNT(*) FILTER (
+            WHERE COALESCE(pricing_cohort, 'unknown') = 'standard'
+              AND is_trial = true
+              AND (
+                (status = 'trial' AND expires_date > NOW()) OR
+                (status = 'grace_period' AND grace_period_expires_date > NOW())
+              )
+          ) AS active_standard_trials,
+          COUNT(*) FILTER (
+            WHERE COALESCE(pricing_cohort, 'unknown') = 'standard'
+              AND is_trial = false
+              AND (
+                (status = 'active' AND expires_date > NOW()) OR
+                (status = 'grace_period' AND grace_period_expires_date > NOW())
+              )
+          ) AS active_standard_paid,
+          COUNT(*) FILTER (
+            WHERE COALESCE(pricing_cohort, 'unknown') = 'standard'
+              AND product_id = 'agora_pro_monthly'
+              AND is_trial = false
+              AND (
+                (status = 'active' AND expires_date > NOW()) OR
+                (status = 'grace_period' AND grace_period_expires_date > NOW())
+              )
+          ) AS standard_paid_monthly,
+          COUNT(*) FILTER (
+            WHERE COALESCE(pricing_cohort, 'unknown') = 'standard'
+              AND product_id = 'agora_pro_yearly'
+              AND is_trial = false
+              AND (
+                (status = 'active' AND expires_date > NOW()) OR
+                (status = 'grace_period' AND grace_period_expires_date > NOW())
+              )
+          ) AS standard_paid_yearly,
+          COUNT(*) FILTER (
+            WHERE COALESCE(pricing_cohort, 'unknown') = 'unknown'
+              AND (
+                (status IN ('trial', 'active') AND expires_date > NOW()) OR
+                (status = 'grace_period' AND grace_period_expires_date > NOW())
+              )
+          ) AS active_unknown_cohort
+        FROM eligible_entitlements
+      ),
+      first_transactions AS (
+        SELECT DISTINCT ON (
+          t.original_transaction_id,
+          t.environment
+        )
+          t.original_transaction_id,
+          t.environment,
+          t.purchase_date
+        FROM app_store_transactions t
+        WHERE t.environment = 'Production'
+        ORDER BY
+          t.original_transaction_id,
+          t.environment,
+          t.purchase_date ASC NULLS LAST,
+          t.transaction_id ASC
+      ),
+      new_chains AS (
+        SELECT
+          COUNT(*) FILTER (
+            WHERE COALESCE(e.pricing_cohort, 'unknown') = 'founding_2026'
+          ) AS new_founding_chains,
+          COUNT(*) FILTER (
+            WHERE COALESCE(e.pricing_cohort, 'unknown') = 'standard'
+          ) AS new_standard_chains,
+          COUNT(*) FILTER (
+            WHERE COALESCE(e.pricing_cohort, 'unknown') = 'unknown'
+          ) AS new_unknown_chains
+        FROM first_transactions ft
+        JOIN eligible_entitlements e
+          ON e.original_transaction_id = ft.original_transaction_id
+         AND e.environment = ft.environment
+        CROSS JOIN bounds b
+        WHERE ft.purchase_date >= b.start_time
+          AND ft.purchase_date < b.end_time
+      ),
+      paid_revenue_rows AS (
+        SELECT
+          COALESCE(e.pricing_cohort, 'unknown') AS pricing_cohort,
+          COALESCE(t.currency, 'UNKNOWN') AS currency,
+          SUM(COALESCE(t.price_milliunits, 0)) AS price_milliunits,
+          COUNT(*) AS transactions
+        FROM app_store_transactions t
+        JOIN eligible_entitlements e
+          ON e.original_transaction_id = t.original_transaction_id
+         AND e.environment = t.environment
+        CROSS JOIN bounds b
+        WHERE t.environment = 'Production'
+          AND t.is_trial = false
+          AND t.purchase_date >= b.start_time
+          AND t.purchase_date < b.end_time
+          AND t.price_milliunits IS NOT NULL
+          AND t.revocation_date IS NULL
+        GROUP BY
+          COALESCE(e.pricing_cohort, 'unknown'),
+          COALESCE(t.currency, 'UNKNOWN')
+      ),
+      paid_revenue AS (
+        SELECT COALESCE(
+          jsonb_agg(
+            jsonb_build_object(
+              'pricingCohort', pricing_cohort,
+              'currency', currency,
+              'priceMilliunits', price_milliunits,
+              'transactions', transactions
+            )
+            ORDER BY pricing_cohort, currency
+          ),
+          '[]'::jsonb
+        ) AS paid_revenue_by_cohort_currency
+        FROM paid_revenue_rows
+      )
+      SELECT
+        snapshot.*,
+        new_chains.*,
+        paid_revenue.paid_revenue_by_cohort_currency
+      FROM active_snapshot snapshot
+      CROSS JOIN new_chains
+      CROSS JOIN paid_revenue;
+    `);
+
     const sevenDayResult = await client.query(`
       WITH params AS (
         SELECT 
@@ -648,6 +909,23 @@ async function main() {
     if (!row) {
       throw new Error("No analytics data returned.");
     }
+
+    const cohortRow = cohortResult.rows[0] || {};
+    const activeFoundingTrials = toNumber(cohortRow.active_founding_trials);
+    const activeFoundingPaid = toNumber(cohortRow.active_founding_paid);
+    const foundingPaidMonthly = toNumber(cohortRow.founding_paid_monthly);
+    const foundingPaidYearly = toNumber(cohortRow.founding_paid_yearly);
+    const activeStandardTrials = toNumber(cohortRow.active_standard_trials);
+    const activeStandardPaid = toNumber(cohortRow.active_standard_paid);
+    const standardPaidMonthly = toNumber(cohortRow.standard_paid_monthly);
+    const standardPaidYearly = toNumber(cohortRow.standard_paid_yearly);
+    const activeUnknownCohort = toNumber(cohortRow.active_unknown_cohort);
+    const newFoundingChains = toNumber(cohortRow.new_founding_chains);
+    const newStandardChains = toNumber(cohortRow.new_standard_chains);
+    const newUnknownChains = toNumber(cohortRow.new_unknown_chains);
+    const paidRevenueBreakdown = formatRevenueBreakdown(
+      cohortRow.paid_revenue_by_cohort_currency
+    );
 
     const dailyActiveUsers = toNumber(row.daily_active_users);
     const newUsers = toNumber(row.new_users);
@@ -760,6 +1038,22 @@ async function main() {
       slowestGenerationSeconds,
     });
 
+    const cohortMessage = [
+      `<b>Agora Pro Pricing Cohorts</b>`,
+      `<b>Snapshot:</b> ${row.report_date_label} report delivery time`,
+      ``,
+      `<b>Active Founding Members:</b> ${activeFoundingPaid} paid + ${activeFoundingTrials} trialing`,
+      `<b>Founding paid plans:</b> ${foundingPaidMonthly} monthly / ${foundingPaidYearly} yearly`,
+      `<b>Active Standard Members:</b> ${activeStandardPaid} paid + ${activeStandardTrials} trialing`,
+      `<b>Standard paid plans:</b> ${standardPaidMonthly} monthly / ${standardPaidYearly} yearly`,
+      `<b>Active unknown cohort:</b> ${activeUnknownCohort}`,
+      `<b>New subscription chains on report day:</b> ${newFoundingChains} founding / ${newStandardChains} standard / ${newUnknownChains} unknown`,
+      ``,
+      `<b>Verified gross transaction value by cohort/currency</b>`,
+      paidRevenueBreakdown,
+      `<i>Excludes currently known revoked/refunded transactions and does not subtract Apple fees or taxes.</i>`,
+    ].join("\n");
+
     const message = [
       `🏛️ <b>The Oracle has spoken.</b>`,
       ``,
@@ -843,6 +1137,10 @@ async function main() {
       "",
       "────────────────────────",
       "",
+      stripTelegramHtml(cohortMessage),
+      "",
+      "────────────────────────",
+      "",
       stripTelegramHtml(businessMessage),
       "",
       "────────────────────────",
@@ -852,10 +1150,17 @@ async function main() {
 
     const subject = `The Agora Daily Report — ${row.report_date_label}`;
 
+    const telegramDelivery = (async () => {
+      await sendTelegramMessage(message);
+      await sendTelegramMessage(cohortMessage);
+      await sendTelegramMessage(businessMessage);
+      await sendTelegramMessage(sevenDayMessage);
+
+      return { success: true };
+    })();
+
     const deliveryResults = await Promise.allSettled([
-      sendTelegramMessage(message),
-      sendTelegramMessage(businessMessage),
-      sendTelegramMessage(sevenDayMessage),
+      telegramDelivery,
       sendAnalyticsEmail({
         subject,
         reportText: emailReport,
