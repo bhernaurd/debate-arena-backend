@@ -133,7 +133,8 @@ export function createAnalyticsRouter(pool, options = {}) {
         se.environment,
         se.expires_date,
         se.grace_period_expires_date,
-        se.auto_renew_enabled
+        se.auto_renew_enabled,
+        COALESCE(se.pricing_cohort, 'unknown') AS pricing_cohort
       FROM subscription_entitlements se
       WHERE se.user_id = $1
          OR EXISTS (
@@ -176,12 +177,15 @@ export function createAnalyticsRouter(pool, options = {}) {
       subscriptionStatus: entitlement?.status || 'none',
       subscriptionProductId: entitlement?.product_id || null,
       subscriptionEnvironment: entitlement?.environment || null,
+      subscriptionPricingCohort:
+        entitlement?.pricing_cohort || 'unknown',
       subscriptionAutoRenewEnabled:
         entitlement?.auto_renew_enabled ?? null,
       revenueEligible:
         entitlement?.environment === 'Production' &&
         analyticsAccessTier === 'paid_pro',
       analyticsVersion: 'july31_analytics_v1',
+      pricingCohortAnalyticsVersion: 'founding_pricing_v1',
     };
   }
 
@@ -392,6 +396,99 @@ export function createAnalyticsRouter(pool, options = {}) {
                  (status = 'grace_period' AND grace_period_expires_date > NOW())
                )
            ) AS paid_yearly,
+           COUNT(*) FILTER (
+             WHERE environment = 'Production'
+               AND COALESCE(pricing_cohort, 'unknown') = 'founding_2026'
+               AND status IN ('trial', 'grace_period')
+               AND is_trial = true
+               AND (
+                 (status = 'trial' AND expires_date > NOW()) OR
+                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+               )
+           ) AS active_founding_trials,
+           COUNT(*) FILTER (
+             WHERE environment = 'Production'
+               AND COALESCE(pricing_cohort, 'unknown') = 'founding_2026'
+               AND status IN ('active', 'grace_period')
+               AND is_trial = false
+               AND (
+                 (status = 'active' AND expires_date > NOW()) OR
+                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+               )
+           ) AS active_founding_paid_subscribers,
+           COUNT(*) FILTER (
+             WHERE environment = 'Production'
+               AND COALESCE(pricing_cohort, 'unknown') = 'founding_2026'
+               AND product_id = 'agora_pro_monthly'
+               AND status IN ('active', 'grace_period')
+               AND is_trial = false
+               AND (
+                 (status = 'active' AND expires_date > NOW()) OR
+                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+               )
+           ) AS founding_paid_monthly,
+           COUNT(*) FILTER (
+             WHERE environment = 'Production'
+               AND COALESCE(pricing_cohort, 'unknown') = 'founding_2026'
+               AND product_id = 'agora_pro_yearly'
+               AND status IN ('active', 'grace_period')
+               AND is_trial = false
+               AND (
+                 (status = 'active' AND expires_date > NOW()) OR
+                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+               )
+           ) AS founding_paid_yearly,
+           COUNT(*) FILTER (
+             WHERE environment = 'Production'
+               AND COALESCE(pricing_cohort, 'unknown') = 'standard'
+               AND status IN ('trial', 'grace_period')
+               AND is_trial = true
+               AND (
+                 (status = 'trial' AND expires_date > NOW()) OR
+                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+               )
+           ) AS active_standard_trials,
+           COUNT(*) FILTER (
+             WHERE environment = 'Production'
+               AND COALESCE(pricing_cohort, 'unknown') = 'standard'
+               AND status IN ('active', 'grace_period')
+               AND is_trial = false
+               AND (
+                 (status = 'active' AND expires_date > NOW()) OR
+                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+               )
+           ) AS active_standard_paid_subscribers,
+           COUNT(*) FILTER (
+             WHERE environment = 'Production'
+               AND COALESCE(pricing_cohort, 'unknown') = 'standard'
+               AND product_id = 'agora_pro_monthly'
+               AND status IN ('active', 'grace_period')
+               AND is_trial = false
+               AND (
+                 (status = 'active' AND expires_date > NOW()) OR
+                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+               )
+           ) AS standard_paid_monthly,
+           COUNT(*) FILTER (
+             WHERE environment = 'Production'
+               AND COALESCE(pricing_cohort, 'unknown') = 'standard'
+               AND product_id = 'agora_pro_yearly'
+               AND status IN ('active', 'grace_period')
+               AND is_trial = false
+               AND (
+                 (status = 'active' AND expires_date > NOW()) OR
+                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+               )
+           ) AS standard_paid_yearly,
+           COUNT(*) FILTER (
+             WHERE environment = 'Production'
+               AND COALESCE(pricing_cohort, 'unknown') = 'unknown'
+               AND status IN ('active', 'trial', 'grace_period')
+               AND (
+                 (status IN ('trial', 'active') AND expires_date > NOW()) OR
+                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+               )
+           ) AS active_unknown_cohort,
            COUNT(*) FILTER (
              WHERE environment = 'Production'
                AND status IN ('active', 'trial', 'grace_period')
