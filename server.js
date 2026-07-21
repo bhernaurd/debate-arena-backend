@@ -13,6 +13,7 @@ import questionsRouter from './questions.js';
 import { createAnalyticsRouter } from './analytics.js';
 import aiJobsRouter from './aiJobs.js';
 import { createAppStoreSubscriptionRouter } from './appStoreSubscriptionRoutes.js';
+import { createPaywallConfigurationRouter } from './paywallConfigurationRoutes.js';
 
 import './pushScheduler.js';
 import './aiJobWorker.js';
@@ -71,6 +72,7 @@ const subscriptionSyncLimiter = rateLimit({
 app.use('/debate', limiter);
 app.use('/api/app-store/sync-transaction', subscriptionSyncLimiter);
 
+app.use(createPaywallConfigurationRouter());
 app.use(createDailyChallengeRouter(pool));
 app.use(createPushRouter(pool));
 app.use(questionsRouter);
