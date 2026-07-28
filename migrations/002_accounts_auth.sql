@@ -1,8 +1,9 @@
 -- 002_accounts_auth.sql
 -- Foundational Agora account and authentication schema.
 --
--- This migration is additive. Existing legacy user_id columns continue to
--- represent installation identifiers and are not reinterpreted as accounts.
+-- This migration is additive. Existing user_id columns continue to represent
+-- legacy installation identifiers unless a later migration explicitly adds a
+-- separate account_id column.
 
 CREATE TABLE accounts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -47,6 +48,56 @@ CREATE TABLE accounts (
 CREATE INDEX accounts_status_created_at_idx
     ON accounts (status, created_at DESC);
 
+CREATE TABLE account_auth_challenges (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    installation_id TEXT NOT NULL,
+    purpose TEXT NOT NULL DEFAULT 'sign_in_with_apple'
+        CHECK (
+            purpose IN (
+                'sign_in_with_apple',
+                'reauthenticate',
+                'delete_account'
+            )
+        ),
+
+    nonce_sha256 TEXT NOT NULL UNIQUE,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at TIMESTAMPTZ NOT NULL,
+    consumed_at TIMESTAMPTZ,
+
+    failed_attempts INTEGER NOT NULL DEFAULT 0
+        CHECK (failed_attempts >= 0 AND failed_attempts <= 20),
+
+    CHECK (
+        installation_id ~ '^[A-Za-z0-9-]{8,128}$'
+    ),
+
+    CHECK (
+        nonce_sha256 ~ '^[0-9a-f]{64}$'
+    ),
+
+    CHECK (
+        expires_at > created_at
+    ),
+
+    CHECK (
+        consumed_at IS NULL
+        OR consumed_at >= created_at
+    )
+);
+
+CREATE INDEX account_auth_challenges_installation_idx
+    ON account_auth_challenges (
+        installation_id,
+        created_at DESC
+    );
+
+CREATE INDEX account_auth_challenges_expiration_idx
+    ON account_auth_challenges (expires_at)
+    WHERE consumed_at IS NULL;
+
 CREATE TABLE account_apple_identities (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
@@ -85,7 +136,6 @@ CREATE TABLE account_apple_identities (
 
     UNIQUE (issuer, audience, subject),
     UNIQUE (account_id, issuer, audience),
-    UNIQUE (apple_refresh_token_hash),
 
     CHECK (CHAR_LENGTH(BTRIM(issuer)) BETWEEN 1 AND 255),
     CHECK (CHAR_LENGTH(BTRIM(audience)) BETWEEN 1 AND 255),
@@ -169,8 +219,6 @@ CREATE TABLE account_installations (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    UNIQUE (id, account_id),
-
     CHECK (
         installation_id ~ '^[A-Za-z0-9-]{8,128}$'
     ),
@@ -205,19 +253,23 @@ CREATE INDEX account_installations_account_last_seen_idx
         last_seen_at DESC
     );
 
-CREATE TABLE account_auth_sessions (
+CREATE TABLE account_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     account_id UUID NOT NULL
         REFERENCES accounts(id)
         ON DELETE CASCADE,
 
-    account_installation_id UUID NOT NULL,
+    account_installation_id UUID NOT NULL
+        REFERENCES account_installations(id)
+        ON DELETE CASCADE,
 
     token_family_id UUID NOT NULL DEFAULT gen_random_uuid(),
     refresh_token_hash TEXT NOT NULL UNIQUE,
 
-    rotated_from_session_id UUID,
+    rotated_from_session_id UUID UNIQUE
+        REFERENCES account_sessions(id)
+        ON DELETE SET NULL,
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -229,30 +281,15 @@ CREATE TABLE account_auth_sessions (
     ip_address_hash TEXT,
     user_agent_hash TEXT,
 
-    UNIQUE (id, account_id),
-    UNIQUE (rotated_from_session_id),
-
-    FOREIGN KEY (
-        account_installation_id,
-        account_id
-    )
-        REFERENCES account_installations(id, account_id)
-        ON DELETE CASCADE,
-
-    FOREIGN KEY (
-        rotated_from_session_id,
-        account_id
-    )
-        REFERENCES account_auth_sessions(id, account_id)
-        ON DELETE RESTRICT,
-
     CHECK (
         refresh_token_hash ~ '^[0-9a-f]{64}$'
     ),
 
     CHECK (expires_at > created_at),
 
-    CHECK (last_used_at >= created_at),
+    CHECK (
+        last_used_at >= created_at
+    ),
 
     CHECK (
         revoked_at IS NULL
@@ -275,25 +312,25 @@ CREATE TABLE account_auth_sessions (
     )
 );
 
-CREATE UNIQUE INDEX account_auth_sessions_one_active_per_installation_idx
-    ON account_auth_sessions (account_installation_id)
+CREATE UNIQUE INDEX account_sessions_one_active_per_installation_idx
+    ON account_sessions (account_installation_id)
     WHERE revoked_at IS NULL;
 
-CREATE INDEX account_auth_sessions_account_active_idx
-    ON account_auth_sessions (
+CREATE INDEX account_sessions_account_active_idx
+    ON account_sessions (
         account_id,
         expires_at DESC
     )
     WHERE revoked_at IS NULL;
 
-CREATE INDEX account_auth_sessions_family_idx
-    ON account_auth_sessions (
+CREATE INDEX account_sessions_family_idx
+    ON account_sessions (
         token_family_id,
         created_at ASC
     );
 
-CREATE INDEX account_auth_sessions_expiration_idx
-    ON account_auth_sessions (expires_at)
+CREATE INDEX account_sessions_expiration_idx
+    ON account_sessions (expires_at)
     WHERE revoked_at IS NULL;
 
 CREATE TABLE account_subscription_ownership (
@@ -472,13 +509,16 @@ CREATE INDEX account_deletion_requests_status_idx
 COMMENT ON TABLE accounts IS
     'Authenticated Agora accounts. Existing legacy user_id columns remain installation identifiers.';
 
+COMMENT ON TABLE account_auth_challenges IS
+    'Short-lived, single-use Sign in with Apple nonce challenges issued by the backend.';
+
 COMMENT ON TABLE account_apple_identities IS
     'Sign in with Apple identities and encrypted Apple refresh-token material. Never store raw authorization codes.';
 
 COMMENT ON TABLE account_installations IS
     'Historical and active links between authenticated accounts and installation identifiers.';
 
-COMMENT ON TABLE account_auth_sessions IS
+COMMENT ON TABLE account_sessions IS
     'Agora refresh-session records. Only SHA-256 hashes of Agora refresh tokens are stored.';
 
 COMMENT ON TABLE account_subscription_ownership IS
