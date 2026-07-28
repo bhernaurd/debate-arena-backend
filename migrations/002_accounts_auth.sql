@@ -52,6 +52,13 @@ CREATE TABLE account_auth_challenges (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 
     installation_id TEXT NOT NULL,
+
+    -- Required for reauthentication and deletion challenges so a challenge
+    -- cannot be used against a different signed-in account.
+    account_id UUID
+        REFERENCES accounts(id)
+        ON DELETE CASCADE,
+
     purpose TEXT NOT NULL DEFAULT 'sign_in_with_apple'
         CHECK (
             purpose IN (
@@ -85,6 +92,17 @@ CREATE TABLE account_auth_challenges (
     CHECK (
         consumed_at IS NULL
         OR consumed_at >= created_at
+    ),
+
+    CHECK (
+        (
+            purpose = 'sign_in_with_apple'
+            AND account_id IS NULL
+        )
+        OR (
+            purpose IN ('reauthenticate', 'delete_account')
+            AND account_id IS NOT NULL
+        )
     )
 );
 
@@ -93,6 +111,14 @@ CREATE INDEX account_auth_challenges_installation_idx
         installation_id,
         created_at DESC
     );
+
+CREATE INDEX account_auth_challenges_account_idx
+    ON account_auth_challenges (
+        account_id,
+        purpose,
+        created_at DESC
+    )
+    WHERE account_id IS NOT NULL;
 
 CREATE INDEX account_auth_challenges_expiration_idx
     ON account_auth_challenges (expires_at)
@@ -219,6 +245,10 @@ CREATE TABLE account_installations (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
+    -- Supports composite foreign keys that guarantee a session's installation
+    -- belongs to the same account recorded on the session.
+    UNIQUE (id, account_id),
+
     CHECK (
         installation_id ~ '^[A-Za-z0-9-]{8,128}$'
     ),
@@ -231,6 +261,10 @@ CREATE TABLE account_installations (
     CHECK (
         last_ios_build IS NULL
         OR last_ios_build > 0
+    ),
+
+    CHECK (
+        last_seen_at >= linked_at
     ),
 
     CHECK (
@@ -260,16 +294,12 @@ CREATE TABLE account_sessions (
         REFERENCES accounts(id)
         ON DELETE CASCADE,
 
-    account_installation_id UUID NOT NULL
-        REFERENCES account_installations(id)
-        ON DELETE CASCADE,
+    account_installation_id UUID NOT NULL,
 
     token_family_id UUID NOT NULL DEFAULT gen_random_uuid(),
     refresh_token_hash TEXT NOT NULL UNIQUE,
 
-    rotated_from_session_id UUID UNIQUE
-        REFERENCES account_sessions(id)
-        ON DELETE SET NULL,
+    rotated_from_session_id UUID,
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_used_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -280,6 +310,26 @@ CREATE TABLE account_sessions (
 
     ip_address_hash TEXT,
     user_agent_hash TEXT,
+
+    UNIQUE (id, account_id),
+    UNIQUE (rotated_from_session_id),
+
+    FOREIGN KEY (
+        account_installation_id,
+        account_id
+    )
+        REFERENCES account_installations(id, account_id)
+        ON DELETE CASCADE,
+
+    -- The composite key prevents a rotation chain from crossing accounts.
+    -- Deferred checking keeps account-wide cascade deletion safe.
+    FOREIGN KEY (
+        rotated_from_session_id,
+        account_id
+    )
+        REFERENCES account_sessions(id, account_id)
+        ON DELETE NO ACTION
+        DEFERRABLE INITIALLY DEFERRED,
 
     CHECK (
         refresh_token_hash ~ '^[0-9a-f]{64}$'
@@ -297,8 +347,15 @@ CREATE TABLE account_sessions (
     ),
 
     CHECK (
-        revocation_reason IS NULL
-        OR CHAR_LENGTH(BTRIM(revocation_reason)) BETWEEN 1 AND 100
+        (
+            revoked_at IS NULL
+            AND revocation_reason IS NULL
+        )
+        OR (
+            revoked_at IS NOT NULL
+            AND revocation_reason IS NOT NULL
+            AND CHAR_LENGTH(BTRIM(revocation_reason)) BETWEEN 1 AND 100
+        )
     ),
 
     CHECK (
@@ -519,7 +576,7 @@ COMMENT ON TABLE account_installations IS
     'Historical and active links between authenticated accounts and installation identifiers.';
 
 COMMENT ON TABLE account_sessions IS
-    'Agora refresh-session records. Only SHA-256 hashes of Agora refresh tokens are stored.';
+    'Agora refresh-session records. Only cryptographic hashes of Agora refresh tokens are stored.';
 
 COMMENT ON TABLE account_subscription_ownership IS
     'Canonical authenticated account owner for each verified App Store original transaction chain.';
