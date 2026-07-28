@@ -393,13 +393,16 @@ function requestInstallationId(req, bodyUserId = '') {
     return resolved;
 }
 
+function requestIosVersion(req) {
+    const raw = req.get('x-ios-version');
+
+    return cleanString(raw, 32) || null;
+}
+
 function requestIosBuild(req) {
     const raw = req.get('x-ios-build');
 
-    if (!raw) return null;
-
-    const parsed = Number(raw);
-    return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+    return cleanString(raw, 32) || null;
 }
 
 function accessErrorResponse(res, err, fallbackMessage) {
@@ -1046,6 +1049,7 @@ router.post('/api/ai-jobs', async (req, res) => {
             debateId: cleanDebateId,
             clientRequestId: cleanClientRequestId,
             metadata: safeMetadata,
+            iosVersion: requestIosVersion(req),
             iosBuild: requestIosBuild(req),
             isVerifiedPro,
         });

@@ -11,9 +11,123 @@ import {
 const USER_ID_RE = /^[A-Za-z0-9-]{8,128}$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+const PRICING_COHORTS = new Set([
+    'unknown',
+    'founding_2026',
+    'standard',
+]);
+
+// The founding offer begins July 22 and ends when September 1 begins in each
+// user's local time zone. UTC+14 reaches a local date first; UTC-12 reaches it
+// last. Client hints are accepted only when the verified purchase itself falls
+// inside the worldwide possible window. Notification-only snapshots inside an
+// early/late boundary remain unknown until a later verified client sync
+// disambiguates them.
+const FOUNDING_OFFER_START_EARLIEST_UTC = Date.parse(
+    '2026-07-21T10:00:00Z'
+);
+const FOUNDING_OFFER_START_LATEST_UTC = Date.parse(
+    '2026-07-22T12:00:00Z'
+);
+const FOUNDING_OFFER_END_EARLIEST_UTC = Date.parse(
+    '2026-08-31T10:00:00Z'
+);
+const FOUNDING_OFFER_END_LATEST_UTC = Date.parse(
+    '2026-09-01T12:00:00Z'
+);
+
 function cleanString(value, maxLength = 50000) {
     if (typeof value !== 'string') return '';
     return value.trim().slice(0, maxLength);
+}
+
+function normalizePricingCohortHint(value) {
+    const clean = cleanString(value, 40).toLowerCase();
+
+    if (!clean) return 'unknown';
+    return PRICING_COHORTS.has(clean) ? clean : null;
+}
+
+function derivePricingCohortAssignment({
+    transaction,
+    pricingCohortHint = 'unknown',
+}) {
+    const purchaseTimestamp = Number(
+        transaction?.purchaseDate ||
+        transaction?.originalPurchaseDate ||
+        0
+    );
+    const originalPurchaseTimestamp = Number(
+        transaction?.originalPurchaseDate ||
+        transaction?.purchaseDate ||
+        0
+    );
+
+    const hasValidPurchaseDate =
+        Number.isFinite(purchaseTimestamp) &&
+        purchaseTimestamp > 0;
+    const hasValidOriginalPurchaseDate =
+        Number.isFinite(originalPurchaseTimestamp) &&
+        originalPurchaseTimestamp > 0;
+
+    const purchaseInsidePossibleFoundingWindow =
+        hasValidPurchaseDate &&
+        purchaseTimestamp >= FOUNDING_OFFER_START_EARLIEST_UTC &&
+        purchaseTimestamp < FOUNDING_OFFER_END_LATEST_UTC;
+
+    const originalPurchaseInsideUnambiguousFoundingWindow =
+        hasValidOriginalPurchaseDate &&
+        originalPurchaseTimestamp >= FOUNDING_OFFER_START_LATEST_UTC &&
+        originalPurchaseTimestamp < FOUNDING_OFFER_END_EARLIEST_UTC;
+
+    if (
+        pricingCohortHint === 'founding_2026' &&
+        purchaseInsidePossibleFoundingWindow
+    ) {
+        return {
+            pricingCohort: 'founding_2026',
+            pricingCohortSource: 'client_hint_with_verified_transaction',
+            pricingCohortAssignedAt: new Date(),
+        };
+    }
+
+    // The standard paywall is itself the disambiguating signal during the
+    // worldwide September 1 boundary. Once a chain has a permanent cohort,
+    // the entitlement upsert below prevents later hints from overwriting it.
+    if (pricingCohortHint === 'standard') {
+        return {
+            pricingCohort: 'standard',
+            pricingCohortSource: 'client_hint_with_verified_transaction',
+            pricingCohortAssignedAt: new Date(),
+        };
+    }
+
+    if (hasValidOriginalPurchaseDate) {
+        if (originalPurchaseInsideUnambiguousFoundingWindow) {
+            return {
+                pricingCohort: 'founding_2026',
+                pricingCohortSource: 'verified_original_purchase_date',
+                pricingCohortAssignedAt: new Date(),
+            };
+        }
+
+        if (
+            originalPurchaseTimestamp < FOUNDING_OFFER_START_EARLIEST_UTC ||
+            originalPurchaseTimestamp >= FOUNDING_OFFER_END_LATEST_UTC
+        ) {
+            return {
+                pricingCohort: 'standard',
+                pricingCohortSource: 'verified_original_purchase_date',
+                pricingCohortAssignedAt: new Date(),
+            };
+        }
+    }
+
+    return {
+        pricingCohort: 'unknown',
+        pricingCohortSource: null,
+        pricingCohortAssignedAt: null,
+    };
 }
 
 function normalizeUUID(value) {
@@ -392,6 +506,8 @@ async function upsertEntitlement(client, {
     subtype,
     source,
     snapshotSignedDate,
+    pricingCohortHint = 'unknown',
+    paywallSessionId = null,
 }) {
     const originalTransactionId = cleanString(
         transaction?.originalTransactionId ||
@@ -422,6 +538,10 @@ async function upsertEntitlement(client, {
         transaction?.appAccountToken || renewal?.appAccountToken
     );
     const autoRenew = autoRenewEnabled(renewal);
+    const cohortAssignment = derivePricingCohortAssignment({
+        transaction,
+        pricingCohortHint,
+    });
 
     const upsertResult = await client.query(
         `
@@ -444,11 +564,16 @@ async function upsertEntitlement(client, {
             last_notification_type,
             last_notification_subtype,
             source,
-            last_signed_date
+            last_signed_date,
+            pricing_cohort,
+            pricing_cohort_source,
+            pricing_cohort_assigned_at,
+            pricing_cohort_paywall_session_id
         )
         VALUES (
             $1, $2, $3::uuid, $4, $5, $6, $7, $8, $9,
-            $10, $11, $12, $13, $14, $15, $16, $17, $18, $19
+            $10, $11, $12, $13, $14, $15, $16, $17, $18, $19,
+            $20, $21, $22, $23
         )
         ON CONFLICT (original_transaction_id, environment) DO UPDATE SET
             user_id = COALESCE(subscription_entitlements.user_id, EXCLUDED.user_id),
@@ -473,6 +598,56 @@ async function upsertEntitlement(client, {
                 ELSE subscription_entitlements.source
             END,
             last_signed_date = EXCLUDED.last_signed_date,
+            pricing_cohort = CASE
+                WHEN subscription_entitlements.pricing_cohort IN (
+                    'founding_2026',
+                    'standard'
+                ) THEN subscription_entitlements.pricing_cohort
+                WHEN EXCLUDED.pricing_cohort IN (
+                    'founding_2026',
+                    'standard'
+                ) THEN EXCLUDED.pricing_cohort
+                ELSE COALESCE(
+                    subscription_entitlements.pricing_cohort,
+                    'unknown'
+                )
+            END,
+            pricing_cohort_source = CASE
+                WHEN subscription_entitlements.pricing_cohort IN (
+                    'founding_2026',
+                    'standard'
+                ) THEN subscription_entitlements.pricing_cohort_source
+                WHEN EXCLUDED.pricing_cohort IN (
+                    'founding_2026',
+                    'standard'
+                ) THEN EXCLUDED.pricing_cohort_source
+                ELSE subscription_entitlements.pricing_cohort_source
+            END,
+            pricing_cohort_assigned_at = CASE
+                WHEN subscription_entitlements.pricing_cohort IN (
+                    'founding_2026',
+                    'standard'
+                ) THEN subscription_entitlements.pricing_cohort_assigned_at
+                WHEN EXCLUDED.pricing_cohort IN (
+                    'founding_2026',
+                    'standard'
+                ) THEN EXCLUDED.pricing_cohort_assigned_at
+                ELSE subscription_entitlements.pricing_cohort_assigned_at
+            END,
+            pricing_cohort_paywall_session_id = CASE
+                WHEN subscription_entitlements.pricing_cohort IN (
+                    'founding_2026',
+                    'standard'
+                ) THEN subscription_entitlements.pricing_cohort_paywall_session_id
+                WHEN EXCLUDED.pricing_cohort IN (
+                    'founding_2026',
+                    'standard'
+                ) THEN COALESCE(
+                    EXCLUDED.pricing_cohort_paywall_session_id,
+                    subscription_entitlements.pricing_cohort_paywall_session_id
+                )
+                ELSE subscription_entitlements.pricing_cohort_paywall_session_id
+            END,
             updated_at = NOW()
         WHERE
             subscription_entitlements.last_signed_date IS NULL OR
@@ -485,7 +660,11 @@ async function upsertEntitlement(client, {
             is_trial,
             auto_renew_enabled,
             expires_date,
-            last_signed_date
+            last_signed_date,
+            pricing_cohort,
+            pricing_cohort_source,
+            pricing_cohort_assigned_at,
+            pricing_cohort_paywall_session_id
         `,
         [
             originalTransactionId,
@@ -511,6 +690,10 @@ async function upsertEntitlement(client, {
             snapshotSignedDate ||
                 toDate(transaction?.signedDate) ||
                 new Date(),
+            cohortAssignment.pricingCohort,
+            cohortAssignment.pricingCohortSource,
+            cohortAssignment.pricingCohortAssignedAt,
+            cleanString(paywallSessionId, 128) || null,
         ]
     );
 
@@ -530,7 +713,11 @@ async function upsertEntitlement(client, {
                 is_trial,
                 auto_renew_enabled,
                 expires_date,
-                last_signed_date
+                last_signed_date,
+                pricing_cohort,
+                pricing_cohort_source,
+                pricing_cohort_assigned_at,
+                pricing_cohort_paywall_session_id
             FROM subscription_entitlements
             WHERE original_transaction_id = $1
               AND environment = $2
@@ -540,6 +727,55 @@ async function upsertEntitlement(client, {
         );
 
         canonicalRow = currentResult.rows[0] || null;
+    }
+
+    if (
+        canonicalRow &&
+        (canonicalRow.pricing_cohort || 'unknown') === 'unknown' &&
+        cohortAssignment.pricingCohort !== 'unknown'
+    ) {
+        const cohortUpdate = await client.query(
+            `
+            UPDATE subscription_entitlements
+            SET
+                pricing_cohort = $3,
+                pricing_cohort_source = $4,
+                pricing_cohort_assigned_at = COALESCE(
+                    pricing_cohort_assigned_at,
+                    $5
+                ),
+                pricing_cohort_paywall_session_id = COALESCE(
+                    pricing_cohort_paywall_session_id,
+                    $6
+                ),
+                updated_at = NOW()
+            WHERE original_transaction_id = $1
+              AND environment = $2
+              AND COALESCE(pricing_cohort, 'unknown') = 'unknown'
+            RETURNING
+                original_transaction_id,
+                product_id,
+                status,
+                is_trial,
+                auto_renew_enabled,
+                expires_date,
+                last_signed_date,
+                pricing_cohort,
+                pricing_cohort_source,
+                pricing_cohort_assigned_at,
+                pricing_cohort_paywall_session_id
+            `,
+            [
+                originalTransactionId,
+                environment,
+                cohortAssignment.pricingCohort,
+                cohortAssignment.pricingCohortSource,
+                cohortAssignment.pricingCohortAssignedAt,
+                cleanString(paywallSessionId, 128) || null,
+            ]
+        );
+
+        canonicalRow = cohortUpdate.rows[0] || canonicalRow;
     }
 
     if (!canonicalRow) {
@@ -556,6 +792,13 @@ async function upsertEntitlement(client, {
             canonicalRow.auto_renew_enabled ?? null,
         expiresDate: canonicalRow.expires_date || null,
         lastSignedDate: canonicalRow.last_signed_date || null,
+        pricingCohort: canonicalRow.pricing_cohort || 'unknown',
+        pricingCohortSource:
+            canonicalRow.pricing_cohort_source || null,
+        pricingCohortAssignedAt:
+            canonicalRow.pricing_cohort_assigned_at || null,
+        pricingCohortPaywallSessionId:
+            canonicalRow.pricing_cohort_paywall_session_id || null,
     };
 }
 
@@ -669,7 +912,13 @@ async function insertSubscriptionEvent(client, {
             entitlement.autoRenewEnabled,
             entitlement.expiresDate,
             eventAt || new Date(),
-            JSON.stringify(jsonSafe(metadata) || {}),
+            JSON.stringify({
+                ...(jsonSafe(metadata) || {}),
+                pricingCohort:
+                    entitlement.pricingCohort || 'unknown',
+                pricingCohortSource:
+                    entitlement.pricingCohortSource || null,
+            }),
         ]
     );
 }
@@ -686,6 +935,8 @@ async function persistVerifiedSnapshot(client, {
     notificationUUID = null,
     eventAt = null,
     metadata = null,
+    pricingCohortHint = 'unknown',
+    paywallSessionId = null,
 }) {
     const userId = await resolveUserId({
         client,
@@ -716,6 +967,8 @@ async function persistVerifiedSnapshot(client, {
         subtype,
         source,
         snapshotSignedDate: eventAt,
+        pricingCohortHint,
+        paywallSessionId,
     });
 
     await linkSubscriptionInstallations(client, {
@@ -759,6 +1012,13 @@ export function createAppStoreSubscriptionRouter(pool) {
             req.body?.transactionJWS,
             50000
         );
+        const pricingCohortHint = normalizePricingCohortHint(
+            req.body?.pricingCohortHint
+        );
+        const paywallSessionId = cleanString(
+            req.body?.paywallSessionId,
+            128
+        ) || null;
 
         if (!requestedUserId) {
             return res.status(401).json({
@@ -771,6 +1031,13 @@ export function createAppStoreSubscriptionRouter(pool) {
             return res.status(400).json({
                 success: false,
                 error: 'transactionJWS is required.',
+            });
+        }
+
+        if (pricingCohortHint === null) {
+            return res.status(400).json({
+                success: false,
+                error: 'invalid pricingCohortHint',
             });
         }
 
@@ -804,7 +1071,11 @@ export function createAppStoreSubscriptionRouter(pool) {
                 eventAt: toDate(transaction?.signedDate) || new Date(),
                 metadata: {
                     iosBuild: req.get('x-ios-build') || null,
+                    pricingCohortHint,
+                    paywallSessionId,
                 },
+                pricingCohortHint,
+                paywallSessionId,
             });
 
             await client.query('COMMIT');
@@ -814,6 +1085,8 @@ export function createAppStoreSubscriptionRouter(pool) {
                 ignored: result.ignored,
                 reason: result.reason || null,
                 status: result.entitlement?.status || null,
+                pricingCohort:
+                    result.entitlement?.pricingCohort || 'unknown',
                 analyticsAccessTier:
                     result.entitlement?.isTrial &&
                     ['trial', 'active', 'grace_period'].includes(

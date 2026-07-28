@@ -12,6 +12,10 @@
 // eligibility cutoff automatically.
 
 import express from 'express';
+import {
+    evaluateMinimumIosClient,
+    parseOptionalPositiveInteger,
+} from './lib/iosClientCompatibility.js';
 
 const USER_ID_RE = /^[A-Za-z0-9-]{8,128}$/;
 const PHILOSOPHER_ID_RE = /^[a-z0-9][a-z0-9_-]{1,79}$/;
@@ -87,18 +91,6 @@ function cleanString(value, maxLength = 200) {
     return value.trim().slice(0, maxLength);
 }
 
-function parseOptionalPositiveInteger(value) {
-    if (value === undefined || value === null || value === '') return null;
-
-    const parsed = Number(value);
-
-    if (!Number.isInteger(parsed) || parsed <= 0) {
-        return null;
-    }
-
-    return parsed;
-}
-
 function isValidUserId(value) {
     return typeof value === 'string' && USER_ID_RE.test(value);
 }
@@ -120,10 +112,14 @@ function philosopherIdFromMetadata(metadata) {
     return cleanString(normalized.philosopherId, 80).toLowerCase();
 }
 
+function iosVersionFromRequest(req) {
+    const raw = req.get('x-ios-version') || req.query?.iosVersion;
+    return cleanString(raw, 32) || null;
+}
+
 function iosBuildFromRequest(req) {
-    return parseOptionalPositiveInteger(
-        req.get('x-ios-build') || req.query?.iosBuild
-    );
+    const raw = req.get('x-ios-build') || req.query?.iosBuild;
+    return cleanString(raw, 32) || null;
 }
 
 function isoOrNull(value) {
@@ -145,13 +141,20 @@ function phaseForRelease(release, now) {
     return 'pro_only';
 }
 
-function minimumBuildSatisfied(release, iosBuild) {
-    const minimumBuild = Number(release.minimum_ios_build || 0);
-
-    if (!minimumBuild) return true;
-    if (!iosBuild) return false;
-
-    return iosBuild >= minimumBuild;
+function evaluateReleaseClientCompatibility(
+    release,
+    iosVersion,
+    iosBuild
+) {
+    return evaluateMinimumIosClient({
+        clientVersion: iosVersion,
+        clientBuild: iosBuild,
+        minimumVersion:
+            release.required_minimum_ios_version ?? null,
+        minimumBuild: release.minimum_ios_build ?? null,
+        minimumLegacyBuild:
+            release.required_minimum_legacy_ios_build ?? null,
+    });
 }
 
 async function getFirstSeenAt(db, userId) {
@@ -173,16 +176,26 @@ async function getEnabledReleaseRows(db, philosopherId = null) {
 
     if (philosopherId) {
         values.push(philosopherId);
-        philosopherFilter = `AND philosopher_id = $${values.length}`;
+        philosopherFilter =
+            `AND schedule.philosopher_id = $${values.length}`;
     }
 
     const result = await db.query(
         `
-        SELECT *
-        FROM expanded_philosopher_release_schedule
-        WHERE is_enabled = TRUE
+        SELECT
+            schedule.*,
+            release.minimum_ios_version
+                AS required_minimum_ios_version,
+            release.minimum_legacy_ios_build
+                AS required_minimum_legacy_ios_build
+        FROM expanded_philosopher_release_schedule AS schedule
+        INNER JOIN expanded_philosopher_releases AS release
+            ON release.philosopher_id = schedule.philosopher_id
+        WHERE schedule.is_enabled = TRUE
         ${philosopherFilter}
-        ORDER BY pro_launch_at ASC, philosopher_id ASC
+        ORDER BY
+            schedule.pro_launch_at ASC,
+            schedule.philosopher_id ASC
         `,
         values
     );
@@ -193,9 +206,16 @@ async function getEnabledReleaseRows(db, philosopherId = null) {
 async function getAnyReleaseRow(db, philosopherId) {
     const result = await db.query(
         `
-        SELECT *
-        FROM expanded_philosopher_release_schedule
-        WHERE philosopher_id = $1
+        SELECT
+            schedule.*,
+            release.minimum_ios_version
+                AS required_minimum_ios_version,
+            release.minimum_legacy_ios_build
+                AS required_minimum_legacy_ios_build
+        FROM expanded_philosopher_release_schedule AS schedule
+        INNER JOIN expanded_philosopher_releases AS release
+            ON release.philosopher_id = schedule.philosopher_id
+        WHERE schedule.philosopher_id = $1
         LIMIT 1
         `,
         [philosopherId]
@@ -265,11 +285,17 @@ function buildReleaseStatus({
     release,
     firstSeenAt,
     usage,
+    iosVersion,
     iosBuild,
     now,
 }) {
     const phase = phaseForRelease(release, now);
-    const buildSatisfied = minimumBuildSatisfied(release, iosBuild);
+    const compatibility = evaluateReleaseClientCompatibility(
+        release,
+        iosVersion,
+        iosBuild
+    );
+    const clientSatisfied = compatibility.satisfied;
     const eligibilityCutoff = new Date(release.grace_eligibility_cutoff_at);
     const firstSeenDate = firstSeenAt ? new Date(firstSeenAt) : null;
 
@@ -292,7 +318,7 @@ function buildReleaseStatus({
     let freeAccess = 'none';
     let accessReason = 'pro_required';
 
-    if (!buildSatisfied) {
+    if (!clientSatisfied) {
         accessReason = 'update_required';
     } else if (phase === 'free_event') {
         freeAccess = 'event';
@@ -337,16 +363,24 @@ function buildReleaseStatus({
         graceEligibilityCutoffAt: isoOrNull(
             release.grace_eligibility_cutoff_at
         ),
-        minimumIosBuild: release.minimum_ios_build
-            ? Number(release.minimum_ios_build)
-            : null,
-        minimumBuildSatisfied: buildSatisfied,
+        minimumIosVersion: compatibility.minimumVersion,
+        minimumIosBuild: compatibility.minimumBuild,
+        minimumLegacyIosBuild: compatibility.minimumLegacyBuild,
+
+        // Keep the existing field for currently released iOS builds.
+        minimumBuildSatisfied: clientSatisfied,
+        minimumClientSatisfied: clientSatisfied,
+        clientCompatibilityReason: compatibility.reason,
     };
 }
 
 export async function getExpandedAgoraAccessSnapshot(
     db,
-    { userId, iosBuild = null }
+    {
+        userId,
+        iosVersion = null,
+        iosBuild = null,
+    }
 ) {
     if (!isValidUserId(userId)) {
         throw new ExpandedAgoraAccessError(
@@ -373,6 +407,7 @@ export async function getExpandedAgoraAccessSnapshot(
             release,
             firstSeenAt,
             usage: usageByPhilosopher.get(release.philosopher_id),
+            iosVersion,
             iosBuild,
             now,
         })
@@ -495,6 +530,7 @@ async function authorizeExpandedOpening(
         philosopherId,
         debateId,
         clientRequestId,
+        iosVersion,
         iosBuild,
         isVerifiedPro,
         release: suppliedRelease = null,
@@ -520,15 +556,23 @@ async function authorizeExpandedOpening(
         );
     }
 
-    if (!minimumBuildSatisfied(release, iosBuild)) {
+    const compatibility = evaluateReleaseClientCompatibility(
+        release,
+        iosVersion,
+        iosBuild
+    );
+
+    if (!compatibility.satisfied) {
         throw new ExpandedAgoraAccessError(
             'Update The Agora to access this philosopher.',
             426,
             'update_required',
             {
-                minimumIosBuild: release.minimum_ios_build
-                    ? Number(release.minimum_ios_build)
-                    : null,
+                minimumIosVersion: compatibility.minimumVersion,
+                minimumIosBuild: compatibility.minimumBuild,
+                minimumLegacyIosBuild:
+                    compatibility.minimumLegacyBuild,
+                clientCompatibilityReason: compatibility.reason,
             }
         );
     }
@@ -714,6 +758,7 @@ export async function authorizeAIJobCreate(
         debateId,
         clientRequestId,
         metadata,
+        iosVersion = null,
         iosBuild = null,
         isVerifiedPro = false,
     }
@@ -730,9 +775,11 @@ export async function authorizeAIJobCreate(
         expandedAgoraEnforcementEnabledForUser(userId);
 
     if (!philosopherId) {
+        const strictIosBuild = parseOptionalPositiveInteger(iosBuild);
+
         const mustSendPhilosopherId =
             enforcementEnabled &&
-            await philosopherIdRequiredForBuild(db, iosBuild);
+            await philosopherIdRequiredForBuild(db, strictIosBuild);
 
         if (mustSendPhilosopherId) {
             throw new ExpandedAgoraAccessError(
@@ -814,6 +861,7 @@ export async function authorizeAIJobCreate(
             philosopherId,
             debateId,
             clientRequestId,
+            iosVersion,
             iosBuild,
             isVerifiedPro,
             release,
@@ -959,6 +1007,7 @@ export function createExpandedAgoraAccessRouter(pool) {
             const snapshot =
                 await getExpandedAgoraAccessSnapshot(pool, {
                     userId,
+                    iosVersion: iosVersionFromRequest(req),
                     iosBuild: iosBuildFromRequest(req),
                 });
 
