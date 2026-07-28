@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
+    "migrate": "node scripts/runMigrations.js",
     "daily-analytics-report": "node scripts/dailyAnalyticsReport.js",
     "monthly-analytics-report": "node scripts/monthlyAnalyticsReport.js"
   },
