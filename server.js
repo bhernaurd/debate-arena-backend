@@ -14,6 +14,7 @@ import { createAnalyticsRouter } from './analytics.js';
 import aiJobsRouter from './aiJobs.js';
 import { createAppStoreSubscriptionRouter } from './appStoreSubscriptionRoutes.js';
 import { createPaywallConfigurationRouter } from './paywallConfigurationRoutes.js';
+import { createAccountAuthRouter } from './accountAuthRoutes.js';
 
 import './pushScheduler.js';
 import './aiJobWorker.js';
@@ -69,8 +70,60 @@ const subscriptionSyncLimiter = rateLimit({
   message: { error: 'Too many subscription sync requests.' },
 });
 
+const accountChallengeLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'too_many_authentication_requests',
+      message: 'Too many authentication requests. Please try again shortly.',
+      retryable: true,
+    },
+  },
+});
+
+const accountSignInLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'too_many_authentication_requests',
+      message: 'Too many authentication requests. Please try again shortly.',
+      retryable: true,
+    },
+  },
+});
+
+const accountSessionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'too_many_authentication_requests',
+      message: 'Too many authentication requests. Please try again shortly.',
+      retryable: true,
+    },
+  },
+});
+
 app.use('/debate', limiter);
 app.use('/api/app-store/sync-transaction', subscriptionSyncLimiter);
+
+// Constructing the router validates all required Apple and Agora
+// authentication configuration during startup. A missing or malformed secret
+// prevents the service from starting with partially configured authentication.
+const accountAuthRouter = createAccountAuthRouter(pool);
+
+app.use('/api/account/apple/challenge', accountChallengeLimiter);
+app.use('/api/account/apple/sign-in', accountSignInLimiter);
+app.use('/api/account/session', accountSessionLimiter);
+app.use('/api/account', accountAuthRouter);
 
 app.use(createPaywallConfigurationRouter());
 app.use(createDailyChallengeRouter(pool));
