@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 import express from 'express';
 
 import {
+    AccountSubscriptionOwnershipError,
+} from './lib/accountSubscriptionOwnership.js';
+
+import {
     AGORA_PRO_PRODUCT_IDS,
     verifyAppStoreNotificationJWS,
     verifyAppStoreRenewalInfoJWS,
@@ -9,6 +13,7 @@ import {
 } from './appStoreSubscriptionVerifier.js';
 
 const USER_ID_RE = /^[A-Za-z0-9-]{8,128}$/;
+const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const PRICING_COHORTS = new Set([
@@ -142,6 +147,65 @@ function isValidUserId(value) {
 function requestInstallationId(req) {
     const value = cleanString(req.get('x-installation-id'), 128);
     return isValidUserId(value) ? value : null;
+}
+
+
+function optionalBearerAccessToken(req) {
+    const authorization = req.get('authorization');
+
+    if (authorization == null || authorization === '') {
+        return null;
+    }
+
+    if (
+        typeof authorization !== 'string' ||
+        authorization.length > MAX_AUTHORIZATION_HEADER_LENGTH
+    ) {
+        throw new AccountSubscriptionOwnershipError(
+            'invalid_access_token',
+            'The Agora account access token is invalid or expired.',
+            { status: 401 }
+        );
+    }
+
+    const match =
+        /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/
+            .exec(authorization.trim());
+
+    if (!match) {
+        throw new AccountSubscriptionOwnershipError(
+            'invalid_access_token',
+            'The Agora account access token is invalid or expired.',
+            { status: 401 }
+        );
+    }
+
+    return match[1];
+}
+
+function ownershipErrorResponse(error) {
+    const status =
+        Number.isInteger(error?.status) &&
+        error.status >= 400 &&
+        error.status <= 599
+            ? error.status
+            : 503;
+
+    return {
+        status,
+        body: {
+            success: false,
+            error:
+                error?.message ||
+                'Subscription ownership could not be verified.',
+            errorCode:
+                error?.code ||
+                'subscription_ownership_unavailable',
+            retryable:
+                status >= 500 ||
+                Boolean(error?.retryable),
+        },
+    };
 }
 
 function toDate(value) {
@@ -352,12 +416,10 @@ async function resolveUserId({
         transaction?.originalTransactionId,
         environment
     );
-    const tokenUserId = normalizeUUID(transaction?.appAccountToken);
-
-    // Keep one stable canonical owner for the subscription chain. A verified
-    // entitlement may also be restored on another installation; that device is
-    // linked separately instead of replacing the canonical owner or failing.
-    return existingUserId || tokenUserId || requestedUserId || null;
+    // Legacy user_id columns remain installation identifiers. The verified
+    // App Store appAccountToken may now contain an Agora account UUID, so it
+    // must never become the legacy canonical user_id.
+    return existingUserId || requestedUserId || null;
 }
 
 async function upsertTransaction(client, {
@@ -812,15 +874,15 @@ async function linkSubscriptionInstallations(client, {
 }) {
     if (!originalTransactionId || !environment) return;
 
-    const tokenUserId = normalizeUUID(transaction?.appAccountToken);
+    // Only installation identifiers belong in this legacy link table.
+    // appAccountToken may now be the authenticated Agora account UUID.
     const candidates = new Set(
-        [canonicalUserId, requestedUserId, tokenUserId]
+        [canonicalUserId, requestedUserId]
             .filter((value) => isValidUserId(value))
     );
 
     for (const userId of candidates) {
-        const candidateAppAccountToken =
-            userId === tokenUserId ? tokenUserId : null;
+        const candidateAppAccountToken = null;
 
         await client.query(
             `
@@ -1001,13 +1063,42 @@ async function persistVerifiedSnapshot(client, {
     };
 }
 
-export function createAppStoreSubscriptionRouter(pool) {
+export function createAppStoreSubscriptionRouter(
+    pool,
+    {
+        accountSubscriptionOwnershipService = null,
+    } = {}
+) {
     const router = express.Router();
+
+
+    if (
+        accountSubscriptionOwnershipService != null &&
+        (
+            typeof accountSubscriptionOwnershipService
+                .authorizeSubscriptionSync !== 'function' ||
+            typeof accountSubscriptionOwnershipService
+                .claimVerifiedSubscription !== 'function'
+        )
+    ) {
+        throw new Error(
+            'A valid account subscription ownership service is required.'
+        );
+    }
 
     // Called by the iOS app after a locally verified purchase, restore, launch,
     // or StoreKit transaction update. The JWS is verified again on the server.
     router.post('/api/app-store/sync-transaction', async (req, res) => {
         const requestedUserId = requestInstallationId(req);
+        let accessToken;
+
+        try {
+            accessToken = optionalBearerAccessToken(req);
+        } catch (error) {
+            const response = ownershipErrorResponse(error);
+            return res.status(response.status).json(response.body);
+        }
+
         const transactionJWS = cleanString(
             req.body?.transactionJWS,
             50000
@@ -1043,8 +1134,29 @@ export function createAppStoreSubscriptionRouter(pool) {
 
         let client;
         let processingStarted = false;
+        let accountAuthorization = null;
 
         try {
+            if (accessToken) {
+                if (!accountSubscriptionOwnershipService) {
+                    throw new AccountSubscriptionOwnershipError(
+                        'subscription_ownership_unavailable',
+                        'Authenticated subscription ownership is temporarily unavailable.',
+                        {
+                            status: 503,
+                            retryable: true,
+                        }
+                    );
+                }
+
+                accountAuthorization =
+                    await accountSubscriptionOwnershipService
+                        .authorizeSubscriptionSync({
+                            installationId: requestedUserId,
+                            accessToken,
+                        });
+            }
+
             const {
                 decoded: transaction,
                 environment,
@@ -1073,10 +1185,45 @@ export function createAppStoreSubscriptionRouter(pool) {
                     iosBuild: req.get('x-ios-build') || null,
                     pricingCohortHint,
                     paywallSessionId,
+                    authenticatedAccountId:
+                        accountAuthorization?.accountId || null,
                 },
                 pricingCohortHint,
                 paywallSessionId,
             });
+
+            let accountOwnership = null;
+
+            if (
+                accountAuthorization &&
+                !result.ignored
+            ) {
+                const ownershipResult =
+                    await accountSubscriptionOwnershipService
+                        .claimVerifiedSubscription({
+                            client,
+                            authorization: accountAuthorization,
+                            transaction,
+                            environment,
+                        });
+
+                accountOwnership = {
+                    linked: Boolean(
+                        ownershipResult?.ownership
+                    ),
+                    accountId:
+                        accountAuthorization.accountId,
+                    migratedLegacyOwnership:
+                        Boolean(
+                            ownershipResult
+                                ?.migratedLegacyOwnership
+                        ),
+                    claimSource:
+                        ownershipResult
+                            ?.ownership
+                            ?.claimSource || null,
+                };
+            }
 
             await client.query('COMMIT');
 
@@ -1097,12 +1244,36 @@ export function createAppStoreSubscriptionRouter(pool) {
                           result.entitlement?.status === 'grace_period'
                             ? 'paid_pro'
                             : 'free',
+                accountOwnership,
             });
         } catch (error) {
             if (client) {
                 try {
                     await client.query('ROLLBACK');
                 } catch {}
+            }
+
+            if (
+                error instanceof
+                    AccountSubscriptionOwnershipError
+            ) {
+                const response =
+                    ownershipErrorResponse(error);
+
+                if (response.status >= 500) {
+                    console.error(
+                        '[AppStoreSubscriptions] Account ownership sync failed.',
+                        {
+                            errorCode:
+                                error.code ||
+                                'subscription_ownership_unavailable',
+                        }
+                    );
+                }
+
+                return res
+                    .status(response.status)
+                    .json(response.body);
             }
 
             console.error(
