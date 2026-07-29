@@ -15,6 +15,10 @@ import aiJobsRouter from './aiJobs.js';
 import { createAppStoreSubscriptionRouter } from './appStoreSubscriptionRoutes.js';
 import { createPaywallConfigurationRouter } from './paywallConfigurationRoutes.js';
 import { createAccountAuthRouter } from './accountAuthRoutes.js';
+import { createAccountAuthService } from './lib/accountAuthService.js';
+import {
+  createAccountSubscriptionOwnershipService,
+} from './lib/accountSubscriptionOwnership.js';
 
 import './pushScheduler.js';
 import './aiJobWorker.js';
@@ -115,10 +119,20 @@ const accountSessionLimiter = rateLimit({
 app.use('/debate', limiter);
 app.use('/api/app-store/sync-transaction', subscriptionSyncLimiter);
 
-// Constructing the router validates all required Apple and Agora
-// authentication configuration during startup. A missing or malformed secret
-// prevents the service from starting with partially configured authentication.
-const accountAuthRouter = createAccountAuthRouter(pool);
+// Construct one shared account service. This validates all required Apple and
+// Agora authentication configuration during startup and ensures account routes
+// and authenticated subscription ownership use the same authorization rules.
+const accountAuthService = createAccountAuthService({ pool });
+
+const accountSubscriptionOwnershipService =
+  createAccountSubscriptionOwnershipService({
+    pool,
+    accountAuthService,
+  });
+
+const accountAuthRouter = createAccountAuthRouter(pool, {
+  service: accountAuthService,
+});
 
 app.use('/api/account/apple/challenge', accountChallengeLimiter);
 app.use('/api/account/apple/sign-in', accountSignInLimiter);
@@ -130,7 +144,9 @@ app.use(createDailyChallengeRouter(pool));
 app.use(createPushRouter(pool));
 app.use(questionsRouter);
 app.use(aiJobsRouter);
-app.use(createAppStoreSubscriptionRouter(pool));
+app.use(createAppStoreSubscriptionRouter(pool, {
+  accountSubscriptionOwnershipService,
+}));
 
 app.use('/analytics', createAnalyticsRouter(pool, {
   adminKey: process.env.ANALYTICS_ADMIN_KEY,
