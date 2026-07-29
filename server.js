@@ -17,9 +17,11 @@ import { createPaywallConfigurationRouter } from './paywallConfigurationRoutes.j
 import { createAccountAuthRouter } from './accountAuthRoutes.js';
 import { createAccountDebateHistoryRouter } from './accountDebateHistoryRoutes.js';
 import { createAccountAchievementRouter } from './accountAchievementRoutes.js';
+import { createAccountDailyChallengeProgressRouter } from './accountDailyChallengeProgressRoutes.js';
 import { createAccountAuthService } from './lib/accountAuthService.js';
 import { createAccountDebateHistoryService } from './lib/accountDebateHistoryService.js';
 import { createAccountAchievementService } from './lib/accountAchievementService.js';
+import { createAccountDailyChallengeProgressService } from './lib/accountDailyChallengeProgressService.js';
 import {
   createAccountSubscriptionOwnershipService,
 } from './lib/accountSubscriptionOwnership.js';
@@ -80,6 +82,27 @@ app.use(
   accountHistoryLimiter,
   express.json({ limit: '2mb' })
 );
+
+const accountDailyChallengeProgressLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'too_many_daily_challenge_progress_requests',
+      message: 'Too many Daily Challenge progress requests. Please try again shortly.',
+      retryable: true,
+    },
+  },
+});
+
+app.use(
+  '/api/account/daily-challenge-progress',
+  accountDailyChallengeProgressLimiter,
+  express.json({ limit: '512kb' })
+);
+
 app.use(express.json({ limit: '50kb' }));
 
 const limiter = rateLimit({
@@ -182,6 +205,13 @@ const accountAchievementService =
     accountAuthService,
   });
 
+
+const accountDailyChallengeProgressService =
+  createAccountDailyChallengeProgressService({
+    pool,
+    accountAuthService,
+  });
+
 const accountAuthRouter = createAccountAuthRouter(pool, {
   service: accountAuthService,
 });
@@ -199,6 +229,14 @@ app.use(
   accountAchievementLimiter,
   createAccountAchievementRouter({
     service: accountAchievementService,
+  })
+);
+
+
+app.use(
+  '/api/account/daily-challenge-progress',
+  createAccountDailyChallengeProgressRouter({
+    service: accountDailyChallengeProgressService,
   })
 );
 
