@@ -183,6 +183,19 @@ function authorizationResponse(result) {
     };
 }
 
+function deletionResponse(result) {
+    return {
+        deleted: result.status === 'deleted',
+        account: {
+            id: result.accountId,
+            status: result.status,
+        },
+        deletedAt: serializeDate(result.deletedAt),
+        appleRevocationStatus:
+            result.appleRevocationStatus ?? null,
+    };
+}
+
 function publicError(error) {
     if (
         error instanceof AccountAuthError ||
@@ -314,6 +327,7 @@ export function createAccountAuthRouter(
         'signInWithApple',
         'refreshSession',
         'authorizeAccessToken',
+        'deleteAccount',
     ];
 
     for (const method of requiredServiceMethods) {
@@ -412,6 +426,64 @@ export function createAccountAuthRouter(
 
             return res.status(200).json(
                 authorizationResponse(result)
+            );
+        })
+    );
+
+    router.post(
+        '/deletion/challenge',
+        asyncRoute(async (req, res) => {
+            const installationId = requireInstallationId(req);
+            const accessToken = requireBearerToken(req);
+
+            const authorization =
+                await accountAuthService.authorizeAccessToken({
+                    installationId,
+                    accessToken,
+                });
+
+            const challenge =
+                await accountAuthService.createAppleChallenge({
+                    installationId,
+                    accountId: authorization.accountId,
+                    purpose: 'delete_account',
+                });
+
+            return res.status(201).json({
+                challengeId: challenge.challengeId,
+                purpose: challenge.purpose,
+                rawNonce: challenge.rawNonce,
+                nonceSha256: challenge.nonceSha256,
+                expiresAt: serializeDate(challenge.expiresAt),
+            });
+        })
+    );
+
+    router.post(
+        '/deletion/confirm',
+        asyncRoute(async (req, res) => {
+            const installationId = requireInstallationId(req);
+            const accessToken = requireBearerToken(req);
+
+            const authorization =
+                await accountAuthService.authorizeAccessToken({
+                    installationId,
+                    accessToken,
+                });
+
+            const body = requireJsonObject(req);
+
+            const result =
+                await accountAuthService.deleteAccount({
+                    accountId: authorization.accountId,
+                    installationId,
+                    challengeId: body.challengeId,
+                    rawNonce: body.rawNonce,
+                    identityToken: body.identityToken,
+                });
+
+            return res.status(200).json(
+                deletionResponse(result)
             );
         })
     );
