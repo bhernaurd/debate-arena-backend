@@ -48,6 +48,10 @@ function makeRepository(overrides = {}) {
             };
         },
 
+        async lockOwnershipChain(input) {
+            calls.push(['lockOwnershipChain', input]);
+        },
+
         async lockOwnership(input) {
             calls.push(['lockOwnership', input]);
             return null;
@@ -540,5 +544,56 @@ test('rejects malformed ownership input', async () => {
         cryptoError(
             'invalid_subscription_ownership_input'
         )
+    );
+});
+
+
+test('serializes ownership claims before reading or inserting the ownership row', async () => {
+    const { service, calls } = makeService();
+
+    await service.claimVerifiedSubscription({
+        client: fakeClient,
+        authorization: {
+            accountId: ACCOUNT_A,
+            installationId: INSTALLATION_A,
+        },
+        transaction: BASE_TRANSACTION,
+        environment: 'Production',
+    });
+
+    const lockChainIndex = calls.findIndex(
+        ([name]) => name === 'lockOwnershipChain'
+    );
+    const lockRowIndex = calls.findIndex(
+        ([name]) => name === 'lockOwnership'
+    );
+    const insertIndex = calls.findIndex(
+        ([name]) => name === 'insertOwnership'
+    );
+
+    assert.ok(lockChainIndex >= 0);
+    assert.ok(lockChainIndex < lockRowIndex);
+    assert.ok(lockRowIndex < insertIndex);
+});
+
+test('normalizes account authorization failures into ownership service errors', async () => {
+    const { service } = makeService({
+        authorizeOverride() {
+            const error = new Error(
+                'The access token is invalid or expired.'
+            );
+            error.code = 'invalid_access_token';
+            error.status = 401;
+            error.retryable = false;
+            throw error;
+        },
+    });
+
+    await assert.rejects(
+        () => service.authorizeSubscriptionSync({
+            installationId: INSTALLATION_A,
+            accessToken: 'header.payload.signature',
+        }),
+        cryptoError('invalid_access_token')
     );
 });
