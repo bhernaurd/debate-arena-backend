@@ -26,7 +26,10 @@ function limiterBlock(name) {
     );
     const match = expression.exec(source);
 
-    assert.ok(match, `Expected ${name} to be defined with rateLimit().`);
+    assert.ok(
+        match,
+        `Expected ${name} to be defined with rateLimit().`
+    );
     return match[1];
 }
 
@@ -42,13 +45,17 @@ test('server.js passes Node syntax validation', () => {
     assert.equal(
         result.status,
         0,
-        result.stderr || result.stdout || 'server.js syntax check failed.'
+        result.stderr ||
+            result.stdout ||
+            'server.js syntax check failed.'
     );
 });
 
 test('env.js remains the first executable import', () => {
     const envImport = positionOf("import './env.js';");
-    const expressImport = positionOf("import express from 'express';");
+    const expressImport = positionOf(
+        "import express from 'express';"
+    );
     const accountRouteImport = positionOf(
         "import { createAccountAuthRouter } from './accountAuthRoutes.js';"
     );
@@ -57,33 +64,55 @@ test('env.js remains the first executable import', () => {
     assert.ok(envImport < accountRouteImport);
 });
 
-test('server imports and constructs the production account router once', () => {
+test('server constructs one shared production account service', () => {
     assert.match(
         source,
-        /import \{ createAccountAuthRouter \} from '\.\/accountAuthRoutes\.js';/
+        /import \{ createAccountAuthService \} from '\.\/lib\/accountAuthService\.js';/
     );
 
     const constructions = source.match(
-        /createAccountAuthRouter\(pool\)/g
+        /createAccountAuthService\(\{ pool \}\)/g
     ) ?? [];
 
     assert.equal(constructions.length, 1);
     assert.match(
         source,
-        /const accountAuthRouter = createAccountAuthRouter\(pool\);/
+        /const accountAuthService = createAccountAuthService\(\{ pool \}\);/
+    );
+});
+
+test('account routes and subscription ownership share the same account service', () => {
+    assert.match(
+        source,
+        /createAccountAuthRouter\(pool, \{[\s\S]*?service: accountAuthService/
+    );
+    assert.match(
+        source,
+        /createAccountSubscriptionOwnershipService\(\{[\s\S]*?pool,[\s\S]*?accountAuthService/
+    );
+    assert.match(
+        source,
+        /createAppStoreSubscriptionRouter\(pool, \{[\s\S]*?accountSubscriptionOwnershipService/
     );
 });
 
 test('Apple challenge and sign-in endpoints have strict dedicated limits', () => {
-    const challenge = limiterBlock('accountChallengeLimiter');
-    const signIn = limiterBlock('accountSignInLimiter');
+    const challenge = limiterBlock(
+        'accountChallengeLimiter'
+    );
+    const signIn = limiterBlock(
+        'accountSignInLimiter'
+    );
 
     for (const block of [challenge, signIn]) {
         assert.match(block, /windowMs:\s*60 \* 1000/);
         assert.match(block, /max:\s*10/);
         assert.match(block, /standardHeaders:\s*true/);
         assert.match(block, /legacyHeaders:\s*false/);
-        assert.match(block, /too_many_authentication_requests/);
+        assert.match(
+            block,
+            /too_many_authentication_requests/
+        );
     }
 });
 
@@ -94,21 +123,24 @@ test('session endpoints have a separate thirty-request limit', () => {
     assert.match(session, /max:\s*30/);
     assert.match(session, /standardHeaders:\s*true/);
     assert.match(session, /legacyHeaders:\s*false/);
-    assert.match(session, /too_many_authentication_requests/);
+    assert.match(
+        session,
+        /too_many_authentication_requests/
+    );
 });
 
 test('JSON parsing is registered before account authentication', () => {
     const jsonParser = positionOf(
         "app.use(express.json({ limit: '50kb' }));"
     );
-    const routerConstruction = positionOf(
-        'const accountAuthRouter = createAccountAuthRouter(pool);'
+    const serviceConstruction = positionOf(
+        'const accountAuthService = createAccountAuthService({ pool });'
     );
     const routerMount = positionOf(
         "app.use('/api/account', accountAuthRouter);"
     );
 
-    assert.ok(jsonParser < routerConstruction);
+    assert.ok(jsonParser < serviceConstruction);
     assert.ok(jsonParser < routerMount);
 });
 
@@ -157,7 +189,7 @@ test('existing application routers remain registered', () => {
         'app.use(createPushRouter(pool));',
         'app.use(questionsRouter);',
         'app.use(aiJobsRouter);',
-        'app.use(createAppStoreSubscriptionRouter(pool));',
+        'app.use(createAppStoreSubscriptionRouter(pool, {',
         "app.use('/analytics', createAnalyticsRouter(pool, {",
         "app.post('/debate', async (req, res) => {",
         "app.get('/health', (_, res) => {",
