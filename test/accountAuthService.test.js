@@ -31,6 +31,11 @@ class MemoryAccountAuthRepository {
             identities: new Map(),
             installations: new Map(),
             sessions: new Map(),
+            deletionRequests: new Map(),
+            subscriptionOwnership: new Map(),
+            achievementUnlocks: new Map(),
+            debateHistory: new Map(),
+            dailyChallengeProgress: new Map(),
         };
     }
 
@@ -436,6 +441,243 @@ class MemoryAccountAuthRepository {
         return true;
     }
 
+
+    async findDeletionIdentityForUpdate(
+        tx,
+        { accountId, issuer, audience }
+    ) {
+        const identity = [...tx.state.identities.values()].find(
+            (candidate) =>
+                candidate.accountId === accountId &&
+                candidate.issuer === issuer &&
+                candidate.audience === audience
+        );
+
+        if (!identity) return null;
+
+        const account = tx.state.accounts.get(accountId);
+
+        return {
+            identityId: identity.identityId,
+            accountId: identity.accountId,
+            issuer: identity.issuer,
+            audience: identity.audience,
+            subject: identity.subject,
+            encryptedRefreshToken: identity.encryptedRefreshToken,
+            accountStatus: account.status,
+            authVersion: account.authVersion,
+            displayName: account.displayName,
+        };
+    }
+
+    async createDeletionRequest(
+        tx,
+        { accountId, requestedAt }
+    ) {
+        const active = [...tx.state.deletionRequests.values()].find(
+            (candidate) =>
+                candidate.accountId === accountId &&
+                ['pending', 'processing'].includes(candidate.status)
+        );
+
+        if (active) return null;
+
+        const id = crypto.randomUUID();
+        const row = {
+            id,
+            accountId,
+            status: 'processing',
+            requestSource: 'ios_app',
+            appleRevocationStatus: 'pending',
+            requestedAt: new Date(requestedAt),
+            processingStartedAt: new Date(requestedAt),
+            completedAt: null,
+            lastErrorCode: null,
+            lastErrorMessage: null,
+            createdAt: new Date(requestedAt),
+            updatedAt: new Date(requestedAt),
+        };
+
+        tx.state.deletionRequests.set(id, row);
+
+        return {
+            id,
+            accountId,
+        };
+    }
+
+    async markAccountDeletionPending(
+        tx,
+        { accountId, requestedAt }
+    ) {
+        const account = tx.state.accounts.get(accountId);
+
+        if (!account || account.status !== 'active') {
+            return false;
+        }
+
+        account.status = 'deletion_pending';
+        account.authVersion += 1;
+        account.deletionRequestedAt = new Date(requestedAt);
+        account.updatedAt = new Date(requestedAt);
+        return true;
+    }
+
+    async revokeAllAccountSessions(
+        tx,
+        { accountId, revokedAt, reason }
+    ) {
+        for (const session of tx.state.sessions.values()) {
+            if (session.accountId !== accountId) continue;
+
+            if (session.revokedAt == null) {
+                session.revokedAt = new Date(revokedAt);
+                session.revocationReason = reason;
+            }
+
+            session.lastUsedAt = new Date(revokedAt);
+        }
+    }
+
+    async failAccountDeletion(
+        tx,
+        {
+            accountId,
+            requestId,
+            failedAt,
+            appleRevocationStatus,
+            errorCode,
+            errorMessage,
+        }
+    ) {
+        const request = tx.state.deletionRequests.get(requestId);
+
+        if (
+            request &&
+            request.accountId === accountId &&
+            request.status === 'processing'
+        ) {
+            request.status = 'failed';
+            request.appleRevocationStatus = appleRevocationStatus;
+            request.lastErrorCode = errorCode;
+            request.lastErrorMessage = errorMessage;
+            request.updatedAt = new Date(failedAt);
+        }
+
+        const account = tx.state.accounts.get(accountId);
+
+        if (account?.status === 'deletion_pending') {
+            account.status = 'active';
+            account.authVersion += 1;
+            account.deletionRequestedAt = null;
+            account.updatedAt = new Date(failedAt);
+        }
+    }
+
+    async finalizeAccountDeletion(
+        tx,
+        {
+            accountId,
+            requestId,
+            completedAt,
+            appleRevocationStatus,
+        }
+    ) {
+        const account = tx.state.accounts.get(accountId);
+        const request = tx.state.deletionRequests.get(requestId);
+
+        if (
+            !account ||
+            account.status !== 'deletion_pending' ||
+            !request ||
+            request.accountId !== accountId ||
+            request.status !== 'processing'
+        ) {
+            return false;
+        }
+
+        const installationIds = new Set(
+            [...tx.state.installations.values()]
+                .filter((row) => row.accountId === accountId)
+                .map((row) => row.installationId)
+        );
+
+        for (const ownership of tx.state.subscriptionOwnership.values()) {
+            if (
+                ownership.accountId === accountId &&
+                ownership.ownershipStatus !== 'released'
+            ) {
+                ownership.ownershipStatus = 'released';
+                ownership.releasedAt =
+                    ownership.releasedAt ?? new Date(completedAt);
+                ownership.claimedFromInstallationId = null;
+                ownership.observedAppAccountToken = null;
+                ownership.updatedAt = new Date(completedAt);
+            }
+        }
+
+        for (const [key, row] of tx.state.achievementUnlocks) {
+            if (row.accountId === accountId) {
+                tx.state.achievementUnlocks.delete(key);
+            }
+        }
+
+        for (const [key, row] of tx.state.debateHistory) {
+            if (row.accountId === accountId) {
+                tx.state.debateHistory.delete(key);
+            }
+        }
+
+        for (const [key, row] of tx.state.dailyChallengeProgress) {
+            if (row.accountId === accountId) {
+                tx.state.dailyChallengeProgress.delete(key);
+            }
+        }
+
+        for (const [key, row] of tx.state.sessions) {
+            if (row.accountId === accountId) {
+                tx.state.sessions.delete(key);
+            }
+        }
+
+        for (const [key, row] of tx.state.challenges) {
+            if (
+                row.accountId === accountId ||
+                installationIds.has(row.installationId)
+            ) {
+                tx.state.challenges.delete(key);
+            }
+        }
+
+        for (const [key, row] of tx.state.installations) {
+            if (row.accountId === accountId) {
+                tx.state.installations.delete(key);
+            }
+        }
+
+        for (const [key, row] of tx.state.identities) {
+            if (row.accountId === accountId) {
+                tx.state.identities.delete(key);
+            }
+        }
+
+        account.status = 'deleted';
+        account.authVersion += 1;
+        account.displayName = null;
+        account.lastAuthenticatedAt = null;
+        account.deletedAt = new Date(completedAt);
+        account.updatedAt = new Date(completedAt);
+
+        request.status = 'completed';
+        request.appleRevocationStatus = appleRevocationStatus;
+        request.completedAt = new Date(completedAt);
+        request.lastErrorCode = null;
+        request.lastErrorMessage = null;
+        request.updatedAt = new Date(completedAt);
+
+        return true;
+    }
+
     async findAuthorizationState({ accountId, sessionId }) {
         const session = this.state.sessions.get(sessionId);
 
@@ -493,10 +735,12 @@ function makeAppleDependencies({
     exchangedSubject = credentialSubject,
     refreshToken = 'apple-refresh-token-1',
     exchangeError = null,
+    revokeError = null,
 } = {}) {
     const calls = {
         verify: [],
         exchange: [],
+        revoke: [],
     };
 
     const verifyAppleIdentityToken = async (token, options = {}) => {
@@ -534,10 +778,19 @@ function makeAppleDependencies({
         });
     };
 
+    const revokeAppleToken = async (input) => {
+        calls.revoke.push(input);
+
+        if (revokeError) throw revokeError;
+
+        return { success: true };
+    };
+
     return {
         calls,
         verifyAppleIdentityToken,
         exchangeAuthorizationCode,
+        revokeAppleToken,
     };
 }
 
@@ -553,6 +806,7 @@ function makeFixture(options = {}) {
         accountCryptoConfig,
         verifyAppleIdentityToken: apple.verifyAppleIdentityToken,
         exchangeAuthorizationCode: apple.exchangeAuthorizationCode,
+        revokeToken: apple.revokeAppleToken,
         now: () => currentTime,
         challengeLifetimeSeconds: options.challengeLifetimeSeconds ?? 600,
         accessTokenLifetimeSeconds: options.accessTokenLifetimeSeconds ?? 900,
@@ -600,6 +854,39 @@ async function signIn(
         iosBuild: 1,
         ipAddress: '203.0.113.10',
         userAgent: 'TheAgora/3.8 iOS',
+    });
+}
+
+
+async function createDeletionChallenge(
+    fixture,
+    signedIn,
+    installationId = 'install-device-001'
+) {
+    return fixture.service.createAppleChallenge({
+        installationId,
+        purpose: 'delete_account',
+        accountId: signedIn.account.id,
+    });
+}
+
+async function deleteSignedInAccount(
+    fixture,
+    signedIn,
+    challenge,
+    {
+        installationId = 'install-device-001',
+        rawNonce = challenge.rawNonce,
+        identityToken = 'credential-identity-token',
+        accountId = signedIn.account.id,
+    } = {}
+) {
+    return fixture.service.deleteAccount({
+        accountId,
+        installationId,
+        challengeId: challenge.challengeId,
+        rawNonce,
+        identityToken,
     });
 }
 
@@ -863,6 +1150,7 @@ test('signing a different Apple identity into the same installation unlinks the 
         accountCryptoConfig: fixture.accountCryptoConfig,
         verifyAppleIdentityToken: secondApple.verifyAppleIdentityToken,
         exchangeAuthorizationCode: secondApple.exchangeAuthorizationCode,
+        revokeToken: secondApple.revokeAppleToken,
         now: () => NOW_MS + 120_000,
     });
 
@@ -1098,4 +1386,279 @@ test('expires access tokens independently of the longer refresh session', async 
     });
 
     assert.ok(refreshed.accessToken);
+});
+
+test('deletes an account after Apple reauthentication and preserves released subscription evidence', async () => {
+    const fixture = makeFixture();
+    const signInChallenge = await createChallenge(fixture);
+    const signedIn = await signIn(fixture, signInChallenge);
+    const accountId = signedIn.account.id;
+
+    fixture.repository.state.achievementUnlocks.set('achievement-1', {
+        accountId,
+    });
+    fixture.repository.state.debateHistory.set('debate-1', {
+        accountId,
+    });
+    fixture.repository.state.dailyChallengeProgress.set('daily-1', {
+        accountId,
+    });
+    fixture.repository.state.subscriptionOwnership.set(
+        'original-transaction-1|Production',
+        {
+            accountId,
+            ownershipStatus: 'active',
+            claimedFromInstallationId: 'install-device-001',
+            observedAppAccountToken: crypto.randomUUID(),
+            releasedAt: null,
+            updatedAt: new Date(NOW_MS),
+        }
+    );
+
+    const deletionChallenge = await createDeletionChallenge(
+        fixture,
+        signedIn
+    );
+
+    fixture.advance(30_000);
+
+    const result = await deleteSignedInAccount(
+        fixture,
+        signedIn,
+        deletionChallenge
+    );
+
+    assert.equal(result.accountId, accountId);
+    assert.equal(result.status, 'deleted');
+    assert.equal(result.appleRevocationStatus, 'succeeded');
+
+    assert.equal(fixture.apple.calls.revoke.length, 1);
+    assert.equal(
+        fixture.apple.calls.revoke[0].token,
+        'apple-refresh-token-1'
+    );
+    assert.equal(
+        fixture.apple.calls.revoke[0].tokenTypeHint,
+        'refresh_token'
+    );
+
+    const account = fixture.repository.state.accounts.get(accountId);
+    assert.equal(account.status, 'deleted');
+    assert.equal(account.displayName, null);
+    assert.ok(account.deletedAt instanceof Date);
+    assert.equal(account.authVersion, 3);
+
+    assert.equal(fixture.repository.state.identities.size, 0);
+    assert.equal(fixture.repository.state.installations.size, 0);
+    assert.equal(fixture.repository.state.sessions.size, 0);
+    assert.equal(fixture.repository.state.challenges.size, 0);
+    assert.equal(fixture.repository.state.achievementUnlocks.size, 0);
+    assert.equal(fixture.repository.state.debateHistory.size, 0);
+    assert.equal(
+        fixture.repository.state.dailyChallengeProgress.size,
+        0
+    );
+
+    const ownership = fixture.repository.state.subscriptionOwnership.get(
+        'original-transaction-1|Production'
+    );
+    assert.equal(ownership.ownershipStatus, 'released');
+    assert.ok(ownership.releasedAt instanceof Date);
+    assert.equal(ownership.claimedFromInstallationId, null);
+    assert.equal(ownership.observedAppAccountToken, null);
+
+    const requests = [
+        ...fixture.repository.state.deletionRequests.values(),
+    ];
+    assert.equal(requests.length, 1);
+    assert.equal(requests[0].status, 'completed');
+    assert.equal(
+        requests[0].appleRevocationStatus,
+        'succeeded'
+    );
+
+    await assert.rejects(
+        () => fixture.service.authorizeAccessToken({
+            installationId: 'install-device-001',
+            accessToken: signedIn.accessToken,
+        }),
+        expectAuthError('invalid_access_token', 401)
+    );
+
+    await assert.rejects(
+        () => fixture.service.refreshSession({
+            installationId: 'install-device-001',
+            refreshToken: signedIn.refreshToken,
+        }),
+        expectAuthError('invalid_refresh_token', 401)
+    );
+});
+
+test('rejects a deletion challenge bound to another installation or account', async () => {
+    const fixture = makeFixture();
+    const signInChallenge = await createChallenge(fixture);
+    const signedIn = await signIn(fixture, signInChallenge);
+    const deletionChallenge = await createDeletionChallenge(
+        fixture,
+        signedIn
+    );
+
+    await assert.rejects(
+        () => deleteSignedInAccount(
+            fixture,
+            signedIn,
+            deletionChallenge,
+            {
+                installationId: 'different-install-999',
+            }
+        ),
+        expectAuthError('invalid_challenge', 401)
+    );
+
+    assert.equal(
+        fixture.repository.state.accounts.get(
+            signedIn.account.id
+        ).status,
+        'active'
+    );
+
+    const anotherAccountId = crypto.randomUUID();
+
+    await assert.rejects(
+        () => deleteSignedInAccount(
+            fixture,
+            signedIn,
+            deletionChallenge,
+            {
+                accountId: anotherAccountId,
+            }
+        ),
+        expectAuthError('invalid_challenge', 401)
+    );
+});
+
+test('rejects a mismatched Apple subject without changing account data', async () => {
+    const fixture = makeFixture();
+    const signInChallenge = await createChallenge(fixture);
+    const signedIn = await signIn(fixture, signInChallenge);
+    const deletionChallenge = await createDeletionChallenge(
+        fixture,
+        signedIn
+    );
+
+    const mismatchedApple = makeAppleDependencies({
+        credentialSubject: 'different-apple-subject',
+        exchangedSubject: 'different-apple-subject',
+    });
+
+    const deletionService = createAccountAuthService({
+        repository: fixture.repository,
+        appleConfig: { clientId: APPLE_AUDIENCE },
+        accountCryptoConfig: fixture.accountCryptoConfig,
+        verifyAppleIdentityToken:
+            mismatchedApple.verifyAppleIdentityToken,
+        exchangeAuthorizationCode:
+            mismatchedApple.exchangeAuthorizationCode,
+        revokeToken: mismatchedApple.revokeAppleToken,
+        now: () => NOW_MS + 30_000,
+    });
+
+    await assert.rejects(
+        () => deletionService.deleteAccount({
+            accountId: signedIn.account.id,
+            installationId: 'install-device-001',
+            challengeId: deletionChallenge.challengeId,
+            rawNonce: deletionChallenge.rawNonce,
+            identityToken: 'credential-identity-token',
+        }),
+        expectAuthError('invalid_apple_credential', 401)
+    );
+
+    assert.equal(
+        fixture.repository.state.accounts.get(
+            signedIn.account.id
+        ).status,
+        'active'
+    );
+    assert.equal(fixture.repository.state.identities.size, 1);
+    assert.equal(fixture.repository.state.sessions.size, 1);
+    assert.equal(
+        fixture.repository.state.deletionRequests.size,
+        0
+    );
+});
+
+test('restores the account to active when Apple token revocation fails while invalidating old sessions', async () => {
+    const fixture = makeFixture({
+        apple: {
+            revokeError: new AppleSignInError(
+                'apple_token_revocation_failed',
+                'temporary Apple failure',
+                {
+                    status: 503,
+                }
+            ),
+        },
+    });
+    const signInChallenge = await createChallenge(fixture);
+    const signedIn = await signIn(fixture, signInChallenge);
+    const deletionChallenge = await createDeletionChallenge(
+        fixture,
+        signedIn
+    );
+
+    await assert.rejects(
+        () => deleteSignedInAccount(
+            fixture,
+            signedIn,
+            deletionChallenge
+        ),
+        (error) => {
+            assert.ok(error instanceof AccountAuthError);
+            assert.equal(
+                error.code,
+                'apple_account_revocation_failed'
+            );
+            assert.equal(error.status, 503);
+            assert.equal(error.retryable, true);
+            return true;
+        }
+    );
+
+    const account = fixture.repository.state.accounts.get(
+        signedIn.account.id
+    );
+    assert.equal(account.status, 'active');
+    assert.equal(account.authVersion, 3);
+    assert.equal(account.deletionRequestedAt, null);
+
+    assert.equal(fixture.repository.state.identities.size, 1);
+    assert.equal(fixture.repository.state.installations.size, 1);
+    assert.equal(fixture.repository.state.sessions.size, 1);
+
+    const request = [
+        ...fixture.repository.state.deletionRequests.values(),
+    ][0];
+    assert.equal(request.status, 'failed');
+    assert.equal(request.appleRevocationStatus, 'failed');
+    assert.equal(
+        request.lastErrorCode,
+        'apple_token_revocation_failed'
+    );
+
+    await assert.rejects(
+        () => fixture.service.authorizeAccessToken({
+            installationId: 'install-device-001',
+            accessToken: signedIn.accessToken,
+        }),
+        expectAuthError('invalid_access_token', 401)
+    );
+
+    await assert.rejects(
+        () => fixture.service.refreshSession({
+            installationId: 'install-device-001',
+            refreshToken: signedIn.refreshToken,
+        }),
+        expectAuthError('invalid_refresh_token', 401)
+    );
 });
