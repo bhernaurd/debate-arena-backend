@@ -41,13 +41,35 @@ test('history sync route requires installation and strict Bearer authentication'
     );
 });
 
-test('history router exposes upload-only debate synchronization', () => {
+test('history router exposes authenticated upload and paginated download', () => {
     assert.match(
         routesSource,
         /router\.post\(\s*'\/debates\/sync'/
     );
+    assert.match(
+        routesSource,
+        /router\.get\(\s*'\/debates'/
+    );
+    assert.match(
+        routesSource,
+        /service\.listDebates\(\{/
+    );
+    assert.match(routesSource, /nextCursor/);
+    assert.match(routesSource, /hasMore/);
     assert.doesNotMatch(routesSource, /router\.delete\(/);
-    assert.doesNotMatch(routesSource, /router\.get\(/);
+});
+
+test('history download validates single bounded query values', () => {
+    assert.match(
+        routesSource,
+        /function optionalQueryString\(/
+    );
+    assert.match(routesSource, /req\.query\.limit/);
+    assert.match(routesSource, /req\.query\.cursor/);
+    assert.match(
+        routesSource,
+        /invalid_debate_history_query/
+    );
 });
 
 test('history responses disable caching', () => {
