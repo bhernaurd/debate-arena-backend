@@ -16,8 +16,10 @@ import { createAppStoreSubscriptionRouter } from './appStoreSubscriptionRoutes.j
 import { createPaywallConfigurationRouter } from './paywallConfigurationRoutes.js';
 import { createAccountAuthRouter } from './accountAuthRoutes.js';
 import { createAccountDebateHistoryRouter } from './accountDebateHistoryRoutes.js';
+import { createAccountAchievementRouter } from './accountAchievementRoutes.js';
 import { createAccountAuthService } from './lib/accountAuthService.js';
 import { createAccountDebateHistoryService } from './lib/accountDebateHistoryService.js';
+import { createAccountAchievementService } from './lib/accountAchievementService.js';
 import {
   createAccountSubscriptionOwnershipService,
 } from './lib/accountSubscriptionOwnership.js';
@@ -138,6 +140,21 @@ const accountSessionLimiter = rateLimit({
   },
 });
 
+
+const accountAchievementLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'too_many_achievement_sync_requests',
+      message: 'Too many achievement sync requests. Please try again shortly.',
+      retryable: true,
+    },
+  },
+});
+
 app.use('/debate', limiter);
 app.use('/api/app-store/sync-transaction', subscriptionSyncLimiter);
 
@@ -158,6 +175,13 @@ const accountDebateHistoryService =
     accountAuthService,
   });
 
+
+const accountAchievementService =
+  createAccountAchievementService({
+    pool,
+    accountAuthService,
+  });
+
 const accountAuthRouter = createAccountAuthRouter(pool, {
   service: accountAuthService,
 });
@@ -166,6 +190,15 @@ app.use(
   '/api/account/history',
   createAccountDebateHistoryRouter({
     service: accountDebateHistoryService,
+  })
+);
+
+
+app.use(
+  '/api/account/achievements',
+  accountAchievementLimiter,
+  createAccountAchievementRouter({
+    service: accountAchievementService,
   })
 );
 
