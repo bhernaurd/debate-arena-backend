@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
     AccountDailyChallengeProgressError,
     createAccountDailyChallengeProgressService,
+    createPostgresAccountDailyChallengeProgressRepository,
 } from '../lib/accountDailyChallengeProgressService.js';
 
 const ACCOUNT_ID =
@@ -457,5 +458,105 @@ test('rolls back when persistence fails', async () => {
                 name === 'ROLLBACK'
         ),
         true
+    );
+});
+
+
+test('normalizes PostgreSQL Date objects when loading the current snapshot', async () => {
+    const expectedCreatedAt =
+        new Date('2026-07-29T18:10:20.202Z');
+    const expectedUpdatedAt =
+        new Date('2026-07-29T18:11:21.303Z');
+
+    const client = {
+        async query(sql) {
+            assert.match(
+                sql,
+                /account-daily-progress:load-current-active/
+            );
+
+            return {
+                rows: [
+                    {
+                        challenge_id:
+                            'daily-2026-07-29',
+                        challenge_date:
+                            new Date(
+                                '2026-07-29T00:00:00.000Z'
+                            ),
+                        challenge_title:
+                            'The Daily Challenge',
+                        challenge_question:
+                            'What makes a life worth living?',
+                        philosopher_id:
+                            'socrates',
+                        philosopher_name:
+                            'Socrates',
+                        analytics_debate_id:
+                            'analytics-123',
+                        user_opening_answer:
+                            'A life is worth living when it has meaning.',
+                        messages: [
+                            {
+                                id:
+                                    'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+                                role:
+                                    'user',
+                                content:
+                                    'A life is worth living when it has meaning.',
+                                timestamp:
+                                    '2026-07-29T18:10:20.202Z',
+                                scoreUpdate:
+                                    null,
+                            },
+                        ],
+                        current_score:
+                            null,
+                        round_count:
+                            0,
+                        session_created_at:
+                            expectedCreatedAt,
+                        mutation_updated_at:
+                            expectedUpdatedAt,
+                    },
+                ],
+            };
+        },
+    };
+
+    const pool = {
+        async connect() {
+            return {
+                ...client,
+                release() {},
+            };
+        },
+    };
+
+    const repository =
+        createPostgresAccountDailyChallengeProgressRepository(
+            pool
+        );
+
+    const record =
+        await repository.loadCurrentActive(
+            client,
+            {
+                accountId:
+                    ACCOUNT_ID,
+            }
+        );
+
+    assert.equal(
+        record.challengeDate,
+        '2026-07-29'
+    );
+    assert.equal(
+        record.createdAt,
+        expectedCreatedAt.toISOString()
+    );
+    assert.equal(
+        record.updatedAt,
+        expectedUpdatedAt.toISOString()
     );
 });
