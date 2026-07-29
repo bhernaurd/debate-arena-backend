@@ -76,6 +76,34 @@ function makeDebate(overrides = {}) {
     };
 }
 
+
+function makeDatabaseRow(overrides = {}) {
+    const debate = makeDebate();
+
+    return {
+        account_id: ACCOUNT_ID,
+        saved_debate_id: debate.id,
+        analytics_debate_id: debate.analyticsDebateId,
+        philosopher_name: debate.philosopherName,
+        philosopher_initials: debate.philosopherInitials,
+        philosopher_color_hex: debate.philosopherColorHex,
+        topic: debate.topic,
+        debate_date: debate.date,
+        messages: debate.messages,
+        final_score_text: debate.finalScore,
+        final_score_value: debate.finalScoreValue,
+        has_been_analyzed: debate.hasBeenAnalyzed,
+        report: debate.report,
+        is_daily_challenge: debate.isDailyChallenge,
+        daily_challenge_id: debate.dailyChallengeId,
+        daily_challenge_date: debate.dailyChallengeDate,
+        debate_mode_raw_value: debate.debateModeRawValue,
+        source_schema_version: 1,
+        content_updated_at: debate.contentUpdatedAt,
+        ...overrides,
+    };
+}
+
 function expectedError(code) {
     return (error) => {
         assert.ok(error instanceof AccountDebateHistoryError);
@@ -112,6 +140,15 @@ function makeService({
                 contentUpdatedAt:
                     input.debate.contentUpdatedAt,
                 lastSyncedAt: input.syncedAt,
+            };
+        },
+
+        async listDebates(input) {
+            calls.push(['listDebates', input]);
+
+            return {
+                rows: [],
+                hasMore: false,
             };
         },
 
@@ -494,3 +531,294 @@ test('rejects an impossible Daily Challenge calendar date', async () => {
         expectedError('invalid_debate_history_payload')
     );
 });
+
+test('authenticates before downloading account-owned history', async () => {
+    const { service, calls } = makeService({
+        repositoryOverrides: {
+            async listDebates(input) {
+                calls.push(['listDebates', input]);
+
+                return {
+                    rows: [makeDatabaseRow()],
+                    hasMore: false,
+                };
+            },
+        },
+    });
+
+    const result = await service.listDebates({
+        installationId: INSTALLATION_ID,
+        accessToken: 'header.payload.signature',
+    });
+
+    assert.equal(result.accountId, ACCOUNT_ID);
+    assert.equal(result.installationId, INSTALLATION_ID);
+    assert.equal(result.schemaVersion, 1);
+    assert.equal(result.debates.length, 1);
+    assert.equal(result.debates[0].id, DEBATE_ID);
+    assert.equal(result.hasMore, false);
+    assert.equal(result.nextCursor, null);
+
+    const authorizationIndex = calls.findIndex(
+        ([name]) => name === 'authorizeAccessToken'
+    );
+    const listIndex = calls.findIndex(
+        ([name]) => name === 'listDebates'
+    );
+
+    assert.ok(authorizationIndex < listIndex);
+    assert.equal(
+        calls[listIndex][1].accountId,
+        ACCOUNT_ID
+    );
+});
+
+test('returns a bounded opaque cursor for the next stable page', async () => {
+    const SECOND_DEBATE_ID =
+        '77777777-7777-4777-8777-777777777777';
+
+    const { service, calls } = makeService({
+        repositoryOverrides: {
+            async listDebates(input) {
+                calls.push(['listDebates', input]);
+
+                if (input.cursor == null) {
+                    return {
+                        rows: [
+                            makeDatabaseRow(),
+                            makeDatabaseRow({
+                                saved_debate_id:
+                                    SECOND_DEBATE_ID,
+                                debate_date:
+                                    '2026-07-27T20:00:00.000Z',
+                                content_updated_at:
+                                    '2026-07-27T20:05:00.000Z',
+                            }),
+                        ],
+                        hasMore: true,
+                    };
+                }
+
+                return {
+                    rows: [],
+                    hasMore: false,
+                };
+            },
+        },
+    });
+
+    const firstPage = await service.listDebates({
+        installationId: INSTALLATION_ID,
+        accessToken: 'header.payload.signature',
+        limit: '2',
+    });
+
+    assert.equal(firstPage.debates.length, 2);
+    assert.equal(firstPage.hasMore, true);
+    assert.match(firstPage.nextCursor, /^[A-Za-z0-9_-]+$/);
+    assert.ok(firstPage.nextCursor.length <= 512);
+
+    const secondPage = await service.listDebates({
+        installationId: INSTALLATION_ID,
+        accessToken: 'header.payload.signature',
+        limit: 2,
+        cursor: firstPage.nextCursor,
+    });
+
+    assert.equal(secondPage.debates.length, 0);
+    assert.equal(secondPage.hasMore, false);
+
+    const listCalls = calls.filter(
+        ([name]) => name === 'listDebates'
+    );
+
+    assert.equal(
+        listCalls[1][1].cursor.savedDebateId,
+        SECOND_DEBATE_ID
+    );
+    assert.equal(
+        listCalls[1][1].cursor.debateDate,
+        '2026-07-27T20:00:00.000Z'
+    );
+});
+
+test('rejects malformed download cursors before querying history', async () => {
+    const { service, calls } = makeService();
+
+    await assert.rejects(
+        () => service.listDebates({
+            installationId: INSTALLATION_ID,
+            accessToken: 'header.payload.signature',
+            cursor: 'not+a+base64url+cursor',
+        }),
+        expectedError('invalid_debate_history_cursor')
+    );
+
+    assert.ok(
+        !calls.some(([name]) => name === 'listDebates')
+    );
+});
+
+test('rejects download limits outside the configured bounds', async (t) => {
+    const { service } = makeService();
+
+    await t.test('zero', async () => {
+        await assert.rejects(
+            () => service.listDebates({
+                installationId: INSTALLATION_ID,
+                accessToken: 'header.payload.signature',
+                limit: 0,
+            }),
+            expectedError('invalid_debate_history_page_limit')
+        );
+    });
+
+    await t.test('above maximum', async () => {
+        await assert.rejects(
+            () => service.listDebates({
+                installationId: INSTALLATION_ID,
+                accessToken: 'header.payload.signature',
+                limit:
+                    accountDebateHistoryConstants
+                        .maxDownloadPageSize + 1,
+            }),
+            expectedError('invalid_debate_history_page_limit')
+        );
+    });
+});
+
+test('rejects a database row belonging to another account', async () => {
+    const { service } = makeService({
+        repositoryOverrides: {
+            async listDebates() {
+                return {
+                    rows: [
+                        makeDatabaseRow({
+                            account_id:
+                                '88888888-8888-4888-8888-888888888888',
+                        }),
+                    ],
+                    hasMore: false,
+                };
+            },
+        },
+    });
+
+    await assert.rejects(
+        () => service.listDebates({
+            installationId: INSTALLATION_ID,
+            accessToken: 'header.payload.signature',
+        }),
+        expectedError('debate_history_account_mismatch')
+    );
+});
+
+test('rejects unstable or duplicate database ordering', async (t) => {
+    const SECOND_DEBATE_ID =
+        '77777777-7777-4777-8777-777777777777';
+
+    await t.test('out of order', async () => {
+        const { service } = makeService({
+            repositoryOverrides: {
+                async listDebates() {
+                    return {
+                        rows: [
+                            makeDatabaseRow({
+                                debate_date:
+                                    '2026-07-27T20:00:00.000Z',
+                                content_updated_at:
+                                    '2026-07-27T20:05:00.000Z',
+                            }),
+                            makeDatabaseRow({
+                                saved_debate_id:
+                                    SECOND_DEBATE_ID,
+                                debate_date:
+                                    '2026-07-28T20:00:00.000Z',
+                            }),
+                        ],
+                        hasMore: false,
+                    };
+                },
+            },
+        });
+
+        await assert.rejects(
+            () => service.listDebates({
+                installationId: INSTALLATION_ID,
+                accessToken: 'header.payload.signature',
+            }),
+            expectedError(
+                'debate_history_download_unavailable'
+            )
+        );
+    });
+
+    await t.test('duplicate', async () => {
+        const { service } = makeService({
+            repositoryOverrides: {
+                async listDebates() {
+                    return {
+                        rows: [
+                            makeDatabaseRow(),
+                            makeDatabaseRow(),
+                        ],
+                        hasMore: false,
+                    };
+                },
+            },
+        });
+
+        await assert.rejects(
+            () => service.listDebates({
+                installationId: INSTALLATION_ID,
+                accessToken: 'header.payload.signature',
+            }),
+            expectedError(
+                'debate_history_download_unavailable'
+            )
+        );
+    });
+});
+
+test('preserves full SavedDebate fields in download responses', async () => {
+    const { service } = makeService({
+        repositoryOverrides: {
+            async listDebates() {
+                return {
+                    rows: [
+                        makeDatabaseRow({
+                            messages:
+                                JSON.stringify(
+                                    makeDebate().messages
+                                ),
+                            report:
+                                JSON.stringify(
+                                    makeDebate().report
+                                ),
+                        }),
+                    ],
+                    hasMore: false,
+                };
+            },
+        },
+    });
+
+    const result = await service.listDebates({
+        installationId: INSTALLATION_ID,
+        accessToken: 'header.payload.signature',
+    });
+
+    const debate = result.debates[0];
+
+    assert.equal(debate.id, DEBATE_ID);
+    assert.equal(debate.messages[0].id, MESSAGE_ID);
+    assert.equal(
+        debate.report.roundScores[0].id,
+        ROUND_ID
+    );
+    assert.equal(
+        debate.contentUpdatedAt,
+        '2026-07-28T20:05:00.000Z'
+    );
+});
+
