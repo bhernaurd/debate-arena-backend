@@ -98,6 +98,38 @@ function requireBearerToken(req) {
     return match[1];
 }
 
+
+function optionalQueryString(
+    value,
+    fieldName,
+    maximumLength
+) {
+    if (value == null) return null;
+
+    if (
+        typeof value !== 'string' ||
+        value.length > maximumLength
+    ) {
+        fail(
+            'invalid_debate_history_query',
+            `${fieldName} is invalid.`,
+            { status: 400 }
+        );
+    }
+
+    const cleaned = value.trim();
+
+    if (!cleaned) {
+        fail(
+            'invalid_debate_history_query',
+            `${fieldName} is invalid.`,
+            { status: 400 }
+        );
+    }
+
+    return cleaned;
+}
+
 function serializeDate(value) {
     if (value instanceof Date) return value.toISOString();
 
@@ -218,7 +250,11 @@ export function createAccountDebateHistoryRouter({
     service,
     logger = console,
 } = {}) {
-    if (!service || typeof service.syncDebates !== 'function') {
+    if (
+        !service ||
+        typeof service.syncDebates !== 'function' ||
+        typeof service.listDebates !== 'function'
+    ) {
         throw new Error(
             'A valid account debate-history service is required.'
         );
@@ -232,6 +268,42 @@ export function createAccountDebateHistoryRouter({
         res.setHeader('X-Content-Type-Options', 'nosniff');
         next();
     });
+
+    router.get(
+        '/debates',
+        asyncRoute(async (req, res) => {
+            const installationId = requireInstallationId(req);
+            const accessToken = requireBearerToken(req);
+
+            const result = await service.listDebates({
+                installationId,
+                accessToken,
+                limit: optionalQueryString(
+                    req.query.limit,
+                    'limit',
+                    3
+                ),
+                cursor: optionalQueryString(
+                    req.query.cursor,
+                    'cursor',
+                    512
+                ),
+            });
+
+            return res.status(200).json({
+                success: true,
+                schemaVersion: result.schemaVersion,
+                accountId: result.accountId,
+                installationId: result.installationId,
+                downloadedAt: serializeDate(
+                    result.downloadedAt
+                ),
+                debates: result.debates,
+                nextCursor: result.nextCursor,
+                hasMore: result.hasMore,
+            });
+        })
+    );
 
     router.post(
         '/debates/sync',
