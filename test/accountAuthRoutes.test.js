@@ -78,6 +78,15 @@ function makeService(overrides = {}) {
             };
         },
 
+        async deleteAccount() {
+            return {
+                accountId: ACCOUNT_ID,
+                status: 'deleted',
+                deletedAt: new Date(NOW_MS + 1_000),
+                appleRevocationStatus: 'succeeded',
+            };
+        },
+
         ...overrides,
     };
 }
@@ -217,6 +226,262 @@ test('does not expose reauthentication or deletion challenge purposes publicly',
         installationId: INSTALLATION_ID,
         purpose: 'sign_in_with_apple',
     });
+});
+
+
+test('creates an authenticated Apple challenge for account deletion', async (t) => {
+    const calls = {
+        authorize: [],
+        challenge: [],
+    };
+
+    const server = await startServer({
+        service: makeService({
+            async authorizeAccessToken(input) {
+                calls.authorize.push(input);
+                return makeService().authorizeAccessToken();
+            },
+
+            async createAppleChallenge(input) {
+                calls.challenge.push(input);
+                return {
+                    challengeId: CHALLENGE_ID,
+                    purpose: 'delete_account',
+                    rawNonce: 'deletion-raw-nonce',
+                    nonceSha256: 'b'.repeat(64),
+                    expiresAt: new Date(NOW_MS + 600_000),
+                };
+            },
+        }),
+    });
+    t.after(server.close);
+
+    const response = await fetch(
+        `${server.baseUrl}/api/account/deletion/challenge`,
+        {
+            method: 'POST',
+            headers: authHeaders({
+                Authorization: `Bearer ${ACCESS_TOKEN}`,
+            }),
+            body: JSON.stringify({
+                purpose: 'sign_in_with_apple',
+                accountId:
+                    '99999999-9999-4999-8999-999999999999',
+            }),
+        }
+    );
+    const body = await readJson(response);
+
+    assert.equal(response.status, 201);
+    assert.deepEqual(calls.authorize, [
+        {
+            installationId: INSTALLATION_ID,
+            accessToken: ACCESS_TOKEN,
+        },
+    ]);
+    assert.deepEqual(calls.challenge, [
+        {
+            installationId: INSTALLATION_ID,
+            accountId: ACCOUNT_ID,
+            purpose: 'delete_account',
+        },
+    ]);
+    assert.equal(body.challengeId, CHALLENGE_ID);
+    assert.equal(body.purpose, 'delete_account');
+    assert.equal(body.rawNonce, 'deletion-raw-nonce');
+    assert.equal(body.nonceSha256, 'b'.repeat(64));
+    assert.equal(
+        body.expiresAt,
+        new Date(NOW_MS + 600_000).toISOString()
+    );
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+});
+
+test('confirms account deletion using only the authorized account identity', async (t) => {
+    const calls = {
+        authorize: [],
+        deletion: [],
+    };
+
+    const server = await startServer({
+        service: makeService({
+            async authorizeAccessToken(input) {
+                calls.authorize.push(input);
+                return makeService().authorizeAccessToken();
+            },
+
+            async deleteAccount(input) {
+                calls.deletion.push(input);
+                return {
+                    accountId: ACCOUNT_ID,
+                    status: 'deleted',
+                    deletedAt: new Date(NOW_MS + 1_000),
+                    appleRevocationStatus: 'succeeded',
+                };
+            },
+        }),
+    });
+    t.after(server.close);
+
+    const response = await fetch(
+        `${server.baseUrl}/api/account/deletion/confirm`,
+        {
+            method: 'POST',
+            headers: authHeaders({
+                Authorization: `Bearer ${ACCESS_TOKEN}`,
+            }),
+            body: JSON.stringify({
+                accountId:
+                    '99999999-9999-4999-8999-999999999999',
+                challengeId: CHALLENGE_ID,
+                rawNonce: 'deletion-raw-nonce',
+                identityToken: 'deletion-identity-token',
+            }),
+        }
+    );
+    const body = await readJson(response);
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(calls.authorize, [
+        {
+            installationId: INSTALLATION_ID,
+            accessToken: ACCESS_TOKEN,
+        },
+    ]);
+    assert.deepEqual(calls.deletion, [
+        {
+            accountId: ACCOUNT_ID,
+            installationId: INSTALLATION_ID,
+            challengeId: CHALLENGE_ID,
+            rawNonce: 'deletion-raw-nonce',
+            identityToken: 'deletion-identity-token',
+        },
+    ]);
+    assert.deepEqual(body, {
+        deleted: true,
+        account: {
+            id: ACCOUNT_ID,
+            status: 'deleted',
+        },
+        deletedAt: new Date(NOW_MS + 1_000).toISOString(),
+        appleRevocationStatus: 'succeeded',
+    });
+});
+
+test('requires a valid session before creating or confirming account deletion', async (t) => {
+    const calls = {
+        challenge: 0,
+        deletion: 0,
+    };
+
+    const server = await startServer({
+        service: makeService({
+            async authorizeAccessToken() {
+                throw new AccountAuthError(
+                    'invalid_access_token',
+                    'The access token is invalid or expired.',
+                    { status: 401 }
+                );
+            },
+
+            async createAppleChallenge() {
+                calls.challenge += 1;
+                throw new Error('must not be called');
+            },
+
+            async deleteAccount() {
+                calls.deletion += 1;
+                throw new Error('must not be called');
+            },
+        }),
+    });
+    t.after(server.close);
+
+    const challengeResponse = await fetch(
+        `${server.baseUrl}/api/account/deletion/challenge`,
+        {
+            method: 'POST',
+            headers: authHeaders({
+                Authorization: `Bearer ${ACCESS_TOKEN}`,
+            }),
+            body: '{}',
+        }
+    );
+    const challengeBody = await readJson(challengeResponse);
+
+    assert.equal(challengeResponse.status, 401);
+    assert.equal(
+        challengeBody.error.code,
+        'invalid_access_token'
+    );
+
+    const confirmResponse = await fetch(
+        `${server.baseUrl}/api/account/deletion/confirm`,
+        {
+            method: 'POST',
+            headers: authHeaders({
+                Authorization: `Bearer ${ACCESS_TOKEN}`,
+            }),
+            body: JSON.stringify({
+                challengeId: CHALLENGE_ID,
+                rawNonce: 'deletion-raw-nonce',
+                identityToken: 'deletion-identity-token',
+            }),
+        }
+    );
+    const confirmBody = await readJson(confirmResponse);
+
+    assert.equal(confirmResponse.status, 401);
+    assert.equal(
+        confirmBody.error.code,
+        'invalid_access_token'
+    );
+    assert.equal(calls.challenge, 0);
+    assert.equal(calls.deletion, 0);
+});
+
+test('maps account deletion validation failures without exposing Apple credentials', async (t) => {
+    const server = await startServer({
+        service: makeService({
+            async deleteAccount() {
+                throw new AccountAuthError(
+                    'invalid_apple_credential',
+                    'The Apple sign-in credential could not be verified.',
+                    {
+                        status: 401,
+                        cause: new Error(
+                            'secret deletion identity token'
+                        ),
+                    }
+                );
+            },
+        }),
+    });
+    t.after(server.close);
+
+    const response = await fetch(
+        `${server.baseUrl}/api/account/deletion/confirm`,
+        {
+            method: 'POST',
+            headers: authHeaders({
+                Authorization: `Bearer ${ACCESS_TOKEN}`,
+            }),
+            body: JSON.stringify({
+                challengeId: CHALLENGE_ID,
+                rawNonce: 'deletion-raw-nonce',
+                identityToken: 'secret deletion identity token',
+            }),
+        }
+    );
+    const text = await response.text();
+    const body = JSON.parse(text);
+
+    assert.equal(response.status, 401);
+    assert.equal(body.error.code, 'invalid_apple_credential');
+    assert.equal(
+        text.includes('secret deletion identity token'),
+        false
+    );
 });
 
 test('creates a new account from an Apple sign-in request', async (t) => {
