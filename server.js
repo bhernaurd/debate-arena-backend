@@ -15,7 +15,9 @@ import aiJobsRouter from './aiJobs.js';
 import { createAppStoreSubscriptionRouter } from './appStoreSubscriptionRoutes.js';
 import { createPaywallConfigurationRouter } from './paywallConfigurationRoutes.js';
 import { createAccountAuthRouter } from './accountAuthRoutes.js';
+import { createAccountDebateHistoryRouter } from './accountDebateHistoryRoutes.js';
 import { createAccountAuthService } from './lib/accountAuthService.js';
+import { createAccountDebateHistoryService } from './lib/accountDebateHistoryService.js';
 import {
   createAccountSubscriptionOwnershipService,
 } from './lib/accountSubscriptionOwnership.js';
@@ -52,10 +54,30 @@ app.set('trust proxy', 1);
 
 app.use(cors());
 
-// App Store notification envelopes contain nested signed JWS payloads and can
-// be larger than ordinary app requests. Parse only this route family with the
-// larger limit, then preserve the existing 50 KB global limit everywhere else.
+// App Store notification envelopes and authenticated debate-history batches
+// can be larger than ordinary app requests. Their route-specific parsers are
+// installed before the existing 50 KB global parser.
 app.use('/api/app-store', express.json({ limit: '128kb' }));
+
+const accountHistoryLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'too_many_history_sync_requests',
+      message: 'Too many history sync requests. Please try again shortly.',
+      retryable: true,
+    },
+  },
+});
+
+app.use(
+  '/api/account/history',
+  accountHistoryLimiter,
+  express.json({ limit: '2mb' })
+);
 app.use(express.json({ limit: '50kb' }));
 
 const limiter = rateLimit({
@@ -130,9 +152,22 @@ const accountSubscriptionOwnershipService =
     accountAuthService,
   });
 
+const accountDebateHistoryService =
+  createAccountDebateHistoryService({
+    pool,
+    accountAuthService,
+  });
+
 const accountAuthRouter = createAccountAuthRouter(pool, {
   service: accountAuthService,
 });
+
+app.use(
+  '/api/account/history',
+  createAccountDebateHistoryRouter({
+    service: accountDebateHistoryService,
+  })
+);
 
 app.use('/api/account/apple/challenge', accountChallengeLimiter);
 app.use('/api/account/apple/sign-in', accountSignInLimiter);
