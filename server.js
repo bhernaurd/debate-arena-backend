@@ -1,3 +1,4 @@
+// Ranked start-request foundation added in migration 007.
 // env.js must be first — loads dotenv before any module reads process.env
 import './env.js';
 
