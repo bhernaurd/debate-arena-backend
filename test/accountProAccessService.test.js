@@ -14,7 +14,7 @@ const CHECKED_AT =
     new Date('2026-07-30T04:15:00.000Z');
 
 const PRODUCT_ID =
-    'com.bhernaurd.TheAgora.pro.monthly';
+    'agora_pro_monthly';
 
 function activeRow(overrides = {}) {
     return {
@@ -162,6 +162,10 @@ test(
                     ACCOUNT_ID,
             });
 
+        assert.equal(
+            result.hasProAccess,
+            true
+        );
         assert.equal(
             result.entitlement.status,
             'grace_period'
