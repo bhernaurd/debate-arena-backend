@@ -401,6 +401,13 @@ function serializeDebate(debate) {
             debate.accountId,
         startRequestId:
             debate.startRequestId,
+        ...(debate.completionRequestId
+            ? {
+                completionRequestId:
+                    debate
+                        .completionRequestId,
+            }
+            : {}),
         debateKind:
             debate.debateKind,
         placementTrialNumber:
@@ -440,6 +447,14 @@ function serializeDebate(debate) {
             debate.currentScoreText,
         currentScoreValue:
             debate.currentScoreValue,
+        ...(debate.finalScoreValue != null
+            ? {
+                finalScoreText:
+                    debate.finalScoreText,
+                finalScoreValue:
+                    debate.finalScoreValue,
+            }
+            : {}),
         roundCount:
             debate.roundCount,
         rankedRulesVersion:
@@ -470,6 +485,15 @@ function serializeDebate(debate) {
                 debate.lastActivityAt,
                 'debate.lastActivityAt'
             ),
+        ...(debate.completedAt
+            ? {
+                completedAt:
+                    serializeDate(
+                        debate.completedAt,
+                        'debate.completedAt'
+                    ),
+            }
+            : {}),
         updatedAt:
             serializeDate(
                 debate.updatedAt,
@@ -484,6 +508,84 @@ function serializeReply(reply) {
     }
 
     return serializeMessage(reply);
+}
+
+
+function serializePlacementCompletion(
+    placement
+) {
+    if (
+        !placement ||
+        typeof placement !== 'object' ||
+        Array.isArray(placement)
+    ) {
+        throw new Error(
+            'Ranked debate service returned invalid placement completion data.'
+        );
+    }
+
+    return {
+        trialNumber:
+            placement.trialNumber,
+        weightBasisPoints:
+            placement.weightBasisPoints,
+        weightedScoreContribution:
+            placement
+                .weightedScoreContribution,
+        trialsCompleted:
+            placement.trialsCompleted,
+        trialsRequired:
+            placement.trialsRequired,
+        placementCompleted:
+            Boolean(
+                placement
+                    .placementCompleted
+            ),
+        placementWeightedScore:
+            placement
+                .placementWeightedScore,
+        startingRankKey:
+            placement.startingRankKey,
+        startingDivision:
+            placement.startingDivision,
+        startingRP:
+            placement.startingRP,
+        demotionProtectionDebatesRemaining:
+            placement
+                .demotionProtectionDebatesRemaining,
+    };
+}
+
+function serializeCompletion(
+    completion
+) {
+    if (
+        !completion ||
+        typeof completion !== 'object' ||
+        Array.isArray(completion)
+    ) {
+        throw new Error(
+            'Ranked debate service returned invalid completion data.'
+        );
+    }
+
+    return {
+        completedAt:
+            serializeDate(
+                completion.completedAt,
+                'completion.completedAt'
+            ),
+        finalScoreText:
+            completion.finalScoreText,
+        finalScoreValue:
+            completion.finalScoreValue,
+        scoredRoundCount:
+            completion.scoredRoundCount,
+        placement:
+            serializePlacementCompletion(
+                completion.placement
+            ),
+    };
 }
 
 function serializeSafeErrorDetails(
@@ -526,6 +628,25 @@ function serializeSafeErrorDetails(
     ) {
         output.requestId =
             details.requestId.toLowerCase();
+    }
+
+    for (
+        const field
+        of [
+            'minimumUserTurns',
+            'currentUserTurns',
+            'scoredRoundCount',
+        ]
+    ) {
+        if (
+            Number.isSafeInteger(
+                details[field]
+            ) &&
+            details[field] >= 0
+        ) {
+            output[field] =
+                details[field];
+        }
     }
 
     return Object.keys(output).length > 0
@@ -870,6 +991,92 @@ export function createAccountRankedDebateRouter({
                         reply:
                             serializeReply(
                                 result.reply
+                            ),
+                    });
+            }
+        )
+    );
+
+
+    router.post(
+        '/debates/:debateId/complete',
+        asyncRoute(
+            async (req, res) => {
+                if (
+                    typeof service
+                        .completeDebate !==
+                        'function'
+                ) {
+                    throw new Error(
+                        'Ranked debate completion service is unavailable.'
+                    );
+                }
+
+                const installationId =
+                    requireInstallationId(
+                        req
+                    );
+
+                const accessToken =
+                    requireBearerToken(
+                        req
+                    );
+
+                const debateId =
+                    requireDebateId(
+                        req
+                    );
+
+                const body =
+                    requireBody(
+                        req
+                    );
+
+                const requestId =
+                    requireRequestId(
+                        body
+                    );
+
+                const expectedStateVersion =
+                    requireExpectedStateVersion(
+                        body
+                    );
+
+                const result =
+                    await service
+                        .completeDebate({
+                            installationId,
+                            accessToken,
+                            debateId,
+                            requestId,
+                            expectedStateVersion,
+                        });
+
+                return res
+                    .status(
+                        result.created
+                            ? 201
+                            : 200
+                    )
+                    .json({
+                        success: true,
+                        schemaVersion:
+                            result.schemaVersion,
+                        accountId:
+                            result.accountId,
+                        installationId:
+                            result.installationId,
+                        requestId:
+                            result.requestId,
+                        created:
+                            result.created,
+                        debate:
+                            serializeDebate(
+                                result.debate
+                            ),
+                        completion:
+                            serializeCompletion(
+                                result.completion
                             ),
                     });
             }
