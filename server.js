@@ -18,10 +18,12 @@ import { createAccountAuthRouter } from './accountAuthRoutes.js';
 import { createAccountDebateHistoryRouter } from './accountDebateHistoryRoutes.js';
 import { createAccountAchievementRouter } from './accountAchievementRoutes.js';
 import { createAccountDailyChallengeProgressRouter } from './accountDailyChallengeProgressRoutes.js';
+import { createAccountRankedProfileRouter } from './accountRankedProfileRoutes.js';
 import { createAccountAuthService } from './lib/accountAuthService.js';
 import { createAccountDebateHistoryService } from './lib/accountDebateHistoryService.js';
 import { createAccountAchievementService } from './lib/accountAchievementService.js';
 import { createAccountDailyChallengeProgressService } from './lib/accountDailyChallengeProgressService.js';
+import { createAccountRankedProfileService } from './lib/accountRankedProfileService.js';
 import {
   createAccountSubscriptionOwnershipService,
 } from './lib/accountSubscriptionOwnership.js';
@@ -163,7 +165,6 @@ const accountSessionLimiter = rateLimit({
   },
 });
 
-
 const accountAchievementLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
@@ -173,6 +174,20 @@ const accountAchievementLimiter = rateLimit({
     error: {
       code: 'too_many_achievement_sync_requests',
       message: 'Too many achievement sync requests. Please try again shortly.',
+      retryable: true,
+    },
+  },
+});
+
+const accountRankedProfileLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'too_many_ranked_profile_requests',
+      message: 'Too many Ranked profile requests. Please try again shortly.',
       retryable: true,
     },
   },
@@ -198,16 +213,20 @@ const accountDebateHistoryService =
     accountAuthService,
   });
 
-
 const accountAchievementService =
   createAccountAchievementService({
     pool,
     accountAuthService,
   });
 
-
 const accountDailyChallengeProgressService =
   createAccountDailyChallengeProgressService({
+    pool,
+    accountAuthService,
+  });
+
+const accountRankedProfileService =
+  createAccountRankedProfileService({
     pool,
     accountAuthService,
   });
@@ -223,7 +242,6 @@ app.use(
   })
 );
 
-
 app.use(
   '/api/account/achievements',
   accountAchievementLimiter,
@@ -232,11 +250,18 @@ app.use(
   })
 );
 
-
 app.use(
   '/api/account/daily-challenge-progress',
   createAccountDailyChallengeProgressRouter({
     service: accountDailyChallengeProgressService,
+  })
+);
+
+app.use(
+  '/api/account/ranked',
+  accountRankedProfileLimiter,
+  createAccountRankedProfileRouter({
+    service: accountRankedProfileService,
   })
 );
 
