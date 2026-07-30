@@ -53,6 +53,49 @@ app.all('/tiktoksEj6XzEmPpvavjyCl6uI5SXIFhGYJ6hC.txt', (req, res) => {
 app.use(express.static('public'));
 const PORT = process.env.PORT || 3000;
 
+function readBooleanEnvironmentVariable(
+  name,
+  {
+    defaultValue,
+  }
+) {
+  const rawValue = process.env[name];
+
+  if (
+    rawValue == null ||
+    rawValue.trim() === ''
+  ) {
+    return defaultValue;
+  }
+
+  switch (rawValue.trim().toLowerCase()) {
+    case 'true':
+    case '1':
+    case 'yes':
+    case 'on':
+      return true;
+
+    case 'false':
+    case '0':
+    case 'no':
+    case 'off':
+      return false;
+
+    default:
+      throw new Error(
+        `${name} must be true or false.`
+      );
+  }
+}
+
+const rankedRequiresProAccess =
+  readBooleanEnvironmentVariable(
+    'RANKED_REQUIRE_PRO',
+    {
+      defaultValue: true,
+    }
+  );
+
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
@@ -272,6 +315,39 @@ const accountProAccessService =
     pool,
   });
 
+const rankedProAccessService =
+  rankedRequiresProAccess
+    ? accountProAccessService
+    : Object.freeze({
+        async requireCurrentProAccess({
+          accountId,
+        } = {}) {
+          const cleanAccountId =
+            typeof accountId === 'string'
+              ? accountId.trim().toLowerCase()
+              : '';
+
+          if (!cleanAccountId) {
+            throw new Error(
+              'Ranked Pro testing bypass received an invalid accountId.'
+            );
+          }
+
+          return Object.freeze({
+            accountId: cleanAccountId,
+            hasProAccess: true,
+            accessReason:
+              'ranked_testing_bypass',
+          });
+        },
+      });
+
+if (!rankedRequiresProAccess) {
+  console.warn(
+    '[Ranked] WARNING: Agora Pro access is bypassed because RANKED_REQUIRE_PRO=false. Restore true before release.'
+  );
+}
+
 const rankedTopicGeneratorService =
   createRankedTopicGeneratorService();
 
@@ -279,7 +355,7 @@ const accountRankedPlacementService =
   createAccountRankedPlacementService({
     pool,
     accountAuthService,
-    proAccessService: accountProAccessService,
+    proAccessService: rankedProAccessService,
     topicGeneratorService: rankedTopicGeneratorService,
   });
 
@@ -290,7 +366,7 @@ const accountRankedDebateService =
   createAccountRankedDebateService({
     pool,
     accountAuthService,
-    proAccessService: accountProAccessService,
+    proAccessService: rankedProAccessService,
     debateEngineService: rankedDebateEngineService,
   });
 
