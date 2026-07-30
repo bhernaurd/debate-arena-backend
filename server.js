@@ -20,11 +20,15 @@ import { createAccountDebateHistoryRouter } from './accountDebateHistoryRoutes.j
 import { createAccountAchievementRouter } from './accountAchievementRoutes.js';
 import { createAccountDailyChallengeProgressRouter } from './accountDailyChallengeProgressRoutes.js';
 import { createAccountRankedProfileRouter } from './accountRankedProfileRoutes.js';
+import { createAccountRankedPlacementRouter } from './accountRankedPlacementRoutes.js';
 import { createAccountAuthService } from './lib/accountAuthService.js';
 import { createAccountDebateHistoryService } from './lib/accountDebateHistoryService.js';
 import { createAccountAchievementService } from './lib/accountAchievementService.js';
 import { createAccountDailyChallengeProgressService } from './lib/accountDailyChallengeProgressService.js';
 import { createAccountRankedProfileService } from './lib/accountRankedProfileService.js';
+import { createAccountRankedPlacementService } from './lib/accountRankedPlacementService.js';
+import { createAccountProAccessService } from './lib/accountProAccessService.js';
+import { createRankedTopicGeneratorService } from './lib/rankedTopicGeneratorService.js';
 import {
   createAccountSubscriptionOwnershipService,
 } from './lib/accountSubscriptionOwnership.js';
@@ -194,6 +198,20 @@ const accountRankedProfileLimiter = rateLimit({
   },
 });
 
+const accountRankedPlacementLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'too_many_ranked_placement_requests',
+      message: 'Too many Ranked placement requests. Please try again shortly.',
+      retryable: true,
+    },
+  },
+});
+
 app.use('/debate', limiter);
 app.use('/api/app-store/sync-transaction', subscriptionSyncLimiter);
 
@@ -232,6 +250,22 @@ const accountRankedProfileService =
     accountAuthService,
   });
 
+const accountProAccessService =
+  createAccountProAccessService({
+    pool,
+  });
+
+const rankedTopicGeneratorService =
+  createRankedTopicGeneratorService();
+
+const accountRankedPlacementService =
+  createAccountRankedPlacementService({
+    pool,
+    accountAuthService,
+    proAccessService: accountProAccessService,
+    topicGeneratorService: rankedTopicGeneratorService,
+  });
+
 const accountAuthRouter = createAccountAuthRouter(pool, {
   service: accountAuthService,
 });
@@ -255,6 +289,18 @@ app.use(
   '/api/account/daily-challenge-progress',
   createAccountDailyChallengeProgressRouter({
     service: accountDailyChallengeProgressService,
+  })
+);
+
+app.use(
+  '/api/account/ranked/placements/start',
+  accountRankedPlacementLimiter
+);
+
+app.use(
+  '/api/account/ranked',
+  createAccountRankedPlacementRouter({
+    service: accountRankedPlacementService,
   })
 );
 
