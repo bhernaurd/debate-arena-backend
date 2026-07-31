@@ -464,6 +464,38 @@ function serializeDebate(debate) {
             : {}),
         roundCount:
             debate.roundCount,
+        ...(debate.debateKind === 'ladder'
+            ? {
+                startingRankKey:
+                    debate.startingRankKey,
+                startingDivision:
+                    debate.startingDivision,
+                startingRP:
+                    debate.startingRP,
+                forfeitRPLossPreview:
+                    debate.forfeitRPLossPreview,
+                rpDelta:
+                    debate.rpDelta,
+                endingRankKey:
+                    debate.endingRankKey,
+                endingDivision:
+                    debate.endingDivision,
+                endingRP:
+                    debate.endingRP,
+                promoted:
+                    Boolean(debate.promoted),
+                demoted:
+                    Boolean(debate.demoted),
+                protectionApplied:
+                    Boolean(
+                        debate.protectionApplied
+                    ),
+                protectionConsumed:
+                    Boolean(
+                        debate.protectionConsumed
+                    ),
+            }
+            : {}),
         rankedRulesVersion:
             debate.rankedRulesVersion,
         philosopherPromptVersion:
@@ -563,6 +595,66 @@ function serializePlacementCompletion(
     };
 }
 
+function serializeLadderCompletion(
+    ladder
+) {
+    if (
+        !ladder ||
+        typeof ladder !== 'object' ||
+        Array.isArray(ladder)
+    ) {
+        throw new Error(
+            'Ranked debate service returned invalid ladder completion data.'
+        );
+    }
+
+    return {
+        rpDelta:
+            ladder.rpDelta,
+        beforeRankKey:
+            ladder.beforeRankKey,
+        beforeDivision:
+            ladder.beforeDivision,
+        beforeRP:
+            ladder.beforeRP,
+        afterRankKey:
+            ladder.afterRankKey,
+        afterDivision:
+            ladder.afterDivision,
+        afterRP:
+            ladder.afterRP,
+        promoted:
+            Boolean(ladder.promoted),
+        demoted:
+            Boolean(ladder.demoted),
+        protectionBefore:
+            ladder.protectionBefore,
+        protectionAfter:
+            ladder.protectionAfter,
+        protectionApplied:
+            Boolean(
+                ladder.protectionApplied
+            ),
+        protectionConsumed:
+            Boolean(
+                ladder.protectionConsumed
+            ),
+        peakRankKey:
+            ladder.peakRankKey,
+        peakDivision:
+            ladder.peakDivision,
+        peakReachedAt:
+            serializeOptionalDate(
+                ladder.peakReachedAt,
+                'completion.ladder.peakReachedAt'
+            ),
+        forfeitRPLossPreview:
+            ladder.forfeitRPLossPreview,
+        formulaComponents:
+            ladder.formulaComponents ?? {},
+    };
+}
+
 function serializeCompletion(
     completion
 ) {
@@ -591,9 +683,17 @@ function serializeCompletion(
         scoredRoundCount:
             completion.scoredRoundCount,
         placement:
-            serializePlacementCompletion(
-                completion.placement
-            ),
+            completion.placement == null
+                ? null
+                : serializePlacementCompletion(
+                    completion.placement
+                ),
+        ladder:
+            completion.ladder == null
+                ? null
+                : serializeLadderCompletion(
+                    completion.ladder
+                ),
     };
 }
 
@@ -645,6 +745,7 @@ function serializeSafeErrorDetails(
             'minimumUserTurns',
             'currentUserTurns',
             'scoredRoundCount',
+            'rpLoss',
         ]
     ) {
         if (
