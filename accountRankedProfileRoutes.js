@@ -113,6 +113,8 @@ function serializeConfiguration(configuration) {
             configuration.allowResumeActiveDebates,
         placementsEnabled:
             configuration.placementsEnabled,
+        ladderEnabled:
+            configuration.ladderEnabled,
         leaderboardEnabled:
             configuration.leaderboardEnabled,
         populationLimitsEnabled:
