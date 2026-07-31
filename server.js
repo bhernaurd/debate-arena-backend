@@ -22,6 +22,7 @@ import { createAccountDailyChallengeProgressRouter } from './accountDailyChallen
 import { createAccountRankedProfileRouter } from './accountRankedProfileRoutes.js';
 import { createAccountRankedPlacementRouter } from './accountRankedPlacementRoutes.js';
 import { createAccountRankedDebateRouter } from './accountRankedDebateRoutes.js';
+import { createRankedPhilosopherEligibilityRouter } from './rankedPhilosopherEligibilityRoutes.js';
 import { createAccountAuthService } from './lib/accountAuthService.js';
 import { createAccountDebateHistoryService } from './lib/accountDebateHistoryService.js';
 import { createAccountAchievementService } from './lib/accountAchievementService.js';
@@ -394,6 +395,16 @@ app.use(
   createAccountDailyChallengeProgressRouter({
     service: accountDailyChallengeProgressService,
   })
+);
+
+app.use(
+  '/api/account/ranked/philosophers',
+  accountRankedProfileLimiter
+);
+
+app.use(
+  '/api/account/ranked',
+  createRankedPhilosopherEligibilityRouter()
 );
 
 app.use(
