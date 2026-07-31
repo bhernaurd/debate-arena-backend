@@ -22,6 +22,7 @@ import { createAccountDailyChallengeProgressRouter } from './accountDailyChallen
 import { createAccountRankedProfileRouter } from './accountRankedProfileRoutes.js';
 import { createAccountRankedPlacementRouter } from './accountRankedPlacementRoutes.js';
 import { createAccountRankedDebateRouter } from './accountRankedDebateRoutes.js';
+import { createAccountRankedLadderRouter } from './accountRankedLadderRoutes.js';
 import { createRankedPhilosopherEligibilityRouter } from './rankedPhilosopherEligibilityRoutes.js';
 import { createAccountAuthService } from './lib/accountAuthService.js';
 import { createAccountDebateHistoryService } from './lib/accountDebateHistoryService.js';
@@ -30,6 +31,9 @@ import { createAccountDailyChallengeProgressService } from './lib/accountDailyCh
 import { createAccountRankedProfileService } from './lib/accountRankedProfileService.js';
 import { createAccountRankedPlacementService } from './lib/accountRankedPlacementService.js';
 import { createAccountRankedDebateService } from './lib/accountRankedDebateService.js';
+import { createAccountRankedLadderService } from './lib/accountRankedLadderService.js';
+import { createAccountRankedUnifiedDebateService } from './lib/accountRankedUnifiedDebateService.js';
+import { createRankedRatingService } from './lib/rankedRatingService.js';
 import { createRankedDebateEngineService } from './lib/rankedDebateEngineService.js';
 import { createAccountProAccessService } from './lib/accountProAccessService.js';
 import { createRankedTopicGeneratorService } from './lib/rankedTopicGeneratorService.js';
@@ -273,6 +277,20 @@ const accountRankedDebateLimiter = rateLimit({
   },
 });
 
+const accountRankedLadderStartLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'too_many_ranked_ladder_start_requests',
+      message: 'Too many Ranked ladder start requests. Please try again shortly.',
+      retryable: true,
+    },
+  },
+});
+
 app.use('/debate', limiter);
 app.use('/api/app-store/sync-transaction', subscriptionSyncLimiter);
 
@@ -363,12 +381,33 @@ const accountRankedPlacementService =
 const rankedDebateEngineService =
   createRankedDebateEngineService();
 
-const accountRankedDebateService =
+const rankedRatingService =
+  createRankedRatingService();
+
+const baseAccountRankedDebateService =
   createAccountRankedDebateService({
     pool,
     accountAuthService,
     proAccessService: rankedProAccessService,
     debateEngineService: rankedDebateEngineService,
+  });
+
+const accountRankedLadderService =
+  createAccountRankedLadderService({
+    pool,
+    accountAuthService,
+    proAccessService: rankedProAccessService,
+    topicGeneratorService: rankedTopicGeneratorService,
+    ratingService: rankedRatingService,
+  });
+
+const accountRankedDebateService =
+  createAccountRankedUnifiedDebateService({
+    pool,
+    baseService: baseAccountRankedDebateService,
+    accountAuthService,
+    proAccessService: rankedProAccessService,
+    ratingService: rankedRatingService,
   });
 
 const accountAuthRouter = createAccountAuthRouter(pool, {
@@ -416,6 +455,18 @@ app.use(
   '/api/account/ranked',
   createAccountRankedPlacementRouter({
     service: accountRankedPlacementService,
+  })
+);
+
+app.use(
+  '/api/account/ranked/ladder/start',
+  accountRankedLadderStartLimiter
+);
+
+app.use(
+  '/api/account/ranked',
+  createAccountRankedLadderRouter({
+    service: accountRankedLadderService,
   })
 );
 
