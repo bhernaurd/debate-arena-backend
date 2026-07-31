@@ -317,6 +317,68 @@ function publicError(error) {
     };
 }
 
+function serializeDiagnosticCause(
+    error,
+    depth = 0
+) {
+    if (
+        !error ||
+        typeof error !== 'object' ||
+        depth > 4
+    ) {
+        return null;
+    }
+
+    const diagnostic = {};
+
+    const copyTextField = (
+        sourceField,
+        outputField = sourceField,
+        maximumLength = 500
+    ) => {
+        const value = error[sourceField];
+
+        if (
+            typeof value === 'string' &&
+            value.trim()
+        ) {
+            diagnostic[outputField] =
+                value
+                    .trim()
+                    .slice(0, maximumLength);
+        }
+    };
+
+    copyTextField('name');
+    copyTextField('code');
+    copyTextField('constraint');
+    copyTextField('table');
+    copyTextField('column');
+    copyTextField('schema');
+    copyTextField('routine');
+    copyTextField('severity');
+    copyTextField('detail', 'detail', 1_000);
+    copyTextField('hint', 'hint', 1_000);
+    copyTextField('message', 'message', 1_000);
+
+    const cause = error.cause;
+
+    if (cause && cause !== error) {
+        const nested = serializeDiagnosticCause(
+            cause,
+            depth + 1
+        );
+
+        if (nested) {
+            diagnostic.cause = nested;
+        }
+    }
+
+    return Object.keys(diagnostic).length > 0
+        ? diagnostic
+        : null;
+}
+
 function logUnexpectedError(logger, error, req) {
     const status = Number.isInteger(error?.status)
         ? error.status
@@ -343,6 +405,8 @@ function logUnexpectedError(logger, error, req) {
             errorCode:
                 error?.code ??
                 'unknown_error',
+            diagnosticCause:
+                serializeDiagnosticCause(error),
         }
     );
 }
@@ -442,8 +506,7 @@ export function createAccountRankedProfileRouter({
             req
         );
 
-        const response =
-            publicError(error);
+        const response = publicError(error);
 
         return res
             .status(response.status)
