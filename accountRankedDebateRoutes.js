@@ -408,6 +408,13 @@ function serializeDebate(debate) {
                         .completionRequestId,
             }
             : {}),
+        ...(debate.forfeitRequestId
+            ? {
+                forfeitRequestId:
+                    debate
+                        .forfeitRequestId,
+            }
+            : {}),
         debateKind:
             debate.debateKind,
         placementTrialNumber:
@@ -570,6 +577,8 @@ function serializeCompletion(
     }
 
     return {
+        outcome:
+            completion.outcome,
         completedAt:
             serializeDate(
                 completion.completedAt,
@@ -782,6 +791,12 @@ export function createAccountRankedDebateRouter({
             'function' ||
         typeof service
             .submitTurn !==
+            'function' ||
+        typeof service
+            .completeDebate !==
+            'function' ||
+        typeof service
+            .forfeitDebate !==
             'function'
     ) {
         throw new Error(
@@ -1002,16 +1017,6 @@ export function createAccountRankedDebateRouter({
         '/debates/:debateId/complete',
         asyncRoute(
             async (req, res) => {
-                if (
-                    typeof service
-                        .completeDebate !==
-                        'function'
-                ) {
-                    throw new Error(
-                        'Ranked debate completion service is unavailable.'
-                    );
-                }
-
                 const installationId =
                     requireInstallationId(
                         req
@@ -1045,6 +1050,83 @@ export function createAccountRankedDebateRouter({
                 const result =
                     await service
                         .completeDebate({
+                            installationId,
+                            accessToken,
+                            debateId,
+                            requestId,
+                            expectedStateVersion,
+                        });
+
+                return res
+                    .status(
+                        result.created
+                            ? 201
+                            : 200
+                    )
+                    .json({
+                        success: true,
+                        schemaVersion:
+                            result.schemaVersion,
+                        accountId:
+                            result.accountId,
+                        installationId:
+                            result.installationId,
+                        requestId:
+                            result.requestId,
+                        created:
+                            result.created,
+                        debate:
+                            serializeDebate(
+                                result.debate
+                            ),
+                        completion:
+                            serializeCompletion(
+                                result.completion
+                            ),
+                    });
+            }
+        )
+    );
+
+
+
+    router.post(
+        '/debates/:debateId/forfeit',
+        asyncRoute(
+            async (req, res) => {
+                const installationId =
+                    requireInstallationId(
+                        req
+                    );
+
+                const accessToken =
+                    requireBearerToken(
+                        req
+                    );
+
+                const debateId =
+                    requireDebateId(
+                        req
+                    );
+
+                const body =
+                    requireBody(
+                        req
+                    );
+
+                const requestId =
+                    requireRequestId(
+                        body
+                    );
+
+                const expectedStateVersion =
+                    requireExpectedStateVersion(
+                        body
+                    );
+
+                const result =
+                    await service
+                        .forfeitDebate({
                             installationId,
                             accessToken,
                             debateId,
