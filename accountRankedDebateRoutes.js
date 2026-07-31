@@ -965,6 +965,74 @@ export function createAccountRankedDebateRouter({
         )
     );
 
+    router.get(
+        '/debates/:debateId/result',
+        asyncRoute(
+            async (req, res) => {
+                const installationId =
+                    requireInstallationId(
+                        req
+                    );
+
+                const accessToken =
+                    requireBearerToken(
+                        req
+                    );
+
+                const debateId =
+                    requireDebateId(
+                        req
+                    );
+
+                if (
+                    typeof service
+                        .getResolvedDebateResult !==
+                        'function'
+                ) {
+                    throw new Error(
+                        'Ranked result retrieval is not configured.'
+                    );
+                }
+
+                const result =
+                    await service
+                        .getResolvedDebateResult({
+                            installationId,
+                            accessToken,
+                            debateId,
+                        });
+
+                return res
+                    .status(200)
+                    .json({
+                        success: true,
+                        schemaVersion:
+                            result.schemaVersion,
+                        accountId:
+                            result.accountId,
+                        installationId:
+                            result.installationId,
+                        requestId:
+                            result.requestId,
+                        created: false,
+                        retrievedAt:
+                            serializeDate(
+                                result.retrievedAt,
+                                'retrievedAt'
+                            ),
+                        debate:
+                            serializeDebate(
+                                result.debate
+                            ),
+                        completion:
+                            serializeCompletion(
+                                result.completion
+                            ),
+                    });
+            }
+        )
+    );
+
     router.post(
         '/debates/:debateId/opening',
         asyncRoute(
