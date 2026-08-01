@@ -5,6 +5,7 @@ import {
     AccountDebateHistoryError,
     accountDebateHistoryConstants,
     createAccountDebateHistoryService,
+    createPostgresAccountDebateHistoryRepository,
 } from '../lib/accountDebateHistoryService.js';
 
 const ACCOUNT_ID =
@@ -71,6 +72,10 @@ function makeDebate(overrides = {}) {
         dailyChallengeId: null,
         dailyChallengeDate: null,
         debateModeRawValue: 'balanced',
+        rankedDebateId: null,
+        rankedDebateKindRawValue: null,
+        rankedOutcomeRawValue: null,
+        rankedReportContext: null,
         contentUpdatedAt: '2026-07-28T20:05:00.000Z',
         ...overrides,
     };
@@ -98,10 +103,48 @@ function makeDatabaseRow(overrides = {}) {
         daily_challenge_id: debate.dailyChallengeId,
         daily_challenge_date: debate.dailyChallengeDate,
         debate_mode_raw_value: debate.debateModeRawValue,
+        ranked_debate_id: debate.rankedDebateId,
+        ranked_debate_kind: debate.rankedDebateKindRawValue,
+        ranked_outcome: debate.rankedOutcomeRawValue,
+        ranked_report_context: debate.rankedReportContext,
         source_schema_version: 1,
         content_updated_at: debate.contentUpdatedAt,
         ...overrides,
     };
+}
+
+function makeRankedDebate(overrides = {}) {
+    return makeDebate({
+        id: DEBATE_ID,
+        philosopherName: 'Nietzsche',
+        philosopherInitials: 'NZ',
+        topic: 'Are the values you defend truly your own?',
+        finalScore: '8.4/10',
+        finalScoreValue: 8.4,
+        debateModeRawValue: 'guided',
+        rankedDebateId: DEBATE_ID,
+        rankedDebateKindRawValue: 'ladder',
+        rankedOutcomeRawValue: 'completed',
+        rankedReportContext: {
+            kind: 'ladder',
+            modeName: 'Guided',
+            finalScoreText: '8.4/10',
+            scoredRoundCount: 3,
+            placement: null,
+            ladder: {
+                rpDelta: 14,
+                beforeRankText: 'Student II',
+                beforeRP: 86,
+                afterRankText: 'Student I',
+                afterRP: 0,
+                promoted: true,
+                demoted: false,
+                protectionApplied: false,
+                protectionConsumed: false,
+            },
+        },
+        ...overrides,
+    });
 }
 
 function expectedError(code) {
@@ -181,6 +224,105 @@ function makeService({
     return { service, calls };
 }
 
+test('PostgreSQL repository writes and reads Ranked history columns without changing the schema version', async () => {
+    const queries = [];
+    const client = {
+        async query(sql, values = []) {
+            queries.push({ sql: String(sql), values });
+
+            if (String(sql).includes('account-history:upsert-saved-debate')) {
+                return {
+                    rows: [
+                        {
+                            saved_debate_id: DEBATE_ID,
+                            status: 'synced',
+                            content_updated_at:
+                                '2026-07-28T20:05:00.000Z',
+                            last_synced_at:
+                                '2026-07-29T03:30:00.000Z',
+                        },
+                    ],
+                };
+            }
+
+            return { rows: [] };
+        },
+        release() {},
+    };
+    const pool = {
+        async connect() {
+            return client;
+        },
+        async query(sql, values = []) {
+            queries.push({ sql: String(sql), values });
+            return { rows: [] };
+        },
+    };
+    const repository =
+        createPostgresAccountDebateHistoryRepository(pool);
+    const ranked = makeRankedDebate();
+    const normalized = {
+        savedDebateId: ranked.id,
+        analyticsDebateId: ranked.analyticsDebateId,
+        philosopherName: ranked.philosopherName,
+        philosopherInitials: ranked.philosopherInitials,
+        philosopherColorHex: ranked.philosopherColorHex,
+        topic: ranked.topic,
+        date: ranked.date,
+        debateModeRawValue: ranked.debateModeRawValue,
+        rankedDebateId: ranked.rankedDebateId,
+        rankedDebateKindRawValue:
+            ranked.rankedDebateKindRawValue,
+        rankedOutcomeRawValue:
+            ranked.rankedOutcomeRawValue,
+        rankedReportContext:
+            ranked.rankedReportContext,
+        isDailyChallenge: ranked.isDailyChallenge,
+        dailyChallengeId: ranked.dailyChallengeId,
+        dailyChallengeDate: ranked.dailyChallengeDate,
+        finalScore: ranked.finalScore,
+        finalScoreValue: ranked.finalScoreValue,
+        hasBeenAnalyzed: ranked.hasBeenAnalyzed,
+        messages: ranked.messages,
+        report: ranked.report,
+        contentUpdatedAt: ranked.contentUpdatedAt,
+        contentSha256: 'a'.repeat(64),
+    };
+
+    await repository.withTransaction((transaction) =>
+        repository.upsertDebate(transaction, {
+            accountId: ACCOUNT_ID,
+            installationId: INSTALLATION_ID,
+            schemaVersion: 1,
+            debate: normalized,
+            syncedAt: '2026-07-29T03:30:00.000Z',
+        })
+    );
+
+    const upsert = queries.find(({ sql }) =>
+        sql.includes('account-history:upsert-saved-debate')
+    );
+
+    assert.ok(upsert);
+    assert.equal(upsert.values.length, 27);
+    assert.match(upsert.sql, /ranked_debate_id/);
+    assert.match(upsert.sql, /ranked_debate_kind/);
+    assert.match(upsert.sql, /ranked_outcome/);
+    assert.match(upsert.sql, /ranked_report_context/);
+    assert.match(
+        upsert.sql,
+        /COALESCE\([\s\S]*?EXCLUDED\.ranked_report_context/
+    );
+    assert.equal(upsert.values[10], DEBATE_ID);
+    assert.equal(upsert.values[11], 'ladder');
+    assert.equal(upsert.values[12], 'completed');
+    assert.equal(
+        JSON.parse(upsert.values[13]).ladder.afterRankText,
+        'Student I'
+    );
+    assert.equal(upsert.values[23], 1);
+});
+
 test('authenticates and upserts a complete SavedDebate snapshot', async () => {
     const { service, calls } = makeService();
 
@@ -231,6 +373,105 @@ test('preserves ordered message and report identifiers', async () => {
         ROUND_ID
     );
     assert.match(input.debate.contentSha256, /^[0-9a-f]{64}$/);
+});
+
+
+test('preserves complete Ranked ladder metadata during sync', async () => {
+    const { service, calls } = makeService();
+
+    await service.syncDebates({
+        installationId: INSTALLATION_ID,
+        accessToken: 'header.payload.signature',
+        schemaVersion: 1,
+        debates: [makeRankedDebate()],
+    });
+
+    const input = calls.find(
+        ([name]) => name === 'upsertDebate'
+    )[1];
+
+    assert.equal(input.debate.rankedDebateId, DEBATE_ID);
+    assert.equal(
+        input.debate.rankedDebateKindRawValue,
+        'ladder'
+    );
+    assert.equal(input.debate.rankedOutcomeRawValue, 'completed');
+    assert.equal(input.debate.rankedReportContext.kind, 'ladder');
+    assert.equal(
+        input.debate.rankedReportContext.ladder.rpDelta,
+        14
+    );
+});
+
+test('rejects incomplete or inconsistent Ranked metadata', async (t) => {
+    const { service } = makeService();
+
+    await t.test('missing report context', async () => {
+        await assert.rejects(
+            () => service.syncDebates({
+                installationId: INSTALLATION_ID,
+                accessToken: 'header.payload.signature',
+                schemaVersion: 1,
+                debates: [
+                    makeRankedDebate({
+                        rankedReportContext: null,
+                    }),
+                ],
+            }),
+            expectedError('invalid_debate_history_payload')
+        );
+    });
+
+    await t.test('SavedDebate identity mismatch', async () => {
+        await assert.rejects(
+            () => service.syncDebates({
+                installationId: INSTALLATION_ID,
+                accessToken: 'header.payload.signature',
+                schemaVersion: 1,
+                debates: [
+                    makeRankedDebate({
+                        rankedDebateId:
+                            '77777777-7777-4777-8777-777777777777',
+                    }),
+                ],
+            }),
+            expectedError('invalid_debate_history_payload')
+        );
+    });
+
+    await t.test('result kind mismatch', async () => {
+        await assert.rejects(
+            () => service.syncDebates({
+                installationId: INSTALLATION_ID,
+                accessToken: 'header.payload.signature',
+                schemaVersion: 1,
+                debates: [
+                    makeRankedDebate({
+                        rankedDebateKindRawValue: 'placement',
+                    }),
+                ],
+            }),
+            expectedError('invalid_debate_history_payload')
+        );
+    });
+
+    await t.test('Ranked Daily Challenge overlap', async () => {
+        await assert.rejects(
+            () => service.syncDebates({
+                installationId: INSTALLATION_ID,
+                accessToken: 'header.payload.signature',
+                schemaVersion: 1,
+                debates: [
+                    makeRankedDebate({
+                        isDailyChallenge: true,
+                        dailyChallengeId: 'daily-1',
+                        dailyChallengeDate: '2026-07-28',
+                    }),
+                ],
+            }),
+            expectedError('invalid_debate_history_payload')
+        );
+    });
 });
 
 test('accepts an older debate without analytics, score, report, daily challenge, or mode', async () => {
@@ -570,6 +811,52 @@ test('authenticates before downloading account-owned history', async () => {
     assert.equal(
         calls[listIndex][1].accountId,
         ACCOUNT_ID
+    );
+});
+
+test('returns Ranked metadata unchanged during account-history download', async () => {
+    const ranked = makeRankedDebate();
+    const { service } = makeService({
+        repositoryOverrides: {
+            async listDebates() {
+                return {
+                    rows: [
+                        makeDatabaseRow({
+                            saved_debate_id: ranked.id,
+                            philosopher_name: ranked.philosopherName,
+                            philosopher_initials: ranked.philosopherInitials,
+                            topic: ranked.topic,
+                            final_score_text: ranked.finalScore,
+                            final_score_value: ranked.finalScoreValue,
+                            debate_mode_raw_value: ranked.debateModeRawValue,
+                            ranked_debate_id: ranked.rankedDebateId,
+                            ranked_debate_kind:
+                                ranked.rankedDebateKindRawValue,
+                            ranked_outcome:
+                                ranked.rankedOutcomeRawValue,
+                            ranked_report_context:
+                                ranked.rankedReportContext,
+                        }),
+                    ],
+                    hasMore: false,
+                };
+            },
+        },
+    });
+
+    const result = await service.listDebates({
+        installationId: INSTALLATION_ID,
+        accessToken: 'header.payload.signature',
+    });
+
+    assert.equal(result.debates[0].rankedDebateId, DEBATE_ID);
+    assert.equal(
+        result.debates[0].rankedDebateKindRawValue,
+        'ladder'
+    );
+    assert.equal(
+        result.debates[0].rankedReportContext.ladder.afterRankText,
+        'Student I'
     );
 });
 
