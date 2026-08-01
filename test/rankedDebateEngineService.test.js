@@ -185,7 +185,8 @@ function providerFrom(
 
 function service(
     responses,
-    capturedPayloads = []
+    capturedPayloads = [],
+    options = {}
 ) {
     return createRankedDebateEngineService({
         createMessage:
@@ -197,6 +198,11 @@ function service(
             2,
         httpAttempts:
             1,
+        logger:
+            options.logger ??
+            {
+                warn() {},
+            },
     });
 }
 
@@ -759,3 +765,396 @@ test(
         );
     }
 );
+
+
+test(
+    'uses smaller mode-specific token budgets for new v3 debates',
+    async () => {
+        const guidedPayloads = [];
+        const balancedPayloads = [];
+        const relentlessPayloads = [];
+
+        await service(
+            [
+                body(
+                    [35, 35],
+                    {
+                        finalEnding:
+                            '?',
+                        prefix:
+                            'guidedtokens',
+                    }
+                ),
+            ],
+            guidedPayloads
+        ).generateReply({
+            requestId:
+                REQUEST_ID,
+            context:
+                context(
+                    'guided'
+                ),
+            conversation:
+                conversation(1),
+            roundNumber:
+                1,
+        });
+
+        await service(
+            [
+                body(
+                    [50, 50],
+                    {
+                        finalEnding:
+                            '?',
+                        prefix:
+                            'balancedtokens',
+                    }
+                ),
+            ],
+            balancedPayloads
+        ).generateReply({
+            requestId:
+                REQUEST_ID,
+            context:
+                context(
+                    'balanced'
+                ),
+            conversation:
+                conversation(1),
+            roundNumber:
+                1,
+        });
+
+        await service(
+            [
+                body(
+                    [20, 20, 20],
+                    {
+                        finalEnding:
+                            '?',
+                        prefix:
+                            'relentlesstokens',
+                    }
+                ),
+            ],
+            relentlessPayloads
+        ).generateReply({
+            requestId:
+                REQUEST_ID,
+            context:
+                context(
+                    'relentless'
+                ),
+            conversation:
+                conversation(1),
+            roundNumber:
+                1,
+        });
+
+        assert.equal(
+            guidedPayloads[0]
+                .max_tokens,
+            190
+        );
+        assert.equal(
+            balancedPayloads[0]
+                .max_tokens,
+            280
+        );
+        assert.equal(
+            relentlessPayloads[0]
+                .max_tokens,
+            520
+        );
+    }
+);
+
+test(
+    'returns the closest structurally valid Guided response instead of failing the debate when both style retries miss',
+    async () => {
+        const warnings = [];
+        const closerResponse =
+            body(
+                [48, 47],
+                {
+                    finalEnding:
+                        '?',
+                    prefix:
+                        'closerguided',
+                }
+            );
+        const worseResponse =
+            body(
+                [55, 55],
+                {
+                    finalEnding:
+                        '.',
+                    prefix:
+                        'worseguided',
+                }
+            );
+        const engine =
+            service(
+                [
+                    closerResponse,
+                    worseResponse,
+                ],
+                [],
+                {
+                    logger: {
+                        warn(
+                            message,
+                            details
+                        ) {
+                            warnings.push({
+                                message,
+                                details,
+                            });
+                        },
+                    },
+                }
+            );
+
+        const result =
+            await engine.generateReply({
+                requestId:
+                    REQUEST_ID,
+                context:
+                    context(
+                        'guided'
+                    ),
+                conversation:
+                    conversation(1),
+                roundNumber:
+                    1,
+            });
+
+        assert.equal(
+            result.text,
+            closerResponse
+        );
+        assert.equal(
+            result.scoreValue,
+            null
+        );
+        assert.equal(
+            warnings.length,
+            1
+        );
+        assert.equal(
+            warnings[0]
+                .details
+                .selectedAttempt,
+            1
+        );
+        assert.match(
+            warnings[0]
+                .message,
+            /structurally valid response/i
+        );
+    }
+);
+
+test(
+    'still fails safely when every scored attempt omits the required score line',
+    async () => {
+        const responseBody =
+            body(
+                [50, 50],
+                {
+                    finalEnding:
+                        '?',
+                    prefix:
+                        'missingscore',
+                }
+            );
+        const engine =
+            service([
+                responseBody,
+                responseBody,
+            ]);
+
+        await assert.rejects(
+            engine.generateReply({
+                requestId:
+                    REQUEST_ID,
+                context:
+                    context(
+                        'balanced'
+                    ),
+                conversation:
+                    conversation(2),
+                roundNumber:
+                    2,
+            }),
+            (error) => {
+                assert.equal(
+                    error.code,
+                    'ranked_output_validation_failed'
+                );
+                assert.match(
+                    error.details
+                        .reason,
+                    /required final SCORE line was missing or malformed/i
+                );
+                return true;
+            }
+        );
+    }
+);
+
+test(
+    'a valid scored candidate survives when a later retry has a critical score-format failure',
+    async () => {
+        const styleImperfectBody =
+            body(
+                [45, 45],
+                {
+                    finalEnding:
+                        '?',
+                    prefix:
+                        'scoredfallback',
+                }
+            );
+        const validScoreCandidate =
+            `${styleImperfectBody}\n\nSCORE:[7/10]: The argument engages the objection but remains slightly underdeveloped.`;
+        const missingScoreCandidate =
+            body(
+                [50, 50],
+                {
+                    finalEnding:
+                        '?',
+                    prefix:
+                        'laterfailure',
+                }
+            );
+        const engine =
+            service([
+                validScoreCandidate,
+                missingScoreCandidate,
+            ]);
+
+        const result =
+            await engine.generateReply({
+                requestId:
+                    REQUEST_ID,
+                context:
+                    context(
+                        'balanced'
+                    ),
+                conversation:
+                    conversation(2),
+                roundNumber:
+                    2,
+            });
+
+        assert.equal(
+            result.text,
+            styleImperfectBody
+        );
+        assert.equal(
+            result.scoreValue,
+            7
+        );
+    }
+);
+
+
+test(
+    'a later provider failure cannot discard an already valid scored fallback candidate',
+    async () => {
+        const warnings = [];
+        const styleImperfectBody =
+            body(
+                [45, 45],
+                {
+                    finalEnding:
+                        '?',
+                    prefix:
+                        'providerfallback',
+                }
+            );
+        const scoredCandidate =
+            `${styleImperfectBody}\n\nSCORE:[6.5/10]: The response engages the issue but needs a more complete defense.`;
+        let callCount = 0;
+        const engine =
+            createRankedDebateEngineService({
+                createMessage:
+                    async () => {
+                        callCount += 1;
+
+                        if (
+                            callCount === 1
+                        ) {
+                            return {
+                                content: [
+                                    {
+                                        type:
+                                            'text',
+                                        text:
+                                            scoredCandidate,
+                                    },
+                                ],
+                            };
+                        }
+
+                        const error =
+                            new Error(
+                                'Provider unavailable.'
+                            );
+                        error.statusCode =
+                            503;
+                        throw error;
+                    },
+                maxOutputAttempts:
+                    2,
+                httpAttempts:
+                    1,
+                logger: {
+                    warn(
+                        message,
+                        details
+                    ) {
+                        warnings.push({
+                            message,
+                            details,
+                        });
+                    },
+                },
+            });
+
+        const result =
+            await engine.generateReply({
+                requestId:
+                    REQUEST_ID,
+                context:
+                    context(
+                        'balanced'
+                    ),
+                conversation:
+                    conversation(2),
+                roundNumber:
+                    2,
+            });
+
+        assert.equal(
+            result.text,
+            styleImperfectBody
+        );
+        assert.equal(
+            result.scoreValue,
+            6.5
+        );
+        assert.equal(
+            warnings.length,
+            1
+        );
+        assert.equal(
+            warnings[0]
+                .details
+                .fallbackReason,
+            'later_generation_failed'
+        );
+    }
+);  
