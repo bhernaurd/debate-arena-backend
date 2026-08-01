@@ -3,7 +3,7 @@
 -- Adds an auditable philosopher-voiced opening question while preserving a
 -- neutral canonical topic for scoring, duplicate detection, analytics, and
 -- reports. New placement and ladder debates seed the voiced question directly
--- into messages_json as the completed assistant opening, so the user can
+-- into messages as the completed assistant opening, so the user can
 -- respond immediately without waiting for a second AI opening request.
 --
 -- Existing debates remain valid and unchanged.
@@ -66,8 +66,8 @@ ALTER TABLE account_ranked_debates
         OR (
             opening_question IS NOT NULL
             AND CASE
-                WHEN jsonb_typeof(messages_json) = 'array'
-                THEN jsonb_array_length(messages_json) >= 1
+                WHEN jsonb_typeof(messages) = 'array'
+                THEN jsonb_array_length(messages) >= 1
                 ELSE FALSE
             END
         )
