@@ -5,6 +5,7 @@ import {
     RankedPhilosopherCatalogError,
     findRankedPhilosopher,
     isRankedPhilosopherID,
+    listEligibleRankedPhilosophers,
     listRankedPhilosophers,
     rankedPhilosopherCatalogConstants,
     requireRankedPhilosopher,
@@ -58,7 +59,7 @@ test(
 );
 
 test(
-    'resolves canonical ids and accepted aliases',
+    'resolves canonical IDs without accepting display-name aliases',
     () => {
         assert.equal(
             findRankedPhilosopher(
@@ -69,23 +70,49 @@ test(
 
         assert.equal(
             findRankedPhilosopher(
+                'jung'
+            )?.name,
+            'Carl Jung'
+        );
+
+        assert.equal(
+            findRankedPhilosopher(
+                'dostoevsky'
+            )?.name,
+            'Fyodor Dostoevsky'
+        );
+
+        assert.equal(
+            findRankedPhilosopher(
                 'Marcus Aurelius'
-            )?.id,
-            'aurelius'
+            ),
+            null
         );
 
         assert.equal(
-            findRankedPhilosopher(
-                'Carl Jung'
-            )?.id,
-            'jung'
+            isRankedPhilosopherID(
+                'Marcus Aurelius'
+            ),
+            false
+        );
+    }
+);
+
+test(
+    'uses the server eligibility allowlist for new Ranked starts',
+    () => {
+        assert.deepEqual(
+            listEligibleRankedPhilosophers()
+                .map((item) => item.id),
+            rankedPhilosopherCatalogConstants
+                .eligibleIDs
         );
 
         assert.equal(
-            findRankedPhilosopher(
-                'Fyodor Dostoevsky'
-            )?.id,
-            'dostoevsky'
+            rankedPhilosopherCatalogConstants
+                .eligibleCount,
+            rankedPhilosopherCatalogConstants
+                .eligibleIDs.length
         );
     }
 );
