@@ -6,13 +6,19 @@ import {
     createRankedTopicGeneratorService,
 } from '../lib/rankedTopicGeneratorService.js';
 
-function response(topic, theme = 'Virtue') {
+function response(
+    topic,
+    theme = 'Virtue',
+    openingQuestion =
+        'What answer would your own life give when this question becomes unavoidable?'
+) {
     return {
         content: [
             {
                 type: 'text',
                 text: JSON.stringify({
                     topic,
+                    openingQuestion,
                     theme,
                 }),
             },
@@ -65,6 +71,10 @@ test(
             'guided'
         );
         assert.equal(
+            result.openingQuestion,
+            'What answer would your own life give when this question becomes unavoidable?'
+        );
+        assert.equal(
             result.model,
             'test-model'
         );
@@ -90,7 +100,11 @@ test(
         );
         assert.match(
             request.messages[0].content,
-            /system-assigned/
+            /AUTHORITATIVE PHILOSOPHER SOURCE/
+        );
+        assert.match(
+            request.messages[0].content,
+            /openingQuestion/
         );
     }
 );
@@ -264,6 +278,66 @@ test(
 );
 
 test(
+    'regenerates when the model omits the philosopher opening question',
+    async () => {
+        let attempts = 0;
+        const prompts = [];
+
+        const service =
+            createRankedTopicGeneratorService({
+                messageClient:
+                    async (request) => {
+                        attempts += 1;
+                        prompts.push(
+                            request.messages[0].content
+                        );
+
+                        if (attempts === 1) {
+                            return {
+                                content: [
+                                    {
+                                        type: 'text',
+                                        text: JSON.stringify({
+                                            topic: 'Can a person be courageous while refusing every risk that might expose failure?',
+                                            theme: 'Courage',
+                                        }),
+                                    },
+                                ],
+                            };
+                        }
+
+                        return response(
+                            'Can a person be courageous while refusing every risk that might expose failure?',
+                            'Courage',
+                            'Will you still call yourself courageous when your virtue has never entered danger?'
+                        );
+                    },
+            });
+
+        const result =
+            await service.generateTopic({
+                philosopherId:
+                    'aristotle',
+                debateMode:
+                    'balanced',
+            });
+
+        assert.equal(
+            attempts,
+            2
+        );
+        assert.equal(
+            result.openingQuestion,
+            'Will you still call yourself courageous when your virtue has never entered danger?'
+        );
+        assert.match(
+            prompts[1],
+            /opening question must be one clean question/i
+        );
+    }
+);
+
+test(
     'rejects repeated or closely paraphrased topics',
     async () => {
         let attempts = 0;
@@ -316,7 +390,7 @@ test(
                             {
                                 type: 'text',
                                 text:
-                                    '```json\n{"topic":"Would you still call an action just if it saved many people by sacrificing one innocent person?","theme":"Justice"}\n```',
+                                    '```json\n{"topic":"Would you still call an action just if it saved many people by sacrificing one innocent person?","openingQuestion":"Would you name the act just when its order is purchased with an innocent soul?","theme":"Justice"}\n```',
                             },
                         ],
                     }),
