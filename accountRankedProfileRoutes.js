@@ -359,9 +359,6 @@ function serializeDiagnosticCause(
     copyTextField('schema');
     copyTextField('routine');
     copyTextField('severity');
-    copyTextField('detail', 'detail', 1_000);
-    copyTextField('hint', 'hint', 1_000);
-    copyTextField('message', 'message', 1_000);
 
     const cause = error.cause;
 
