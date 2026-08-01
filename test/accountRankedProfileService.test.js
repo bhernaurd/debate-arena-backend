@@ -51,6 +51,7 @@ class MemoryRankedProfileRepository {
             allow_new_debates: false,
             allow_resume_active_debates: true,
             placements_enabled: false,
+            ladder_enabled: false,
             leaderboard_enabled: false,
             population_limits_enabled: false,
             ranked_rules_version: null,
@@ -250,6 +251,10 @@ test('bootstraps a new account-owned Ranked profile and fixed five-trial placeme
     );
     assert.equal(
         result.configuration.placementsEnabled,
+        false
+    );
+    assert.equal(
+        result.configuration.ladderEnabled,
         false
     );
 
