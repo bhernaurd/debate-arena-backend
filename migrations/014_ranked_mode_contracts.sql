@@ -7,9 +7,9 @@
 -- paragraph structure, and the number of pressure points pursued.
 --
 -- No debate rows, scores, RP values, placement results, or transcripts are
--- rewritten by this migration. New model generations use the updated versions.
-
-BEGIN;
+-- rewritten by this migration. Newly created Ranked debates use the updated
+-- version identifiers. Existing debates retain the versions stored when they
+-- were created.
 
 UPDATE ranked_system_configuration
 SET
@@ -19,8 +19,6 @@ SET
         'ranked-scoring-v3-mode-contracts',
     updated_at = CURRENT_TIMESTAMP
 WHERE configuration_key = 'global';
-
-COMMIT;
 
 SELECT
     configuration_key,
