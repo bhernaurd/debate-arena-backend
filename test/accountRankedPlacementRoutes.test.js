@@ -112,6 +112,7 @@ function generatedTopic(overrides = {}) {
         philosopherName: 'Socrates',
         debateMode: 'guided',
         topic: 'Can a person live well while refusing to examine their deepest beliefs?',
+        openingQuestion: 'What kind of life do you call good if you refuse to examine the beliefs directing it?',
         topicNormalized: 'can person live well while refusing examine deepest beliefs',
         topicFingerprint: 'a'.repeat(64),
         theme: 'self-examination',
