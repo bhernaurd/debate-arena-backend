@@ -297,6 +297,18 @@ function makeService(
             return turnResult();
         },
 
+        async completeDebate() {
+            return {
+                success: true,
+            };
+        },
+
+        async forfeitDebate() {
+            return {
+                success: true,
+            };
+        },
+
         ...overrides,
     };
 }
