@@ -93,6 +93,7 @@ function bootstrapResult({
             allowNewDebates: false,
             allowResumeActiveDebates: true,
             placementsEnabled: false,
+            ladderEnabled: false,
             leaderboardEnabled: false,
             populationLimitsEnabled: false,
             rankedRulesVersion: null,
@@ -290,6 +291,10 @@ test(
             body.configuration
                 .allowResumeActiveDebates,
             true
+        );
+        assert.equal(
+            body.configuration.ladderEnabled,
+            false
         );
         assert.equal(
             body.profile.placementStatus,
