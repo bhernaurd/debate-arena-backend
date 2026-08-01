@@ -17,6 +17,13 @@ const migrationSource = await readFile(
     ),
     'utf8'
 );
+const rankedHistoryMigrationSource = await readFile(
+    new URL(
+        '../migrations/015_ranked_history_metadata.sql',
+        import.meta.url
+    ),
+    'utf8'
+);
 
 function positionOf(source, fragment) {
     const position = source.indexOf(fragment);
@@ -175,5 +182,37 @@ test('migration preserves origin installation and newer-content precedence metad
     assert.match(
         migrationSource,
         /content_sha256 TEXT NOT NULL/
+    );
+});
+
+
+test('Ranked history migration stores complete validated result metadata', () => {
+    assert.match(
+        rankedHistoryMigrationSource,
+        /ranked_debate_id UUID/
+    );
+    assert.match(
+        rankedHistoryMigrationSource,
+        /ranked_debate_kind TEXT/
+    );
+    assert.match(
+        rankedHistoryMigrationSource,
+        /ranked_outcome TEXT/
+    );
+    assert.match(
+        rankedHistoryMigrationSource,
+        /ranked_report_context JSONB/
+    );
+    assert.match(
+        rankedHistoryMigrationSource,
+        /ranked_debate_id = saved_debate_id/
+    );
+    assert.match(
+        rankedHistoryMigrationSource,
+        /jsonb_typeof\(ranked_report_context\) = 'object'/
+    );
+    assert.match(
+        rankedHistoryMigrationSource,
+        /is_daily_challenge = FALSE/
     );
 });
