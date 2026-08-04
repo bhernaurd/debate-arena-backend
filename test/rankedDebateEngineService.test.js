@@ -476,7 +476,7 @@ test(
                 }
             );
         const scored =
-            `${responseBody}\n\nSCORE:[7.5/10]: The argument is clear but its standard remains insufficiently defended.`;
+            `${responseBody}\n\nSCORE:[7.56/10]: The argument is clear but its standard remains insufficiently defended.`;
         const engine =
             service([
                 scored,
@@ -502,11 +502,11 @@ test(
         );
         assert.equal(
             result.scoreValue,
-            7.5
+            7.6
         );
         assert.equal(
             result.scoreText,
-            '7.5/10: The argument is clear but its standard remains insufficiently defended.'
+            '7.6/10: The argument is clear but its standard remains insufficiently defended.'
         );
     }
 );
@@ -1157,4 +1157,4 @@ test(
             'later_generation_failed'
         );
     }
-);  
+); 
