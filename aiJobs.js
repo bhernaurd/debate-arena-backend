@@ -118,6 +118,30 @@ const REQUIRE_SERVER_VERIFIED_PRO_FOR_MODEL =
         .trim()
         .toLowerCase() === 'true';
 
+// Allows specific internal installations to test Pro-gated Expanded Agora
+// access without requiring a real App Store transaction.
+//
+// Railway example:
+// EXPANDED_AGORA_TEST_PRO_USER_IDS=id1,id2
+//
+// This bypass is controlled only by the backend. Client-provided Pro metadata
+// is never accepted as authorization for this allowlist.
+const EXPANDED_AGORA_TEST_PRO_USER_IDS = new Set(
+    String(process.env.EXPANDED_AGORA_TEST_PRO_USER_IDS || '')
+        .split(',')
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean)
+);
+
+function hasExpandedAgoraTestProAccess(userId) {
+    const normalizedUserId = cleanString(userId, 128).toLowerCase();
+
+    return (
+        normalizedUserId.length > 0 &&
+        EXPANDED_AGORA_TEST_PRO_USER_IDS.has(normalizedUserId)
+    );
+}
+
 function truthyMetadataValue(value) {
     if (value === true) return true;
 
@@ -995,6 +1019,12 @@ router.post('/api/ai-jobs', async (req, res) => {
         const isVerifiedPro =
             proVerification.isVerifiedPro === true;
 
+        const isTestProBypass =
+            hasExpandedAgoraTestProAccess(cleanUserId);
+
+        const hasExpandedAgoraProAccess =
+            isVerifiedPro || isTestProBypass;
+
         const clientReportedPro =
             String(safeMetadata.accessTier || '').trim().toLowerCase() === 'pro' ||
             truthyMetadataValue(safeMetadata.isPro) ||
@@ -1003,7 +1033,9 @@ router.post('/api/ai-jobs', async (req, res) => {
         const analyticsAccessTier = isVerifiedPro
             ? (proVerification.analyticsAccessTier ||
                 (proVerification.isTrial ? 'trial' : 'paid_pro'))
-            : (clientReportedPro ? 'legacy_pro' : 'free');
+            : (isTestProBypass
+                ? 'internal_test_pro'
+                : (clientReportedPro ? 'legacy_pro' : 'free'));
 
         client = await pool.connect();
         await client.query('BEGIN');
@@ -1051,7 +1083,7 @@ router.post('/api/ai-jobs', async (req, res) => {
             metadata: safeMetadata,
             iosVersion: requestIosVersion(req),
             iosBuild: requestIosBuild(req),
-            isVerifiedPro,
+            isVerifiedPro: hasExpandedAgoraProAccess,
         });
 
         const result = await client.query(
@@ -1081,6 +1113,7 @@ router.post('/api/ai-jobs', async (req, res) => {
                     // These values are produced by the backend and deliberately
                     // overwrite any same-named client metadata.
                     serverVerifiedPro: isVerifiedPro,
+                    testProBypass: isTestProBypass,
                     proVerificationReason:
                         proVerification.reason || 'unknown',
                     proVerificationEnvironment:
@@ -1098,9 +1131,11 @@ router.post('/api/ai-jobs', async (req, res) => {
                     analyticsAccessTier,
                     analyticsTierSource: isVerifiedPro
                         ? 'server_verified_storekit'
-                        : (clientReportedPro
-                            ? 'legacy_client_metadata'
-                            : 'free_no_verified_entitlement'),
+                        : (isTestProBypass
+                            ? 'railway_test_pro_allowlist'
+                            : (clientReportedPro
+                                ? 'legacy_client_metadata'
+                                : 'free_no_verified_entitlement')),
 
                     expandedAgoraAccessReason: accessDecision.reason,
                 }),
