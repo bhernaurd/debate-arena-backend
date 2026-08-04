@@ -19,6 +19,9 @@ const ACCOUNT_ID =
 const DEBATE_ID =
     '22222222-2222-4222-8222-222222222222';
 
+const SECOND_DEBATE_ID =
+    '99999999-9999-4999-8999-999999999999';
+
 const START_REQUEST_ID =
     '33333333-3333-4333-8333-333333333333';
 
@@ -281,12 +284,73 @@ function turnResult({
     });
 }
 
+function resolvedIndexResult(
+    overrides = {}
+) {
+    return {
+        schemaVersion:
+            accountRankedDebateConstants
+                .schemaVersion,
+        accountId:
+            ACCOUNT_ID,
+        installationId:
+            INSTALLATION_ID,
+        retrievedAt:
+            NOW,
+        debates: [
+            {
+                id:
+                    DEBATE_ID,
+                debateKind:
+                    'placement',
+                status:
+                    'completed',
+                completedAt:
+                    NOW,
+                updatedAt:
+                    NOW,
+            },
+            {
+                id:
+                    SECOND_DEBATE_ID,
+                debateKind:
+                    'ladder',
+                status:
+                    'forfeited',
+                completedAt:
+                    new Date(
+                        '2026-07-29T11:15:00.000Z'
+                    ),
+                updatedAt:
+                    new Date(
+                        '2026-07-29T11:16:00.000Z'
+                    ),
+            },
+        ],
+        nextCursor:
+            'next-page-token',
+        hasMore:
+            true,
+        ...overrides,
+    };
+}
+
 function makeService(
     overrides = {}
 ) {
     return {
         async resumeActiveDebate() {
             return resumeResult();
+        },
+
+        async listResolvedDebates() {
+            return resolvedIndexResult();
+        },
+
+        async getResolvedDebateResult() {
+            return {
+                success: true,
+            };
         },
 
         async generateOpening() {
@@ -517,6 +581,102 @@ test(
                 'x-content-type-options'
             ),
             'nosniff'
+        );
+    }
+);
+
+test(
+    'lists resolved Ranked debates with stable pagination metadata',
+    async (t) => {
+        let captured;
+
+        const server =
+            await startServer({
+                service:
+                    makeService({
+                        async listResolvedDebates(
+                            input
+                        ) {
+                            captured =
+                                input;
+
+                            return resolvedIndexResult();
+                        },
+                    }),
+            });
+
+        t.after(
+            server.close
+        );
+
+        const response =
+            await fetch(
+                `${server.baseUrl}/api/account/ranked/debates/resolved?limit=25&cursor=previous-page-token`,
+                {
+                    headers:
+                        headers(),
+                }
+            );
+
+        const body =
+            await readJson(
+                response
+            );
+
+        assert.equal(
+            response.status,
+            200
+        );
+
+        assert.deepEqual(
+            captured,
+            {
+                installationId:
+                    INSTALLATION_ID,
+                accessToken:
+                    ACCESS_TOKEN,
+                limit:
+                    '25',
+                cursor:
+                    'previous-page-token',
+            }
+        );
+
+        assert.equal(
+            body.success,
+            true
+        );
+        assert.equal(
+            body.debates.length,
+            2
+        );
+        assert.equal(
+            body.debates[0].id,
+            DEBATE_ID
+        );
+        assert.equal(
+            body.debates[0].debateKind,
+            'placement'
+        );
+        assert.equal(
+            body.debates[1].status,
+            'forfeited'
+        );
+        assert.equal(
+            body.debates[1].completedAt,
+            '2026-07-29T11:15:00.000Z'
+        );
+        assert.equal(
+            body.nextCursor,
+            'next-page-token'
+        );
+        assert.equal(
+            body.hasMore,
+            true
+        );
+        assert.equal(
+            body.retrievedAt,
+            NOW.toISOString()
         );
     }
 );
