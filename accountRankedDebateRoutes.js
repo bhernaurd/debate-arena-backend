@@ -697,6 +697,34 @@ function serializeCompletion(
     };
 }
 
+function serializeResolvedDebateIndexItem(
+    debate
+) {
+    if (
+        !debate ||
+        typeof debate !== 'object' ||
+        Array.isArray(debate)
+    ) {
+        throw new Error(
+            'Ranked debate service returned an invalid resolved-history item.'
+        );
+    }
+
+    return {
+        id: debate.id,
+        debateKind: debate.debateKind,
+        status: debate.status,
+        completedAt: serializeDate(
+            debate.completedAt,
+            'resolvedDebate.completedAt'
+        ),
+        updatedAt: serializeDate(
+            debate.updatedAt,
+            'resolvedDebate.updatedAt'
+        ),
+    };
+}
+
 function serializeSafeErrorDetails(
     details
 ) {
@@ -982,6 +1010,12 @@ export function createAccountRankedDebateRouter({
             .resumeActiveDebate !==
             'function' ||
         typeof service
+            .listResolvedDebates !==
+            'function' ||
+        typeof service
+            .getResolvedDebateResult !==
+            'function' ||
+        typeof service
             .generateOpening !==
             'function' ||
         typeof service
@@ -1045,6 +1079,61 @@ export function createAccountRankedDebateRouter({
                         debate:
                             serializeDebate(
                                 result.debate
+                            ),
+                    });
+            }
+        )
+    );
+
+    router.get(
+        '/debates/resolved',
+        asyncRoute(
+            async (req, res) => {
+                const installationId =
+                    requireInstallationId(
+                        req
+                    );
+
+                const accessToken =
+                    requireBearerToken(
+                        req
+                    );
+
+                const result =
+                    await service
+                        .listResolvedDebates({
+                            installationId,
+                            accessToken,
+                            limit:
+                                req.query.limit,
+                            cursor:
+                                req.query.cursor,
+                        });
+
+                return res
+                    .status(200)
+                    .json({
+                        success: true,
+                        schemaVersion:
+                            result.schemaVersion,
+                        accountId:
+                            result.accountId,
+                        installationId:
+                            result.installationId,
+                        retrievedAt:
+                            serializeDate(
+                                result.retrievedAt,
+                                'retrievedAt'
+                            ),
+                        debates:
+                            result.debates.map(
+                                serializeResolvedDebateIndexItem
+                            ),
+                        nextCursor:
+                            result.nextCursor,
+                        hasMore:
+                            Boolean(
+                                result.hasMore
                             ),
                     });
             }
