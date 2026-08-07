@@ -26,6 +26,10 @@
 //   - Stricter validation for difficulty, source grounding, generic wording, and notification mismatch.
 //   - Sonnet model by default, with Railway env override.
 //   - question_mode is stored in Postgres.
+//   - Daily Challenge questions are exactly one neutral question sentence, max 15 words.
+//   - Users always choose which side they want to defend.
+//   - userPositionPrompt is forced to one neutral instruction for every challenge.
+//   - Backend validation rejects multi-sentence, over-15-word, or side-assigned questions.
 //
 // Required DB migration before deploying this version:
 //   ALTER TABLE daily_challenges
@@ -49,6 +53,10 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 // without editing code.
 const DAILY_CHALLENGE_MODEL =
     process.env.DAILY_CHALLENGE_MODEL || 'claude-sonnet-4-5-20250929';
+
+const DAILY_CHALLENGE_MAX_WORDS = 15;
+const DAILY_CHALLENGE_POSITION_PROMPT =
+    'Choose your position and make the strongest case you can.';
 
 // ─── Storage compatibility for current pushScheduler.js ───────────────────────
 
@@ -249,61 +257,61 @@ const QUESTION_MODES = {
         id: 'defend_a_definition',
         label: 'Defend a Definition',
         instruction:
-            'Require the user to define a key moral, psychological, or philosophical term, then defend that definition against the philosopher.',
+            'Frame a neutral philosophical question whose disagreement turns on how a key term should be understood.',
         goodShape:
-            'Ask the user to define something they use confidently, then expose whether the definition survives pressure.',
+            'Make the definition itself contestable so the user can choose and defend their own understanding.',
         avoid:
-            'Do not ask a vague reflection question. The user must supply and defend a definition.',
+            'Do not tell the user what definition to adopt, what side to defend, or what answer is correct.',
     },
     take_a_side: {
         id: 'take_a_side',
         label: 'Take a Side',
         instruction:
-            'Force the user to take a clear side on a real philosophical tension raised by the source idea.',
+            'Present a clear source-grounded tension between two defensible positions and let the user choose either side.',
         goodShape:
-            'Frame the question so the user must choose between two defensible but conflicting positions.',
+            'Use a concise either-or or yes-no tension where both answers can support a serious argument.',
         avoid:
-            'Do not let the user answer with a neutral reflection or list of feelings.',
+            'Do not assign the user a side or imply that one answer is the required position.',
     },
     self_audit: {
         id: 'self_audit',
         label: 'Self-Audit',
         instruction:
-            'Make the source idea personally implicating by asking the user to test a belief, habit, relationship, judgment, or desire in their own life.',
+            'Turn the source idea into a concise personal question that still allows more than one defensible answer.',
         goodShape:
-            'The question should make the user examine themselves without becoming generic journaling.',
+            'Make the question personally relevant without telling the user what their experience means.',
         avoid:
-            'Do not write motivational self-help. Keep the source idea visible.',
+            'Do not become generic journaling, self-help, or a command to confess a predetermined flaw.',
     },
     steelman_the_opposite: {
         id: 'steelman_the_opposite',
         label: 'Steelman the Opposite',
         instruction:
-            'Ask the user to defend the side they would usually resist, then let the philosopher attack or complicate it.',
+            'Present two strong opposing interpretations of the source tension, but let the user freely choose which one to defend.',
         goodShape:
-            'The user should have to make the strongest case for a position that challenges their instinct.',
+            'Make both sides intellectually credible enough that choosing either creates a real debate.',
         avoid:
-            'Do not merely ask what the opposite view is. Require a defense.',
+            'Do not tell the user to defend the opposite side, resist their instinct, or take any predetermined position.',
     },
     concrete_case: {
         id: 'concrete_case',
         label: 'Concrete Case',
         instruction:
-            'Demand one concrete example from the user’s life, then judge that case through the philosopher’s concept.',
+            'Express the source idea through one concise concrete tension or situation and let the user judge it.',
         goodShape:
-            'Ask for one named situation, relationship, habit, judgment, fear, desire, or conflict.',
+            'Ask a short question about a recognizable choice, action, relationship, judgment, or conflict.',
         avoid:
-            'Do not ask broad abstract questions that can be answered without an example.',
+            'Do not require a specific personal disclosure or tell the user what conclusion to defend.',
     },
     moral_trial: {
         id: 'moral_trial',
         label: 'Moral Trial',
         instruction:
-            'Put the user’s belief, excuse, desire, resentment, ambition, or fear on trial before the philosopher.',
+            'Put a belief, motive, value, excuse, desire, resentment, ambition, or fear under philosophical pressure without presuming guilt.',
         goodShape:
-            'The question should feel like the user has to defend themselves against a serious accusation.',
+            'Ask whether the challenged motive or value is justified, corrupting, virtuous, truthful, or defensible.',
         avoid:
-            'Do not make the philosopher merely curious. The philosopher should press a charge.',
+            'Do not accuse the user, assign guilt, or force them to defend a predetermined side.',
     },
 };
 
@@ -1522,6 +1530,47 @@ function looksTooGeneric(challenge) {
     return genericPatterns.some(pattern => question.includes(pattern));
 }
 
+function countChallengeWords(text) {
+    return String(text || '')
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .length;
+}
+
+function hasExactlyOneQuestionSentence(text) {
+    const question = String(text || '').trim();
+
+    if (!question.endsWith('?')) return false;
+
+    const sentenceEndings = question.match(/[.!?](?=\s|$)/g) || [];
+    return sentenceEndings.length === 1;
+}
+
+function assignsUserPosition(text) {
+    const question = normalizeText(text);
+
+    const assignmentPatterns = [
+        'defend the first',
+        'defend the second',
+        'defend this position',
+        'defend that position',
+        'defend the position',
+        'argue that',
+        'argue for',
+        'argue against',
+        'take the side',
+        'take this side',
+        'choose the first',
+        'choose the second',
+        'you must defend',
+        'you should defend',
+        'steelman the opposite',
+    ];
+
+    return assignmentPatterns.some(pattern => question.includes(pattern));
+}
+
 function validateChallenge(challenge) {
     const required = [
         'id',
@@ -1573,14 +1622,31 @@ function validateChallenge(challenge) {
         throw new Error(`Invalid questionMode: ${challenge.questionMode}`);
     }
 
-    const questionLength = String(challenge.challengeQuestion || '').trim().length;
+    const challengeQuestion = String(challenge.challengeQuestion || '').trim();
+    const questionWordCount = countChallengeWords(challengeQuestion);
 
-    if (questionLength < 45) {
-        throw new Error('challengeQuestion is too short to carry a real debate.');
+    if (!hasExactlyOneQuestionSentence(challengeQuestion)) {
+        throw new Error(
+            'challengeQuestion must be exactly one sentence and must end with a question mark.'
+        );
     }
 
-    if (questionLength > 420) {
-        throw new Error('challengeQuestion is too long for the Daily Challenge entry point.');
+    if (questionWordCount > DAILY_CHALLENGE_MAX_WORDS) {
+        throw new Error(
+            `challengeQuestion is ${questionWordCount} words. Maximum is ${DAILY_CHALLENGE_MAX_WORDS}.`
+        );
+    }
+
+    if (assignsUserPosition(challengeQuestion)) {
+        throw new Error(
+            'challengeQuestion assigns the user a position. The user must choose which side to defend.'
+        );
+    }
+
+    if (String(challenge.userPositionPrompt || '').trim() !== DAILY_CHALLENGE_POSITION_PROMPT) {
+        throw new Error(
+            `userPositionPrompt must be exactly: "${DAILY_CHALLENGE_POSITION_PROMPT}"`
+        );
     }
 
     if (looksTooGeneric(challenge)) {
@@ -1662,24 +1728,34 @@ Core rules:
 - Do not invent views the philosopher did not hold.
 - Do not make unsupported claims about how the philosopher would react to modern technology, politics, or culture.
 - Modern relevance is allowed, but the foundation must remain the work, concept, and source idea provided.
-- The question should help the user understand the philosopher's real thought while forcing them to take a defensible position.
+- challengeQuestion must be EXACTLY ONE sentence.
+- challengeQuestion must be a direct question ending in "?".
+- challengeQuestion must contain NO MORE THAN ${DAILY_CHALLENGE_MAX_WORDS} words.
+- Keep the challengeQuestion concise enough to understand at a glance.
+- Do not add examples, setup paragraphs, explanations, or a second sentence to challengeQuestion.
+- Do not assume or assign the user's position.
+- Never tell the user which side to defend.
+- The user must be free to choose either defensible side of the tension.
+- The selected question mode may shape the kind of tension, but it must never force a predetermined stance.
+- userPositionPrompt must be exactly: "${DAILY_CHALLENGE_POSITION_PROMPT}"
+- The question should help the user understand the philosopher's real thought while giving them a defensible choice.
 - Do not write generic journaling prompts.
 - Do not write motivational self-help.
 - Do not write quote-app content.
 - Do not mention AI or ChatGPT unless the selected source idea explicitly requires it.
-- Do not assume the user's position.
 - The user must be able to enter the debate in 1-2 sentences, but the question should have enough tension to sustain a serious argument.
-- The Daily Challenge should be loseable: the philosopher should have a real angle of attack.
+- The Daily Challenge should be loseable: the philosopher should have a real angle of attack against the user's chosen answer.
 - Avoid repeating or closely resembling any recent question provided by the backend.
 - Return ONLY valid JSON. No preamble, no markdown, no backticks.
 
 Question quality standard:
 1. Traceable — a reader familiar with the source should recognize the concept.
-2. Contestable — the user can take a real side that the philosopher can attack.
-3. Personally implicating — the user should feel addressed, not merely informed.
-4. Enterable — the opening answer should be possible in 1-2 sentences.
-5. Loseable — the user should be able to feel their position crack under pressure.
-6. Teachable — the user should understand the philosopher's concept better after the debate.
+2. Contestable — the question presents a real tension with more than one defensible answer.
+3. Neutral — the wording does not tell the user which side is correct or which side to defend.
+4. Concise — exactly one sentence and no more than ${DAILY_CHALLENGE_MAX_WORDS} words.
+5. Enterable — the opening answer should be possible in 1-2 sentences.
+6. Loseable — the user's chosen position can crack under philosophical pressure.
+7. Teachable — the user should understand the philosopher's concept better after the debate.
 
 Notification rules:
 - The notification copy must directly revolve around the generated challengeQuestion.
@@ -1720,14 +1796,20 @@ ${recentQuestionText}
 
 CRITICAL:
 The challengeQuestion must clearly grow out of the source idea above.
-The challengeQuestion must follow the selected question mode.
+The challengeQuestion must follow the selected question mode WITHOUT assigning a side.
+The challengeQuestion must be exactly one sentence.
+The challengeQuestion must end with a question mark.
+The challengeQuestion must contain no more than ${DAILY_CHALLENGE_MAX_WORDS} words.
+The challengeQuestion must be neutral and let the user choose which side to defend.
+Do not include examples, explanations, a second sentence, or instructions such as "defend the first position."
 The difficulty must be exactly: ${scheduledDifficulty}
 The question may connect to the user's life, choices, beliefs, habits, relationships, society, or future — but it must remain grounded in the selected work and concept.
 Do NOT write a vague modern hypothetical such as "What would ${philosopher.name} think about social media?"
-Instead, teach the actual philosophical idea by turning it into a debate the user can enter.
+Instead, teach the actual philosophical idea through one concise debate question.
 The new challengeQuestion must NOT repeat or closely resemble the recent questions above.
-The user should have to defend a real position, not merely reflect.
-The opposingAngle must be the position ${philosopher.name} will argue during the debate, grounded in the selected source idea.
+The user should have to choose and defend a real position, not merely reflect.
+The userPositionPrompt must be exactly: "${DAILY_CHALLENGE_POSITION_PROMPT}"
+The opposingAngle must be a source-grounded pressure point ${philosopher.name} can use to challenge the user's chosen position without assuming which side the user picked.
 The morningNotification, afternoonNotification, and eveningNotification must be written ONLY in the voice/style of ${philosopher.name}.
 They must directly relate to the exact challengeQuestion you generate.
 Do not write generic ${philosopher.name} notifications.
@@ -1738,9 +1820,9 @@ ${retryInstruction}
 Return this exact JSON with no other text:
 {
   "title": "Short evocative title (max 6 words)",
-  "challengeQuestion": "The full debate question (1-2 sentences, no assumed position)",
-  "userPositionPrompt": "One sentence inviting the user to state and defend their view",
-  "opposingAngle": "The position ${philosopher.name} will argue, grounded in the selected source idea (1 sentence)",
+  "challengeQuestion": "Exactly one neutral debate question, maximum ${DAILY_CHALLENGE_MAX_WORDS} words, ending in ?",
+  "userPositionPrompt": "${DAILY_CHALLENGE_POSITION_PROMPT}",
+  "opposingAngle": "One source-grounded pressure point ${philosopher.name} can use against the user's chosen position (1 sentence)",
   "difficulty": "${scheduledDifficulty}",
   "shareHook": "One-sentence hook for sharing on social media",
   "educationalNote": "One sentence explaining the source idea in simple language without sounding academic",
@@ -1759,7 +1841,12 @@ Return this exact JSON with no other text:
     const raw = message.content?.find(b => b.type === 'text')?.text ?? '';
     const clean = raw.replace(/```json|```/g, '').trim();
 
-    return JSON.parse(clean);
+    const parsed = JSON.parse(clean);
+
+    // The user always chooses their own side. Never let model wording assign a position.
+    parsed.userPositionPrompt = DAILY_CHALLENGE_POSITION_PROMPT;
+
+    return parsed;
 }
 
 // ─── Fallbacks ────────────────────────────────────────────────────────────────
@@ -1776,9 +1863,9 @@ const FALLBACKS = {
         debateAngle: 'whether self-questioning is necessary for a good life',
         questionMode: 'defend_a_definition',
         title: 'The Unexamined Life',
-        challengeQuestion: 'Socrates argues that an unexamined life is not worthy of a human being. Define one belief you live by, then defend why it deserves to guide your life.',
-        userPositionPrompt: 'Name one belief you hold with confidence, define it clearly, and explain why it should survive questioning.',
-        opposingAngle: 'Socrates will argue that confidence without examination is not wisdom.',
+        challengeQuestion: 'Can an unexamined belief ever deserve to guide your life?',
+        userPositionPrompt: DAILY_CHALLENGE_POSITION_PROMPT,
+        opposingAngle: 'Socrates will question whether any belief deserves authority before it survives examination.',
         difficulty: 'Accessible',
         shareHook: 'Socrates made me defend a belief I thought was already settled.',
         educationalNote: 'In the Apology, Socrates presents self-examination as essential to living well.',
@@ -1796,9 +1883,9 @@ const FALLBACKS = {
         debateAngle: 'whether people prefer comforting appearances over difficult truth',
         questionMode: 'concrete_case',
         title: 'Shadows or Truth',
-        challengeQuestion: 'Plato’s cave suggests that people often mistake appearances for reality. Name one thing you trust, then defend why it is truth rather than only a familiar shadow.',
-        userPositionPrompt: 'Choose one belief, image, authority, or desire you trust, and defend why it is real rather than merely familiar.',
-        opposingAngle: 'Plato will argue that what feels familiar may still be only appearance.',
+        challengeQuestion: 'Can familiar appearances be trusted as truth without deeper examination?',
+        userPositionPrompt: DAILY_CHALLENGE_POSITION_PROMPT,
+        opposingAngle: 'Plato will challenge confidence in appearances and demand an account of what makes them true.',
         difficulty: 'Accessible',
         shareHook: 'Plato made me ask whether something I trust is only a shadow.',
         educationalNote: 'In the Republic, Plato uses the cave to show how education turns the soul from appearance toward truth.',
@@ -1816,9 +1903,9 @@ const FALLBACKS = {
         debateAngle: 'whether people become good by what they repeatedly do',
         questionMode: 'concrete_case',
         title: 'Habit Becomes Character',
-        challengeQuestion: 'Aristotle argues that character is formed by repeated action, not intention alone. Name one habit you practice often, then defend what kind of character it is forming in you.',
-        userPositionPrompt: 'Choose one repeated action and explain what it reveals about the person you are becoming.',
-        opposingAngle: 'Aristotle will argue that repeated action reveals character more truthfully than intention does.',
+        challengeQuestion: 'Do repeated actions shape character more than intentions do?',
+        userPositionPrompt: DAILY_CHALLENGE_POSITION_PROMPT,
+        opposingAngle: 'Aristotle will press whether intentions matter morally when repeated actions train character in another direction.',
         difficulty: 'Accessible',
         shareHook: 'Aristotle made me look at my habits as evidence of my character.',
         educationalNote: 'In the Nicomachean Ethics, Aristotle teaches that virtue is built through practice.',
@@ -1836,9 +1923,9 @@ const FALLBACKS = {
         debateAngle: 'whether suffering comes more from events or from judgments about events',
         questionMode: 'self_audit',
         title: 'What Is Yours',
-        challengeQuestion: 'Marcus Aurelius teaches that much of our disturbance comes from judging things outside our control. Name one thing disturbing you, then defend whether it truly belongs to your power.',
-        userPositionPrompt: 'Name something currently disturbing you, and explain whether it is truly within your control.',
-        opposingAngle: 'Marcus Aurelius will argue that your judgment, not the event itself, is where discipline begins.',
+        challengeQuestion: 'Does suffering come more from events or from our judgments about them?',
+        userPositionPrompt: DAILY_CHALLENGE_POSITION_PROMPT,
+        opposingAngle: 'Marcus Aurelius will press whether judgment, rather than the event itself, is where disturbance begins.',
         difficulty: 'Accessible',
         shareHook: 'Marcus Aurelius made me separate what happened from the judgment I placed on it.',
         educationalNote: 'In the Meditations, Marcus returns often to the distinction between events and our judgments about them.',
@@ -1856,9 +1943,9 @@ const FALLBACKS = {
         debateAngle: 'whether moral criticism can hide envy or weakness',
         questionMode: 'moral_trial',
         title: 'Resentment in Disguise',
-        challengeQuestion: 'Nietzsche warns that resentment can disguise itself as moral judgment. Name something you condemn, then defend why your judgment is justice rather than envy or weakness speaking.',
-        userPositionPrompt: 'Name something you judge harshly, and explain why your judgment is honest rather than resentful.',
-        opposingAngle: 'Nietzsche will argue that some moral outrage is resentment wearing noble clothing.',
+        challengeQuestion: 'Can moral condemnation hide resentment, envy, or weakness?',
+        userPositionPrompt: DAILY_CHALLENGE_POSITION_PROMPT,
+        opposingAngle: 'Nietzsche will press whether moral condemnation can disguise resentment while appearing righteous.',
         difficulty: 'Demanding',
         shareHook: 'Nietzsche made me question whether my judgment was justice or resentment.',
         educationalNote: 'In the Genealogy of Morality, Nietzsche examines how resentment can create moral values.',
@@ -1876,9 +1963,9 @@ const FALLBACKS = {
         debateAngle: 'whether what people condemn in others often reveals what they refuse to face in themselves',
         questionMode: 'concrete_case',
         title: 'The Hidden Self',
-        challengeQuestion: 'Jung’s idea of the shadow suggests that what we reject in others may reveal what we refuse to face in ourselves. Name the kind of person who irritates you most, then defend why that reaction says nothing hidden about you.',
-        userPositionPrompt: 'Describe the trait in others that bothers you most, and explain what you believe it says about them rather than you.',
-        opposingAngle: 'Jung will argue that your strongest reaction may reveal an unconscious part of yourself.',
+        challengeQuestion: 'Do our strongest reactions to others reveal hidden parts of ourselves?',
+        userPositionPrompt: DAILY_CHALLENGE_POSITION_PROMPT,
+        opposingAngle: 'Jung will press whether intense reactions to others reveal projection or rejected parts of the self.',
         difficulty: 'Demanding',
         shareHook: 'Jung made me ask whether what bothers me in others is hidden in me.',
         educationalNote: 'For Jung, the shadow is the part of the personality the conscious self rejects or avoids.',
@@ -1898,6 +1985,9 @@ function getFallback(philosopher, dateString, expiresAt = null) {
         philosopherName: philosopher.name,
         theme: f.sourceConcept,
         ...f,
+
+        // The user always chooses their own side.
+        userPositionPrompt: DAILY_CHALLENGE_POSITION_PROMPT,
 
         // Preserve the deliberate difficulty schedule even when fallback is used.
         difficulty: getScheduledDifficulty(dateString),
