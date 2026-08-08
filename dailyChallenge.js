@@ -333,6 +333,19 @@ const VALID_DIFFICULTIES = new Set([
     'Demanding',
 ]);
 
+const DIFFICULTY_GUIDANCE = {
+    Accessible:
+        'Use familiar language and one clear philosophical tension. Avoid specialist vocabulary unless the source concept cannot be expressed accurately without it.',
+    Challenging:
+        'Use a more abstract or counterintuitive tension that requires the user to distinguish between competing reasons, while remaining understandable without prior study.',
+    Demanding:
+        'Expose a subtle assumption, conflict, or implication in the source idea. The question should reward careful philosophical reasoning without becoming obscure or technical.',
+};
+
+function getDifficultyGuidance(difficulty) {
+    return DIFFICULTY_GUIDANCE[difficulty] || DIFFICULTY_GUIDANCE.Accessible;
+}
+
 function getScheduledDifficulty(dateString) {
     const dow = DateTime.fromISO(dateString, { zone: CHICAGO_ZONE }).weekday;
 
@@ -739,10 +752,14 @@ const SOURCE_IDEAS = {
         {
             key: 'aristotle-poetics-catharsis',
             work: 'Poetics',
-            reference: 'Poetics',
-            concept: 'Tragedy and Catharsis',
-            sourceIdea: 'Aristotle presents tragedy as a structured imitation of action that evokes pity and fear.',
-            debateAngle: 'whether art helps people understand suffering better than argument does',
+            reference: 'Poetics, Chapters 6 and 13–14',
+            concept: 'Tragedy, Pity, and Fear',
+            sourceIdea: 'Aristotle connects tragedy with an imitation of serious action that arouses pity and fear and with their catharsis.',
+            debateAngle: 'whether tragedy gains its value partly through how it shapes pity and fear',
+            coreClaim: 'For Aristotle, tragedy is not merely emotional spectacle; pity and fear belong to his account of what tragedy characteristically does.',
+            allowedApplication: 'The question may test whether emotionally powerful art can have an ordered philosophical or ethical function.',
+            avoidOverclaim: 'Do not claim that Aristotle gives one uncontested modern psychological theory of catharsis or that tragedy simply teaches better than argument.',
+            modes: ['take_a_side', 'concrete_case', 'steelman_the_opposite'],
         },
         {
             key: 'aristotle-nicomachean-ethics-choice',
@@ -835,10 +852,14 @@ const SOURCE_IDEAS = {
         {
             key: 'aristotle-poetics-recognition-reversal',
             work: 'Poetics',
-            reference: 'Poetics',
+            reference: 'Poetics, Chapters 10–11 and 16',
             concept: 'Recognition and Reversal',
-            sourceIdea: 'Aristotle sees recognition and reversal as powerful features of tragic understanding.',
-            debateAngle: 'whether painful reversals reveal truths ordinary success hides',
+            sourceIdea: 'Aristotle treats recognition and reversal as especially powerful elements of complex tragic plots.',
+            debateAngle: 'whether discovery and reversal are more powerful when they grow from the plot rather than accident',
+            coreClaim: 'Recognition and reversal are structural features of complex plots, and Aristotle values their close connection to the sequence of action.',
+            allowedApplication: 'The question may ask what makes a reversal or discovery dramatically intelligible or powerful.',
+            avoidOverclaim: 'Do not turn Aristotle’s theory of plot into a general doctrine that personal suffering or failure uniquely reveals truth.',
+            modes: ['take_a_side', 'concrete_case', 'steelman_the_opposite'],
         },
         {
             key: 'aristotle-nicomachean-ethics-contemplation',
@@ -855,10 +876,14 @@ const SOURCE_IDEAS = {
         {
             key: 'aurelius-meditations-control',
             work: 'Meditations',
-            reference: 'Meditations',
-            concept: 'Control and Judgment',
-            sourceIdea: 'Marcus Aurelius repeatedly distinguishes what depends on us from what does not.',
-            debateAngle: 'whether suffering comes more from events or from judgments about events',
+            reference: 'Meditations, especially Books 4 and 8',
+            concept: 'Events and Judgment',
+            sourceIdea: 'Marcus Aurelius repeatedly separates external events from the judgments the mind forms about them.',
+            debateAngle: 'whether disturbance comes more from events or from our judgments about them',
+            coreClaim: 'Marcus repeatedly argues that the ruling mind can examine and revise the judgments it adds to external events.',
+            allowedApplication: 'The question may distinguish what happened from the interpretation, judgment, or assent added by the mind.',
+            avoidOverclaim: 'Do not deny bodily pain, material loss, injustice, or real external harm, and do not imply that every form of suffering is merely a mistaken thought.',
+            modes: ['take_a_side', 'self_audit', 'concrete_case'],
         },
         {
             key: 'aurelius-meditations-impermanence',
@@ -1438,7 +1463,7 @@ function getSourceGuardrails(source) {
             'A modern or personal application is allowed only when it preserves the logical structure of the source idea and does not attribute an unsupported modern opinion to the philosopher.',
         avoidOverclaim:
             source?.avoidOverclaim ||
-            'Do not make the philosopher claim more than the supplied source supports. Do not turn a qualified, exploratory, diagnostic, or contextual idea into an absolute slogan.',
+            'Do not make the philosopher claim more than the supplied source supports. Preserve whether the source is an endorsed claim, an inquiry, a diagnosis, an objection, or a contrast; do not turn exploration into settled doctrine or a qualified idea into an absolute slogan.',
     };
 }
 
@@ -1804,14 +1829,65 @@ function buildRecentQuestionText(recentQuestions) {
         .join('\n');
 }
 
+function getClaudeText(message, label = 'Claude') {
+    if (!message) {
+        throw new Error(`${label} returned no message.`);
+    }
+
+    if (message.stop_reason === 'max_tokens') {
+        throw new Error(`${label} response was truncated at max_tokens.`);
+    }
+
+    if (message.stop_reason === 'refusal') {
+        throw new Error(`${label} refused the request.`);
+    }
+
+    const raw = message.content?.find(block => block.type === 'text')?.text ?? '';
+
+    if (!String(raw).trim()) {
+        throw new Error(`${label} returned no text content.`);
+    }
+
+    return String(raw).trim();
+}
+
+function parseClaudeJson(raw, label = 'Claude') {
+    const cleaned = String(raw || '')
+        .replace(/```json/gi, '')
+        .replace(/```/g, '')
+        .trim();
+
+    try {
+        return JSON.parse(cleaned);
+    } catch (directErr) {
+        const firstBrace = cleaned.indexOf('{');
+        const lastBrace = cleaned.lastIndexOf('}');
+
+        if (firstBrace >= 0 && lastBrace > firstBrace) {
+            const candidate = cleaned.slice(firstBrace, lastBrace + 1);
+
+            try {
+                return JSON.parse(candidate);
+            } catch {
+                // Fall through to the clearer error below.
+            }
+        }
+
+        throw new Error(`${label} returned invalid JSON: ${directErr.message}`);
+    }
+}
+
 async function evaluateChallengeFidelity({
     philosopher,
     source,
+    questionMode,
+    scheduledDifficulty,
     challengeQuestion,
     recentQuestions = [],
 }) {
     const guardrails = getSourceGuardrails(source);
     const recentQuestionText = buildRecentQuestionText(recentQuestions);
+    const difficultyGuidance = getDifficultyGuidance(scheduledDifficulty);
 
     const systemPrompt = `You are the strict historical-philosophy fidelity editor for The Agora.
 
@@ -1823,10 +1899,14 @@ A modern analogy is allowed when it preserves the philosophical structure of the
 
 Reject the question if it:
 - introduces a belief not supported by the supplied source,
-- turns a qualified or contextual idea into an absolute slogan,
+- turns a qualified, exploratory, diagnostic, dialogical, or contextual idea into an absolute settled doctrine,
 - merely sounds philosophical while losing the source concept,
 - attributes a modern opinion to the philosopher,
 - collapses an important distinction identified in Avoid overclaim,
+- uses loaded wording that strongly signals which answer the user is supposed to choose,
+- fails to create a genuinely contestable tension with more than one defensible answer,
+- distorts the selected question mode in order to force the source into an awkward shape,
+- fails the supplied difficulty standard,
 - or is substantially the same philosophical question as a recent Daily Challenge, even if paraphrased with different words.
 
 Return ONLY valid JSON. No markdown, no preamble.`;
@@ -1846,6 +1926,16 @@ Core claim: ${guardrails.coreClaim}
 Allowed application: ${guardrails.allowedApplication}
 Avoid overclaim: ${guardrails.avoidOverclaim}
 
+Selected question mode:
+${questionMode.label}
+Mode instruction: ${questionMode.instruction}
+Good shape: ${questionMode.goodShape}
+Avoid: ${questionMode.avoid}
+
+Scheduled difficulty:
+${scheduledDifficulty}
+Difficulty standard: ${difficultyGuidance}
+
 Proposed challengeQuestion:
 ${challengeQuestion}
 
@@ -1858,26 +1948,56 @@ Return exactly:
   "recognizableConcept": true,
   "philosopherPlausible": true,
   "unsupportedInference": false,
+  "neutralWording": true,
+  "contestable": true,
+  "modeFit": true,
+  "difficultyFit": true,
   "tooSimilarToRecent": false,
   "reason": "One concise sentence explaining the judgment."
 }`;
 
-    const message = await client.messages.create({
-        model: DAILY_CHALLENGE_FIDELITY_MODEL,
-        max_tokens: 450,
-        messages: [{ role: 'user', content: userPrompt }],
-        system: systemPrompt,
-    });
+    let result = null;
+    let reviewerError = null;
 
-    const raw = message.content?.find(b => b.type === 'text')?.text ?? '';
-    const clean = raw.replace(/```json|```/g, '').trim();
-    const result = JSON.parse(clean);
+    for (let reviewerAttempt = 1; reviewerAttempt <= 2; reviewerAttempt++) {
+        try {
+            const message = await client.messages.create({
+                model: DAILY_CHALLENGE_FIDELITY_MODEL,
+                max_tokens: 450,
+                temperature: 0,
+                messages: [{ role: 'user', content: userPrompt }],
+                system: systemPrompt,
+            });
+
+            const raw = getClaudeText(message, 'Daily Challenge fidelity evaluator');
+            result = parseClaudeJson(raw, 'Daily Challenge fidelity evaluator');
+            break;
+        } catch (err) {
+            reviewerError = err;
+            console.warn(
+                `[DailyChallenge] Fidelity evaluator attempt ${reviewerAttempt} failed:`,
+                err.message
+            );
+        }
+    }
+
+    if (!result) {
+        const err = new Error(
+            `Fidelity evaluator unavailable after retry: ${reviewerError?.message || 'unknown error'}`
+        );
+        err.code = 'FIDELITY_EVALUATOR_UNAVAILABLE';
+        throw err;
+    }
 
     const requiredBooleans = [
         'sourceFaithful',
         'recognizableConcept',
         'philosopherPlausible',
         'unsupportedInference',
+        'neutralWording',
+        'contestable',
+        'modeFit',
+        'difficultyFit',
         'tooSimilarToRecent',
     ];
 
@@ -1903,6 +2023,22 @@ Return exactly:
         throw new Error(`Unsupported philosophical inference: ${result.reason || 'question overstates the source.'}`);
     }
 
+    if (!result.neutralWording) {
+        throw new Error(`Question wording is not neutral: ${result.reason || 'wording pushes the user toward one answer.'}`);
+    }
+
+    if (!result.contestable) {
+        throw new Error(`Question is not sufficiently contestable: ${result.reason || 'both sides are not seriously defensible.'}`);
+    }
+
+    if (!result.modeFit) {
+        throw new Error(`Question does not fit the selected mode: ${result.reason || questionMode.label}`);
+    }
+
+    if (!result.difficultyFit) {
+        throw new Error(`Question does not fit ${scheduledDifficulty} difficulty: ${result.reason || difficultyGuidance}`);
+    }
+
     if (result.tooSimilarToRecent) {
         throw new Error(`Question is semantically too similar to a recent challenge: ${result.reason || 'duplicate concept framing.'}`);
     }
@@ -1921,6 +2057,7 @@ async function generateChallenge(
 ) {
     const recentQuestionText = buildRecentQuestionText(recentQuestions);
     const sourceGuardrails = getSourceGuardrails(source);
+    const difficultyGuidance = getDifficultyGuidance(scheduledDifficulty);
 
     const retryInstruction = previousRejectionReason
         ? `
@@ -1944,6 +2081,7 @@ Core rules:
 - Modern relevance is allowed, but the foundation must remain the work, concept, and source idea provided.
 - Treat a modern example as an application of the philosopher's framework, not as evidence that the philosopher literally held a modern opinion.
 - Do not make the source claim broader, more absolute, or more contemporary than the supplied source supports.
+- Preserve the source's stance. If the supplied wording says the philosopher investigates, questions, tests, diagnoses, contrasts, or challenges something, do not rewrite that as a doctrine the philosopher straightforwardly endorses.
 - The challengeQuestion itself must carry the philosophical idea. It must still be source-recognizable if the title, opposingAngle, educationalNote, and notifications are removed.
 - challengeQuestion must be EXACTLY ONE sentence.
 - challengeQuestion must be a direct question ending in "?".
@@ -2007,6 +2145,7 @@ Avoid: ${questionMode.avoid}
 
 Scheduled difficulty:
 ${scheduledDifficulty}
+Difficulty standard: ${difficultyGuidance}
 
 Date:
 ${dateString}
@@ -2056,14 +2195,13 @@ Return this exact JSON with no other text:
     const message = await client.messages.create({
         model: DAILY_CHALLENGE_MODEL,
         max_tokens: 1400,
+        temperature: 0.8,
         messages: [{ role: 'user', content: userPrompt }],
         system: systemPrompt,
     });
 
-    const raw = message.content?.find(b => b.type === 'text')?.text ?? '';
-    const clean = raw.replace(/```json|```/g, '').trim();
-
-    const parsed = JSON.parse(clean);
+    const raw = getClaudeText(message, 'Daily Challenge generator');
+    const parsed = parseClaudeJson(raw, 'Daily Challenge generator');
 
     // The user always chooses their own side. Never let model wording assign a position.
     parsed.userPositionPrompt = DAILY_CHALLENGE_POSITION_PROMPT;
@@ -2139,18 +2277,18 @@ const FALLBACKS = {
     aurelius: {
         sourceKey: 'aurelius-meditations-control',
         sourceWork: 'Meditations',
-        sourceReference: 'Meditations',
-        sourceConcept: 'Control and Judgment',
-        sourceIdea: 'Marcus Aurelius repeatedly distinguishes what depends on us from what does not.',
-        debateAngle: 'whether suffering comes more from events or from judgments about events',
+        sourceReference: 'Meditations, especially Books 4 and 8',
+        sourceConcept: 'Events and Judgment',
+        sourceIdea: 'Marcus Aurelius repeatedly separates external events from the judgments the mind forms about them.',
+        debateAngle: 'whether disturbance comes more from events or from our judgments about them',
         questionMode: 'self_audit',
-        title: 'What Is Yours',
-        challengeQuestion: 'Does suffering come more from events or from our judgments about them?',
+        title: 'Event or Judgment',
+        challengeQuestion: 'Do events disturb us, or the judgments we form about them?',
         userPositionPrompt: DAILY_CHALLENGE_POSITION_PROMPT,
-        opposingAngle: 'Marcus Aurelius will press whether judgment, rather than the event itself, is where disturbance begins.',
+        opposingAngle: 'Marcus Aurelius will press whether the mind adds a judgment that intensifies disturbance beyond the event itself.',
         difficulty: 'Accessible',
-        shareHook: 'Marcus Aurelius made me separate what happened from the judgment I placed on it.',
-        educationalNote: 'In the Meditations, Marcus returns often to the distinction between events and our judgments about them.',
+        shareHook: 'Marcus Aurelius made me separate what happened from the judgment I added to it.',
+        educationalNote: 'In the Meditations, Marcus repeatedly separates external events from the judgments the mind forms about them.',
         morningNotification: 'What troubles you today: the thing itself, or the judgment you have added to it?',
         afternoonNotification: 'You have given power to something outside yourself. Is that power truly its own, or yours?',
         eveningNotification: 'Before the day ends, return what was never yours to control.',
@@ -2407,12 +2545,15 @@ async function insertChallengeIntoDb(db, challenge) {
 }
 
 async function getUpcomingChallengesFromDb(db, limit = 21) {
+    const chicagoToday = DateTime.now().setZone(CHICAGO_ZONE).toISODate();
+
     const result = await db.query(
         `SELECT *
          FROM daily_challenges
+         WHERE challenge_date >= $1::date
          ORDER BY challenge_date ASC
-         LIMIT $1`,
-        [limit]
+         LIMIT $2`,
+        [chicagoToday, limit]
     );
 
     return result.rows.map(rowToChallenge).filter(Boolean);
@@ -2497,6 +2638,8 @@ async function generateChallengeForDate(db, dateString) {
                 const fidelityResult = await evaluateChallengeFidelity({
                     philosopher,
                     source,
+                    questionMode,
+                    scheduledDifficulty,
                     challengeQuestion: challengeData.challengeQuestion,
                     recentQuestions,
                 });
@@ -2527,6 +2670,13 @@ async function generateChallengeForDate(db, dateString) {
                     `[DailyChallenge] Generation attempt ${attempt} failed for ${dateString}:`,
                     attemptErr.message
                 );
+
+                // If the independent reviewer is unavailable, regenerating the
+                // question will not solve the infrastructure problem. Fail closed
+                // to the curated fallback instead of spending another model call.
+                if (attemptErr?.code === 'FIDELITY_EVALUATOR_UNAVAILABLE') {
+                    throw attemptErr;
+                }
             }
         }
 
