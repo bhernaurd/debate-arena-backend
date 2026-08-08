@@ -24,7 +24,11 @@
 //   - One retry happens before fallback if generation or validation fails.
 //   - Fallback difficulty follows the scheduled difficulty curve.
 //   - Stricter validation for difficulty, source grounding, generic wording, and notification mismatch.
-//   - Sonnet model by default, with Railway env override.
+//   - Source grounding is judged from challengeQuestion itself, not rescued by supporting metadata.
+//   - A second model-based fidelity gate rejects unsupported inferences and source drift.
+//   - Lexical + semantic recent-question checks reject close repeats and paraphrased duplicates.
+//   - Optional source guardrails support coreClaim, allowedApplication, and avoidOverclaim.
+//   - Sonnet model by default, with Railway env overrides for generation and fidelity review.
 //   - question_mode is stored in Postgres.
 //   - Daily Challenge questions are exactly one neutral question sentence, max 15 words.
 //   - Users always choose which side they want to defend.
@@ -53,6 +57,12 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 // without editing code.
 const DAILY_CHALLENGE_MODEL =
     process.env.DAILY_CHALLENGE_MODEL || 'claude-sonnet-4-5-20250929';
+
+// A second editorial pass verifies source fidelity and semantic novelty before
+// a generated challenge is accepted. By default it uses the same model, but
+// Railway can override it independently if desired.
+const DAILY_CHALLENGE_FIDELITY_MODEL =
+    process.env.DAILY_CHALLENGE_FIDELITY_MODEL || DAILY_CHALLENGE_MODEL;
 
 const DAILY_CHALLENGE_MAX_WORDS = 15;
 const DAILY_CHALLENGE_POSITION_PROMPT =
@@ -797,6 +807,9 @@ const SOURCE_IDEAS = {
             concept: 'Four Causes',
             sourceIdea: 'Aristotle explains things through material, formal, efficient, and final causes.',
             debateAngle: 'whether understanding something requires knowing its purpose',
+            coreClaim: 'A complete explanation can include what something is for, its end or final cause.',
+            allowedApplication: 'Artifacts such as tools or phones may be used as concrete analogies because their functions help explain what they are.',
+            avoidOverclaim: 'Do not reduce Aristotle to the slogan that everything happens for a reason, and do not treat artifact purpose and natural teleology as identical.',
             modes: ['take_a_side', 'concrete_case', 'self_audit'],
         },
         {
@@ -806,6 +819,9 @@ const SOURCE_IDEAS = {
             concept: 'Nature and Purpose',
             sourceIdea: 'Aristotle often explains natural things by the ends toward which they develop.',
             debateAngle: 'whether human life can be understood without a purpose or end',
+            coreClaim: 'Aristotle explains many natural processes partly through the ends toward which natural beings characteristically develop.',
+            allowedApplication: 'The question may test whether function, development, or an end helps explain a natural being or a human life.',
+            avoidOverclaim: 'Do not claim that every event is destined, that every accident has a purpose, or that Aristotle teaches a modern cosmic everything-happens-for-a-reason doctrine.',
             modes: ['take_a_side', 'self_audit', 'concrete_case'],
         },
         {
@@ -1409,6 +1425,23 @@ function pickQuestionMode(globalHistory, source = null) {
     });
 }
 
+// ─── Source fidelity guardrails ──────────────────────────────────────────────
+
+function getSourceGuardrails(source) {
+    return {
+        coreClaim:
+            source?.coreClaim ||
+            source?.sourceIdea ||
+            'Use only the documented source idea supplied by the backend.',
+        allowedApplication:
+            source?.allowedApplication ||
+            'A modern or personal application is allowed only when it preserves the logical structure of the source idea and does not attribute an unsupported modern opinion to the philosopher.',
+        avoidOverclaim:
+            source?.avoidOverclaim ||
+            'Do not make the philosopher claim more than the supplied source supports. Do not turn a qualified, exploratory, diagnostic, or contextual idea into an absolute slogan.',
+    };
+}
+
 // ─── Philosopher ID normalizer ────────────────────────────────────────────────
 
 function normalizePhilosopherId(raw) {
@@ -1490,26 +1523,80 @@ function importantTerms(text) {
         .filter(term => !STOP_WORDS.has(term));
 }
 
-function hasSourceGrounding(challenge) {
-    const sourceTerms = [
-        ...importantTerms(challenge.sourceConcept),
-        ...importantTerms(challenge.sourceIdea),
-        ...importantTerms(challenge.debateAngle),
-    ];
+function simpleStem(term) {
+    let t = String(term || '').toLowerCase().trim();
 
-    const uniqueTerms = [...new Set(sourceTerms)];
+    if (t.length <= 4) return t;
 
-    if (uniqueTerms.length === 0) return true;
+    if (t.endsWith('ies') && t.length > 5) {
+        return `${t.slice(0, -3)}y`;
+    }
 
-    const combined = normalizeText([
-        challenge.title,
-        challenge.challengeQuestion,
-        challenge.userPositionPrompt,
-        challenge.opposingAngle,
-        challenge.educationalNote,
-    ].join(' '));
+    for (const suffix of ['ingly', 'edly', 'ing', 'ed', 'es', 's']) {
+        if (t.endsWith(suffix) && t.length - suffix.length >= 4) {
+            t = t.slice(0, -suffix.length);
+            break;
+        }
+    }
 
-    return uniqueTerms.some(term => combined.includes(term));
+    return t;
+}
+
+function meaningfulStems(text) {
+    return [...new Set(importantTerms(text).map(simpleStem).filter(Boolean))];
+}
+
+function hasQuestionSourceGrounding(challenge) {
+    const sourceStems = new Set(
+        meaningfulStems([
+            challenge.sourceConcept,
+            challenge.sourceIdea,
+            challenge.debateAngle,
+        ].join(' '))
+    );
+
+    if (sourceStems.size === 0) return true;
+
+    const questionStems = meaningfulStems(challenge.challengeQuestion);
+    return questionStems.some(term => sourceStems.has(term));
+}
+
+function lexicalQuestionSimilarity(a, b) {
+    const aTerms = new Set(meaningfulStems(a));
+    const bTerms = new Set(meaningfulStems(b));
+
+    if (aTerms.size === 0 || bTerms.size === 0) return 0;
+
+    let intersection = 0;
+
+    for (const term of aTerms) {
+        if (bTerms.has(term)) intersection += 1;
+    }
+
+    return (2 * intersection) / (aTerms.size + bTerms.size);
+}
+
+function findLexicallySimilarRecentQuestion(challengeQuestion, recentQuestions = []) {
+    const normalizedCurrent = normalizeText(challengeQuestion);
+
+    for (const item of recentQuestions) {
+        const previous = String(item?.challengeQuestion || '').trim();
+        if (!previous) continue;
+
+        if (normalizeText(previous) === normalizedCurrent) {
+            return { item, score: 1 };
+        }
+
+        const score = lexicalQuestionSimilarity(challengeQuestion, previous);
+
+        // This is deliberately conservative. Semantic paraphrases with little
+        // word overlap are caught by the second editorial model below.
+        if (score >= 0.72) {
+            return { item, score };
+        }
+    }
+
+    return null;
 }
 
 function looksTooGeneric(challenge) {
@@ -1571,7 +1658,7 @@ function assignsUserPosition(text) {
     return assignmentPatterns.some(pattern => question.includes(pattern));
 }
 
-function validateChallenge(challenge) {
+function validateChallenge(challenge, recentQuestions = []) {
     const required = [
         'id',
         'date',
@@ -1653,9 +1740,29 @@ function validateChallenge(challenge) {
         throw new Error('challengeQuestion appears too generic or self-help oriented.');
     }
 
-    if (!hasSourceGrounding(challenge)) {
+    // Lexical overlap is only a first-pass signal. The question itself is checked,
+    // never the title/opposingAngle/educationalNote. A faithful paraphrase may
+    // have little literal overlap, so the semantic fidelity gate below is the
+    // authoritative source-grounding check.
+    if (!hasQuestionSourceGrounding(challenge)) {
+        console.warn(
+            `[DailyChallenge] No direct lexical source overlap in challengeQuestion for ${challenge.sourceConcept}; semantic fidelity gate will decide.`
+        );
+    }
+
+    const similarRecent = findLexicallySimilarRecentQuestion(
+        challengeQuestion,
+        recentQuestions
+    );
+
+    if (similarRecent) {
+        const priorDate =
+            similarRecent.item?.date ||
+            similarRecent.item?.challengeDate ||
+            'a recent date';
+
         throw new Error(
-            `challengeQuestion does not clearly deploy the source concept: ${challenge.sourceConcept}`
+            `challengeQuestion is too similar to the recent question from ${priorDate} (lexical similarity ${similarRecent.score.toFixed(2)}).`
         );
     }
 
@@ -1697,6 +1804,112 @@ function buildRecentQuestionText(recentQuestions) {
         .join('\n');
 }
 
+async function evaluateChallengeFidelity({
+    philosopher,
+    source,
+    challengeQuestion,
+    recentQuestions = [],
+}) {
+    const guardrails = getSourceGuardrails(source);
+    const recentQuestionText = buildRecentQuestionText(recentQuestions);
+
+    const systemPrompt = `You are the strict historical-philosophy fidelity editor for The Agora.
+
+Your job is NOT to make the question more eloquent. Your only job is to decide whether one proposed Daily Challenge is a fair application of the supplied historical source.
+
+Judge the question itself. Do not let the title, educational note, notifications, or other metadata rescue an unrelated question.
+
+A modern analogy is allowed when it preserves the philosophical structure of the source. The question does not need to be something the historical philosopher literally said or literally asked. It must be a question that the philosopher's documented framework can fairly be used to press.
+
+Reject the question if it:
+- introduces a belief not supported by the supplied source,
+- turns a qualified or contextual idea into an absolute slogan,
+- merely sounds philosophical while losing the source concept,
+- attributes a modern opinion to the philosopher,
+- collapses an important distinction identified in Avoid overclaim,
+- or is substantially the same philosophical question as a recent Daily Challenge, even if paraphrased with different words.
+
+Return ONLY valid JSON. No markdown, no preamble.`;
+
+    const userPrompt = `Evaluate this proposed Daily Challenge.
+
+Philosopher:
+${philosopher.name} (${philosopher.era}, ${philosopher.discipline})
+
+Source:
+Work: ${source.work}
+Reference: ${source.reference}
+Concept: ${source.concept}
+Source idea: ${source.sourceIdea}
+Debate angle: ${source.debateAngle}
+Core claim: ${guardrails.coreClaim}
+Allowed application: ${guardrails.allowedApplication}
+Avoid overclaim: ${guardrails.avoidOverclaim}
+
+Proposed challengeQuestion:
+${challengeQuestion}
+
+Recent questions for this philosopher:
+${recentQuestionText}
+
+Return exactly:
+{
+  "sourceFaithful": true,
+  "recognizableConcept": true,
+  "philosopherPlausible": true,
+  "unsupportedInference": false,
+  "tooSimilarToRecent": false,
+  "reason": "One concise sentence explaining the judgment."
+}`;
+
+    const message = await client.messages.create({
+        model: DAILY_CHALLENGE_FIDELITY_MODEL,
+        max_tokens: 450,
+        messages: [{ role: 'user', content: userPrompt }],
+        system: systemPrompt,
+    });
+
+    const raw = message.content?.find(b => b.type === 'text')?.text ?? '';
+    const clean = raw.replace(/```json|```/g, '').trim();
+    const result = JSON.parse(clean);
+
+    const requiredBooleans = [
+        'sourceFaithful',
+        'recognizableConcept',
+        'philosopherPlausible',
+        'unsupportedInference',
+        'tooSimilarToRecent',
+    ];
+
+    for (const field of requiredBooleans) {
+        if (typeof result[field] !== 'boolean') {
+            throw new Error(`Fidelity evaluator returned invalid ${field}.`);
+        }
+    }
+
+    if (!result.sourceFaithful) {
+        throw new Error(`Source fidelity rejected: ${result.reason || 'question does not follow the source idea.'}`);
+    }
+
+    if (!result.recognizableConcept) {
+        throw new Error(`Source concept not recognizable: ${result.reason || source.concept}`);
+    }
+
+    if (!result.philosopherPlausible) {
+        throw new Error(`Philosopher plausibility rejected: ${result.reason || philosopher.name}`);
+    }
+
+    if (result.unsupportedInference) {
+        throw new Error(`Unsupported philosophical inference: ${result.reason || 'question overstates the source.'}`);
+    }
+
+    if (result.tooSimilarToRecent) {
+        throw new Error(`Question is semantically too similar to a recent challenge: ${result.reason || 'duplicate concept framing.'}`);
+    }
+
+    return result;
+}
+
 async function generateChallenge(
     philosopher,
     source,
@@ -1707,6 +1920,7 @@ async function generateChallenge(
     previousRejectionReason = null
 ) {
     const recentQuestionText = buildRecentQuestionText(recentQuestions);
+    const sourceGuardrails = getSourceGuardrails(source);
 
     const retryInstruction = previousRejectionReason
         ? `
@@ -1728,6 +1942,9 @@ Core rules:
 - Do not invent views the philosopher did not hold.
 - Do not make unsupported claims about how the philosopher would react to modern technology, politics, or culture.
 - Modern relevance is allowed, but the foundation must remain the work, concept, and source idea provided.
+- Treat a modern example as an application of the philosopher's framework, not as evidence that the philosopher literally held a modern opinion.
+- Do not make the source claim broader, more absolute, or more contemporary than the supplied source supports.
+- The challengeQuestion itself must carry the philosophical idea. It must still be source-recognizable if the title, opposingAngle, educationalNote, and notifications are removed.
 - challengeQuestion must be EXACTLY ONE sentence.
 - challengeQuestion must be a direct question ending in "?".
 - challengeQuestion must contain NO MORE THAN ${DAILY_CHALLENGE_MAX_WORDS} words.
@@ -1778,6 +1995,9 @@ Reference: ${source.reference}
 Concept: ${source.concept}
 Source idea: ${source.sourceIdea}
 Debate angle: ${source.debateAngle}
+Core claim: ${sourceGuardrails.coreClaim}
+Allowed application: ${sourceGuardrails.allowedApplication}
+Avoid overclaim: ${sourceGuardrails.avoidOverclaim}
 
 Question mode:
 ${questionMode.label}
@@ -1796,6 +2016,8 @@ ${recentQuestionText}
 
 CRITICAL:
 The challengeQuestion must clearly grow out of the source idea above.
+The challengeQuestion must stand on its own as a recognizable application of the source concept; supporting metadata cannot supply the missing philosophical connection.
+The challengeQuestion must preserve the Core claim and obey Allowed application and Avoid overclaim.
 The challengeQuestion must follow the selected question mode WITHOUT assigning a side.
 The challengeQuestion must be exactly one sentence.
 The challengeQuestion must end with a question mark.
@@ -2270,11 +2492,20 @@ async function generateChallengeForDate(db, dateString) {
                 challengeData.difficulty = scheduledDifficulty;
                 challengeData.theme = source.concept;
 
-                validateChallenge(challengeData);
+                validateChallenge(challengeData, recentQuestions);
+
+                const fidelityResult = await evaluateChallengeFidelity({
+                    philosopher,
+                    source,
+                    challengeQuestion: challengeData.challengeQuestion,
+                    recentQuestions,
+                });
 
                 console.log(`[DailyChallenge] Generated challenge for ${dateString}`);
                 console.log(`[DailyChallenge] generationAttempt: ${attempt}`);
                 console.log(`[DailyChallenge] model: ${DAILY_CHALLENGE_MODEL}`);
+                console.log(`[DailyChallenge] fidelityModel: ${DAILY_CHALLENGE_FIDELITY_MODEL}`);
+                console.log(`[DailyChallenge] fidelity: ${fidelityResult.reason || 'PASSED'}`);
                 console.log(`[DailyChallenge] philosopherId: ${challengeData.philosopherId}`);
                 console.log(`[DailyChallenge] philosopherName: ${challengeData.philosopherName}`);
                 console.log(`[DailyChallenge] sourceWork: ${challengeData.sourceWork}`);
