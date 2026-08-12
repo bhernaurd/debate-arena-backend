@@ -10,7 +10,7 @@
 //  question_normalized, theme, difficulty, source, generated_at, used_at).
 //
 // This version:
-// - Supports the Standard Six + Albert Camus + Fyodor Dostoevsky
+// - Supports the Standard Six + Albert Camus + Fyodor Dostoevsky + Søren Kierkegaard
 // - Uses Claude-generated questions, not static fallback questions
 // - Uses Haiku for question generation
 // - Bypasses the Anthropic SDK/fetch layer because Railway was failing with:
@@ -75,6 +75,10 @@ const PHILOSOPHER_ALIASES = {
 
     'dostoevsky': 'Fyodor Dostoevsky',
     'fyodor dostoevsky': 'Fyodor Dostoevsky',
+
+    'kierkegaard': 'Søren Kierkegaard',
+    'søren kierkegaard': 'Søren Kierkegaard',
+    'soren kierkegaard': 'Søren Kierkegaard',
 };
 
 const PHILOSOPHER_THEMES = {
@@ -101,6 +105,9 @@ const PHILOSOPHER_THEMES = {
 
     'Fyodor Dostoevsky':
         'faith, suffering, guilt, freedom, conscience, moral responsibility, redemption, evil, sin, spiritual crisis, the burden of choice, human contradiction, compassion, pride, humility, underground psychology, nihilism, innocent suffering, rebellion against God, salvation through suffering',
+
+    'Søren Kierkegaard':
+        'the single individual, possibility and actuality, choice and responsibility, anxiety and freedom, despair and becoming a self, aesthetic ethical and religious existence, Religiousness A and B, inward appropriation without relativism, faith and the God-man paradox, infinite resignation, repetition, the crowd and the public, commanded neighbor-love, Christendom, admiration versus imitation, risk, commitment, and living what one claims to believe',
 };
 
 const RECENT_EXCLUSION_COUNT = 20;
