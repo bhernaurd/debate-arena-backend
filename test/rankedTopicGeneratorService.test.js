@@ -131,6 +131,11 @@ test(
                         response(
                             'Can a person remain free while surrendering every difficult choice to others?'
                         ),
+                now:
+                    () =>
+                        new Date(
+                            '2026-08-11T23:59:59-04:00'
+                        ),
             });
 
         await assert.rejects(
@@ -174,7 +179,7 @@ test(
                 now:
                     () =>
                         new Date(
-                            '2026-08-21T00:00:00-04:00'
+                            '2026-08-12T00:00:00-04:00'
                         ),
             });
 
