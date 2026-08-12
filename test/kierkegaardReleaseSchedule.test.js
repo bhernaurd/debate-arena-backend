@@ -6,57 +6,72 @@ import {
     rankedTopicGeneratorConstants,
 } from '../lib/rankedTopicGeneratorService.js';
 
-const migration = readFileSync(
+const baseMigration = readFileSync(
     new URL('../migrations/016_kierkegaard_release.sql', import.meta.url),
     'utf8'
 );
 
+const unlockMigration = readFileSync(
+    new URL('../migrations/017_kierkegaard_unlock_now.sql', import.meta.url),
+    'utf8'
+);
+
 test(
-    'Kierkegaard release migration matches the approved August and September schedule',
+    'Kierkegaard release migrations unlock Pro access on August 12 while preserving the September Open Access Weekend',
     () => {
         assert.match(
-            migration,
+            baseMigration,
             /'kierkegaard'/
         );
 
         assert.match(
-            migration,
+            baseMigration,
             /2026-08-21 04:00:00\+00/
         );
 
         assert.match(
-            migration,
+            unlockMigration,
+            /2026-08-12 04:00:00\+00/
+        );
+
+        assert.match(
+            unlockMigration,
+            /WHERE philosopher_id = 'kierkegaard'/
+        );
+
+        assert.match(
+            baseMigration,
             /2026-09-11 04:00:00\+00/
         );
 
         assert.match(
-            migration,
+            baseMigration,
             /\n\s*72,\n\s*7,\n\s*3,/
         );
 
         assert.match(
-            migration,
+            baseMigration,
             /'America\/New_York'/
         );
 
         assert.match(
-            migration,
+            baseMigration,
             /'3\.8'/
         );
 
         assert.match(
-            migration,
+            baseMigration,
             /philosopher-prompts-v2-kierkegaard/
         );
 
         assert.match(
-            migration,
+            baseMigration,
             /ranked-topic-v2-kierkegaard/
         );
 
 
         assert.match(
-            migration,
+            baseMigration,
             new RegExp(
                 rankedTopicGeneratorConstants.defaultGeneratorVersion
                     .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -65,27 +80,38 @@ test(
 
 
         assert.match(
-            migration,
+            baseMigration,
             /account_ranked_start_requests_voiced_topic_version_chk/
         );
 
         assert.match(
-            migration,
+            baseMigration,
             /account_ranked_debates_voiced_topic_version_chk/
         );
 
         assert.match(
-            migration,
+            baseMigration,
             /ranked-topic-v2-philosopher-voiced/
         );
 
         assert.doesNotMatch(
-            migration,
+            baseMigration,
             /^\s*BEGIN\s*;/im
         );
 
         assert.doesNotMatch(
-            migration,
+            baseMigration,
+            /^\s*COMMIT\s*;/im
+        );
+
+
+        assert.doesNotMatch(
+            unlockMigration,
+            /^\s*BEGIN\s*;/im
+        );
+
+        assert.doesNotMatch(
+            unlockMigration,
             /^\s*COMMIT\s*;/im
         );
     }
