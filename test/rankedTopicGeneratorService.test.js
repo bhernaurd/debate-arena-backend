@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
     RankedTopicGeneratorError,
     createRankedTopicGeneratorService,
+    rankedTopicGeneratorConstants,
 } from '../lib/rankedTopicGeneratorService.js';
 
 function response(
@@ -25,6 +26,17 @@ function response(
         ],
     };
 }
+
+
+test(
+    'uses the Kierkegaard topic bundle version by default',
+    () => {
+        assert.equal(
+            rankedTopicGeneratorConstants.defaultGeneratorVersion,
+            'ranked-topic-v2-kierkegaard'
+        );
+    }
+);
 
 test(
     'generates one canonical Ranked topic with deterministic metadata',
@@ -110,7 +122,7 @@ test(
 );
 
 test(
-    'requires canonical philosopher ids and excludes Coming Soon philosophers',
+    'requires an eligible canonical philosopher id and release-gates Kierkegaard',
     async () => {
         const service =
             createRankedTopicGeneratorService({
@@ -148,6 +160,40 @@ test(
                     RankedTopicGeneratorError &&
                 error.code ===
                     'invalid_ranked_philosopher_id'
+        );
+
+        const releasedService =
+            createRankedTopicGeneratorService({
+                messageClient:
+                    async () =>
+                        response(
+                            'Should public approval determine which commitments deserve your loyalty?',
+                            'the individual and the crowd',
+                            'When you stand alone before a choice, will you answer for it yourself rather than borrow the public’s verdict?'
+                        ),
+                now:
+                    () =>
+                        new Date(
+                            '2026-08-21T00:00:00-04:00'
+                        ),
+            });
+
+        const kierkegaardTopic =
+            await releasedService.generateTopic({
+                philosopherId:
+                    'kierkegaard',
+                debateMode:
+                    'balanced',
+            });
+
+        assert.equal(
+            kierkegaardTopic.philosopherId,
+            'kierkegaard'
+        );
+
+        assert.match(
+            kierkegaardTopic.openingQuestion,
+            /single individual|crowd|public/i
         );
     }
 );
