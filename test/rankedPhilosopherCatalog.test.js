@@ -119,7 +119,7 @@ test(
 );
 
 test(
-    'keeps Kierkegaard canonical while release-gating new Ranked starts until August 21',
+    'keeps Kierkegaard canonical while release-gating new Ranked starts until August 12',
     () => {
         assert.equal(
             findRankedPhilosopher(
@@ -131,7 +131,7 @@ test(
         assert.equal(
             isRankedPhilosopherID(
                 'kierkegaard',
-                new Date('2026-08-20T23:59:59-04:00')
+                new Date('2026-08-11T23:59:59-04:00')
             ),
             false
         );
@@ -139,14 +139,14 @@ test(
         assert.equal(
             isRankedPhilosopherID(
                 'kierkegaard',
-                new Date('2026-08-21T00:00:00-04:00')
+                new Date('2026-08-12T00:00:00-04:00')
             ),
             true
         );
 
         assert.equal(
             listEligibleRankedPhilosophers(
-                new Date('2026-08-21T00:00:00-04:00')
+                new Date('2026-08-12T00:00:00-04:00')
             ).some(
                 (philosopher) =>
                     philosopher.id === 'kierkegaard'
