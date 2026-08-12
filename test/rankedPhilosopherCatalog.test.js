@@ -20,17 +20,18 @@ const EXPECTED = [
     ['aurelius', 'Marcus Aurelius'],
     ['camus', 'Albert Camus'],
     ['dostoevsky', 'Fyodor Dostoevsky'],
+    ['kierkegaard', 'Søren Kierkegaard'],
 ];
 
 test(
-    'contains the eight iOS-selectable Ranked philosophers',
+    'contains the nine canonical Ranked philosophers',
     () => {
         const philosophers =
             listRankedPhilosophers();
 
         assert.equal(
             philosophers.length,
-            8
+            9
         );
 
         assert.deepEqual(
@@ -45,7 +46,7 @@ test(
 
         assert.equal(
             rankedPhilosopherCatalogConstants.count,
-            8
+            9
         );
 
         assert.deepEqual(
@@ -118,20 +119,106 @@ test(
 );
 
 test(
-    'excludes Coming Soon philosophers',
+    'keeps Kierkegaard canonical while release-gating new Ranked starts until August 21',
     () => {
         assert.equal(
             findRankedPhilosopher(
                 'kierkegaard'
-            ),
-            null
+            )?.name,
+            'Søren Kierkegaard'
         );
 
         assert.equal(
             isRankedPhilosopherID(
-                'kierkegaard'
+                'kierkegaard',
+                new Date('2026-08-20T23:59:59-04:00')
             ),
             false
+        );
+
+        assert.equal(
+            isRankedPhilosopherID(
+                'kierkegaard',
+                new Date('2026-08-21T00:00:00-04:00')
+            ),
+            true
+        );
+
+        assert.equal(
+            listEligibleRankedPhilosophers(
+                new Date('2026-08-21T00:00:00-04:00')
+            ).some(
+                (philosopher) =>
+                    philosopher.id === 'kierkegaard'
+            ),
+            true
+        );
+    }
+);
+
+test(
+    'Kierkegaard carries a server-owned identity and scoring lens',
+    async () => {
+        const {
+            findRankedPhilosopherPrompt,
+        } = await import(
+            '../lib/rankedPhilosopherPrompts.js'
+        );
+
+        const prompt =
+            findRankedPhilosopherPrompt(
+                'kierkegaard'
+            );
+
+        assert.equal(
+            prompt?.name,
+            'Søren Kierkegaard'
+        );
+
+        assert.match(
+            prompt?.systemPrompt ?? '',
+            /single individual/i
+        );
+
+        assert.match(
+            prompt?.systemPrompt ?? '',
+            /dizziness of freedom/i
+        );
+
+        assert.match(
+            prompt?.systemPrompt ?? '',
+            /not relativism/i
+        );
+
+        assert.match(
+            prompt?.systemPrompt ?? '',
+            /Religiousness A and Religiousness B/i
+        );
+
+        assert.match(
+            prompt?.systemPrompt ?? '',
+            /Johannes de Silentio.*outside faith/is
+        );
+
+        assert.match(
+            prompt?.systemPrompt ?? '',
+            /formal logical contradiction/i
+        );
+
+
+        assert.match(
+            prompt?.systemPrompt ?? '',
+            /teleological suspension of the ethical/i
+        );
+
+        assert.match(
+            prompt?.systemPrompt ?? '',
+            /Score argumentative quality, not agreement/i
+        );
+
+        assert.match(
+            prompt?.systemPrompt ?? '',
+            /KIERKEGAARD SCORING LENS/
         );
     }
 );
