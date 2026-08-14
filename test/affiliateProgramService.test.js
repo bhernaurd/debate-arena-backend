@@ -6,8 +6,8 @@ import {
   calculateBasePriceCommission,
   hashPartnerToken,
   normalizeAffiliateCode,
-} from './lib/affiliateProgramService.js';
-import { renderPartnerDashboardPage } from './affiliateRoutes.js';
+} from '../lib/affiliateProgramService.js';
+import { renderPartnerDashboardPage } from '../affiliateRoutes.js';
 
 test('normalizes affiliate codes without fuzzy matching', () => {
   assert.equal(normalizeAffiliateCode(' maxagora '), 'MAXAGORA');
@@ -68,7 +68,7 @@ test('partner dashboard contains Overview and Breakdown tabs', () => {
 });
 
 test('classifies only unambiguous Apple renewal/recovery metrics as automatic base-price commission', async () => {
-  const { classifyAppleMetricForBasePrice } = await import('./lib/affiliateProgramService.js');
+  const { classifyAppleMetricForBasePrice } = await import('../lib/affiliateProgramService.js');
   assert.deepEqual(classifyAppleMetricForBasePrice('full_price_renewals'), {
     action: 'commissionable',
     subscriptionPricing: 'Full Price',
@@ -83,7 +83,7 @@ test('classifies only unambiguous Apple renewal/recovery metrics as automatic ba
 });
 
 test('processing-date comparison rejects older Apple instances', async () => {
-  const { compareProcessingDates } = await import('./lib/affiliateProgramService.js');
+  const { compareProcessingDates } = await import('../lib/affiliateProgramService.js');
   assert.equal(compareProcessingDates('2026-09-03', '2026-09-02'), 1);
   assert.equal(compareProcessingDates('2026-09-02', '2026-09-03'), -1);
   assert.equal(compareProcessingDates('2026-09-03', '2026-09-03'), 0);
@@ -98,7 +98,7 @@ test('partner dashboard does not expose a creator-name browser or misleading com
 
 
 test('money-impacting ambiguous Apple events are explicitly classified for review', async () => {
-  const { classifyAppleMetricForBasePrice } = await import('./lib/affiliateProgramService.js');
+  const { classifyAppleMetricForBasePrice } = await import('../lib/affiliateProgramService.js');
   for (const key of [
     'full_price_from_paid_offer',
     'refunds_from_full_price',
@@ -113,7 +113,7 @@ test('money-impacting ambiguous Apple events are explicitly classified for revie
 
 
 test('service rejects string booleans instead of treating "false" as true', async () => {
-  const { createAffiliateProgramService } = await import('./lib/affiliateProgramService.js');
+  const { createAffiliateProgramService } = await import('../lib/affiliateProgramService.js');
   const fakePool = { query: async () => { throw new Error('database should not be reached'); } };
   const service = createAffiliateProgramService({ pool: fakePool, appAppleId: '6762416967' });
 
