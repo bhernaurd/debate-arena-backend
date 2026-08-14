@@ -720,9 +720,25 @@ export function createAffiliateRouter(pool, options = {}) {
       return res.status(201).json({ success: true, ...created });
     } catch (error) {
       if (error?.code === '23505') {
+        const constraint = String(error?.constraint || '');
         error.statusCode = 409;
-        error.code = 'affiliate_code_already_exists';
-        error.message = 'That affiliate code already exists.';
+
+        if (constraint === 'affiliates_offer_identifier_unique_idx') {
+          error.code = 'affiliate_offer_identifier_already_exists';
+          error.message =
+            'That App Store Connect offer reference is already assigned to another affiliate.';
+        } else if (
+          constraint === 'affiliates_normalized_code_unique' ||
+          constraint === 'affiliates_normalized_code_unique_idx' ||
+          constraint === 'affiliates_custom_code_ci_uidx'
+        ) {
+          error.code = 'affiliate_code_already_exists';
+          error.message = 'That affiliate code already exists.';
+        } else {
+          error.code = 'affiliate_unique_conflict';
+          error.message =
+            'That affiliate conflicts with an existing unique affiliate record.';
+        }
       }
       return jsonError(res, error);
     }
