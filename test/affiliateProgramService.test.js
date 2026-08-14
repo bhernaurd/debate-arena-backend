@@ -140,3 +140,32 @@ test('service rejects string booleans instead of treating "false" as true', asyn
     (error) => error?.code === 'invalid_boolean'
   );
 });
+
+
+test('production affiliate creation requires an Apple offer reference name before database writes', async () => {
+  const { createAffiliateProgramService } = await import('../lib/affiliateProgramService.js');
+  const fakePool = {
+    query: async () => { throw new Error('database should not be reached'); },
+    connect: async () => { throw new Error('database should not be reached'); },
+  };
+  const service = createAffiliateProgramService({
+    pool: fakePool,
+    appAppleId: '6762416967',
+    tokenEncryptionKey: Buffer.alloc(32, 7).toString('base64'),
+  });
+
+  await assert.rejects(
+    service.createAffiliate({
+      internalName: 'Max',
+      displayName: 'Max',
+      customCode: 'MAXAGORA',
+      affiliateSince: '2026-08-14',
+      commissionRate: '0.5',
+      commissionBasis: 'base_price',
+      codeStatus: 'active',
+      payoutCurrency: 'USD',
+      isTest: false,
+    }),
+    (error) => error?.code === 'affiliate_offer_identifier_required'
+  );
+});
