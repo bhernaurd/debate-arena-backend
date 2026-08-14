@@ -90,11 +90,40 @@ test('processing-date comparison rejects older Apple instances', async () => {
   assert.equal(compareProcessingDates('2026-09-03', '2026-09-03'), 0);
 });
 
-test('partner dashboard does not expose a creator-name browser or misleading commission-earning label', () => {
+test('partner dashboard exposes the approved affiliate metrics without a creator-name browser', () => {
   const html = renderPartnerDashboardPage('abcdefghijklmnopqrstuvwxyz0123456789ABCDE');
   assert.doesNotMatch(html, /Search creators/i);
-  assert.doesNotMatch(html, /Commission-Earning/i);
-  assert.match(html, /Active Paid/);
+  assert.match(html, /Commission-Earning Subscribers/);
+  assert.match(html, /Eligible Revenue Generated/);
+  assert.match(html, /Lifetime Commission Earned/);
+  assert.match(html, /Lifetime Paid/);
+  assert.match(html, /Expired/);
+  assert.match(html, /Anonymous Subscriber Activity/);
+  assert.match(html, /Promotional \$0\.99 payments are excluded from commission/);
+});
+
+
+test('dashboard service derives anonymous subscriber state from verified Apple subscription chains', async () => {
+  const source = await readFile(
+    new URL('../lib/affiliateProgramService.js', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(source, /FROM affiliate_subscription_attributions a/);
+  assert.match(source, /LEFT JOIN subscription_entitlements e/);
+  assert.match(source, /LEFT JOIN app_store_transactions t/);
+  assert.match(source, /affiliate\.is_test \? 'Sandbox' : 'Production'/);
+  assert.match(source, /commissionEarningSubscribers/);
+  assert.match(source, /anonymousSubscriberActivity/);
+  assert.match(source, /subscriberAlias/);
+  assert.match(source, /offer_type::text/);
+  assert.match(source, /expires_date > NOW\(\)/);
+  assert.match(source, /grace_period_expires_date > NOW\(\)/);
+  assert.match(source, /slice\(0, 12\)/);
+  assert.doesNotMatch(
+    renderPartnerDashboardPage('abcdefghijklmnopqrstuvwxyz0123456789ABCDE'),
+    /original_transaction_id|app_account_token|user_id/i
+  );
 });
 
 
