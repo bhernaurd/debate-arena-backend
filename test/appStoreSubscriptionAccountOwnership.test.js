@@ -175,3 +175,56 @@ test('App Store Server Notifications remain registered and do not require an Ago
         /optionalBearerAccessToken\(req\)/
     );
 });
+
+
+test('affiliate attribution is isolated by a savepoint so it cannot deny Apple-authoritative subscription access', () => {
+    assert.match(
+        routesSource,
+        /async function observeAffiliateAttributionSafely[\s\S]*?SAVEPOINT[\s\S]*?observeVerifiedTransaction[\s\S]*?ROLLBACK TO SAVEPOINT/
+    );
+
+    const persistStart = positionOf(
+        routesSource,
+        'async function persistVerifiedSnapshot(client, {'
+    );
+    const persistSource = routesSource.slice(persistStart);
+    const transactionUpsert = positionOf(
+        persistSource,
+        'const storedTransaction = await upsertTransaction(client, {'
+    );
+    const entitlementUpsert = positionOf(
+        persistSource,
+        'const entitlement = await upsertEntitlement(client, {'
+    );
+    const eventInsert = positionOf(
+        persistSource,
+        'await insertSubscriptionEvent(client, {'
+    );
+    const affiliateObserve = positionOf(
+        persistSource,
+        'await observeAffiliateAttributionSafely('
+    );
+
+    assert.ok(transactionUpsert < entitlementUpsert);
+    assert.ok(entitlementUpsert < eventInsert);
+    assert.ok(eventInsert < affiliateObserve);
+});
+
+test('server constructs, injects, and can emergency-disable affiliate subscription attribution', () => {
+    assert.match(
+        serverSource,
+        /createAffiliateSubscriptionAttributionService/
+    );
+    assert.match(
+        serverSource,
+        /AFFILIATE_SUBSCRIPTION_ATTRIBUTION_ENABLED/
+    );
+    assert.match(
+        serverSource,
+        /affiliateSubscriptionAttributionEnabled[\s\S]*?createAffiliateSubscriptionAttributionService\(\{[\s\S]*?pool/
+    );
+    assert.match(
+        serverSource,
+        /createAppStoreSubscriptionRouter\(pool, \{[\s\S]*?affiliateSubscriptionAttributionService/
+    );
+});
