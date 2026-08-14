@@ -28,8 +28,13 @@ test('admin affiliate creation distinguishes duplicate creator codes from duplic
 test('partner dashboard stays read-only and presents anonymous subscriber activity', () => {
   assert.match(source, /Anonymous Subscriber Activity/);
   assert.match(source, /Subscriber<\/th>/);
-  assert.match(source, /Commission-Earning Subscribers/);
+  assert.match(source, /Current Subscribers/);
+  assert.match(source, /Promo Active/);
+  assert.match(source, /Paid \+ Renewing/);
+  assert.match(source, /Paid \+ Canceling/);
+  assert.match(source, /Current State<\/th>/);
   assert.match(source, /Eligible Revenue Generated/);
+  assert.doesNotMatch(source, /Commission-Earning Subscribers/);
   assert.doesNotMatch(source, /Search creators/i);
   assert.doesNotMatch(source, /document\.cookie/);
 });
