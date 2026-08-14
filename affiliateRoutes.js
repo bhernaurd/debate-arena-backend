@@ -310,7 +310,72 @@ function renderPartnerDashboardPage(token) {
     .row:last-child { border-bottom: 0; }
     .row .name { color: #d7d1df; }
     .row .number { font-variant-numeric: tabular-nums; font-weight: 650; text-align: right; }
-    .range-bar { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 14px; }
+    .period-controls {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .month-navigator {
+      display: grid;
+      grid-template-columns: 38px minmax(188px, auto) 38px;
+      align-items: stretch;
+      border: 1px solid rgba(255,255,255,.075);
+      border-radius: 13px;
+      background: rgba(255,255,255,.018);
+      overflow: hidden;
+    }
+    .month-navigator.aggregate-mode { opacity: .56; }
+    .month-arrow {
+      border: 0;
+      background: transparent;
+      color: #d9d2df;
+      cursor: pointer;
+      font-size: 19px;
+      line-height: 1;
+      transition: background .15s ease, color .15s ease, opacity .15s ease;
+    }
+    .month-arrow:hover:not(:disabled),
+    .month-arrow:focus-visible:not(:disabled) {
+      background: rgba(216,171,82,.08);
+      color: var(--gold-soft);
+      outline: none;
+    }
+    .month-arrow:disabled { opacity: .22; cursor: default; }
+    .month-selector {
+      position: relative;
+      min-width: 188px;
+      padding: 8px 18px;
+      border-left: 1px solid rgba(255,255,255,.06);
+      border-right: 1px solid rgba(255,255,255,.06);
+      text-align: center;
+      cursor: pointer;
+    }
+    .month-title {
+      color: #f0ebf2;
+      font-weight: 700;
+      font-size: 14px;
+      line-height: 1.25;
+    }
+    .month-status {
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 10px;
+      line-height: 1.2;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+    .month-input {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      opacity: 0;
+      cursor: pointer;
+    }
+    .range-bar { display: flex; flex-wrap: wrap; gap: 7px; }
     .range {
       border: 1px solid rgba(255,255,255,.07);
       background: rgba(255,255,255,.02);
@@ -381,6 +446,11 @@ function renderPartnerDashboardPage(token) {
       .tabs { width: 100%; }
       .tab { flex: 1; }
       .payout-grid { grid-template-columns: repeat(2, 1fr); }
+      .period-controls { align-items: stretch; }
+      .month-navigator { width: 100%; grid-template-columns: 40px minmax(0, 1fr) 40px; }
+      .month-selector { min-width: 0; }
+      .range-bar { width: 100%; }
+      .range { flex: 1; text-align: center; }
       .info-button { width: 20px; height: 20px; min-width: 20px; }
     }
   </style>
@@ -607,12 +677,21 @@ function renderPartnerDashboardPage(token) {
     </section>
 
     <section id="breakdownTab" class="hidden">
-      <div class="range-bar">
-        <button class="range active" data-range="this_month" type="button">This Month</button>
-        <button class="range" data-range="last_month" type="button">Last Month</button>
-        <button class="range" data-range="last_3_months" type="button">Last 3 Months</button>
-        <button class="range" data-range="ytd" type="button">YTD</button>
-        <button class="range" data-range="lifetime" type="button">Lifetime</button>
+      <div class="period-controls">
+        <div class="month-navigator" aria-label="Affiliate payout month">
+          <button class="month-arrow" id="previousMonth" type="button" aria-label="Previous month">‹</button>
+          <div class="month-selector" title="Choose a month">
+            <div class="month-title" id="selectedMonthLabel">Loading month…</div>
+            <div class="month-status" id="selectedMonthStatus">In Progress</div>
+            <input class="month-input" id="monthPicker" type="month" aria-label="Choose dashboard month">
+          </div>
+          <button class="month-arrow" id="nextMonth" type="button" aria-label="Next month">›</button>
+        </div>
+
+        <div class="range-bar" aria-label="Broader dashboard ranges">
+          <button class="range" data-range="ytd" type="button">YTD</button>
+          <button class="range" data-range="lifetime" type="button">Lifetime</button>
+        </div>
       </div>
 
       <div class="split">
@@ -679,6 +758,7 @@ function renderPartnerDashboardPage(token) {
   <script>
     const partnerToken = ${JSON.stringify(safeToken)};
     let currentRange = 'this_month';
+    let currentMonthKey = null;
     let currentData = null;
     const infoTooltip = document.getElementById('infoTooltip');
     const infoTooltipTitle = document.getElementById('infoTooltipTitle');
@@ -827,6 +907,88 @@ function renderPartnerDashboardPage(token) {
       return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
     }
 
+    function validMonthKey(value) {
+      return /^\d{4}-\d{2}$/.test(String(value || ''));
+    }
+
+    function monthKeyLabel(value) {
+      if (!validMonthKey(value)) return '';
+      const [year, month] = value.split('-').map(Number);
+      const date = new Date(Date.UTC(year, month - 1, 1, 12, 0, 0));
+      return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric', timeZone: 'UTC' });
+    }
+
+    function shiftMonthKey(value, delta) {
+      if (!validMonthKey(value)) return null;
+      const [year, month] = value.split('-').map(Number);
+      const date = new Date(Date.UTC(year, month - 1 + delta, 1, 12, 0, 0));
+      return String(date.getUTCFullYear()).padStart(4, '0') + '-' + String(date.getUTCMonth() + 1).padStart(2, '0');
+    }
+
+    function selectedMonthStatus(data) {
+      const range = data?.range || {};
+      if (range.kind !== 'month') return 'Monthly View';
+      if (range.isCurrentMonth) return 'In Progress';
+
+      const monthKey = range.monthKey;
+      const history = Array.isArray(data?.breakdown?.payouts?.history)
+        ? data.breakdown.payouts.history
+        : [];
+      const payout = history.find(item => String(item?.payout_period || '').slice(0, 7) === monthKey);
+
+      if (!payout) {
+        const referrals = Number(data?.breakdown?.subscriberMetrics?.newReferrals || 0);
+        return referrals === 0 ? 'No Activity' : 'Awaiting Finalization';
+      }
+      if (payout.status === 'paid') {
+        return Number(payout.amount_due || 0) > 0 ? 'Paid' : 'Finalized';
+      }
+      if (payout.status === 'partially_paid') return 'Partially Paid';
+      if (payout.status === 'ready_to_pay') return 'Finalized';
+      if (payout.status === 'open') return 'In Review';
+      return String(payout.status || 'Awaiting Finalization').replaceAll('_', ' ');
+    }
+
+    function updatePeriodControls(data) {
+      const range = data?.range || {};
+      const navigator = document.querySelector('.month-navigator');
+      const picker = document.getElementById('monthPicker');
+      const previous = document.getElementById('previousMonth');
+      const next = document.getElementById('nextMonth');
+      const monthly = range.kind === 'month';
+
+      if (monthly && validMonthKey(range.monthKey)) {
+        currentMonthKey = range.monthKey;
+      } else if (!currentMonthKey && validMonthKey(range.currentMonthKey)) {
+        currentMonthKey = range.currentMonthKey;
+      }
+
+      const maxMonth = validMonthKey(range.currentMonthKey)
+        ? range.currentMonthKey
+        : currentMonthKey;
+      // Allow partners to inspect earlier calendar months as explicit zero/no-activity
+      // periods. This keeps monthly accounting navigation predictable even before
+      // the affiliate's first attributed subscriber or payout record exists.
+      const minMonth = '2000-01';
+
+      picker.min = minMonth;
+      picker.max = maxMonth || '';
+      picker.value = currentMonthKey || maxMonth || '';
+
+      text('selectedMonthLabel', monthly
+        ? (range.label || monthKeyLabel(currentMonthKey))
+        : monthKeyLabel(currentMonthKey));
+      text('selectedMonthStatus', selectedMonthStatus(data));
+
+      navigator.classList.toggle('aggregate-mode', !monthly);
+      previous.disabled = !currentMonthKey || currentMonthKey <= minMonth;
+      next.disabled = !currentMonthKey || !maxMonth || currentMonthKey >= maxMonth;
+
+      document.querySelectorAll('.range').forEach(button => {
+        button.classList.toggle('active', button.dataset.range === range.key);
+      });
+    }
+
     function dateLabel(value, withTime = false) {
       if (!value) return '—';
       const date = new Date(value);
@@ -904,6 +1066,9 @@ function renderPartnerDashboardPage(token) {
       const s = b.subscriberMetrics || {};
       const p = b.performance || {};
       const payouts = b.payouts || {};
+
+      currentRange = data.range?.key || currentRange;
+      updatePeriodControls(data);
 
       text('partnerName', data.affiliate.displayName);
       text('partnerCode', data.affiliate.customCode);
@@ -1066,10 +1231,35 @@ function renderPartnerDashboardPage(token) {
       });
     });
 
+    async function loadMonth(monthKey) {
+      if (!validMonthKey(monthKey)) return;
+      currentMonthKey = monthKey;
+      currentRange = 'month:' + monthKey;
+      document.querySelectorAll('.range').forEach(item => item.classList.remove('active'));
+      await load(currentRange);
+    }
+
+    document.getElementById('previousMonth').addEventListener('click', async () => {
+      const target = shiftMonthKey(currentMonthKey, -1);
+      if (target) await loadMonth(target);
+    });
+
+    document.getElementById('nextMonth').addEventListener('click', async () => {
+      const target = shiftMonthKey(currentMonthKey, 1);
+      const maxMonth = currentData?.range?.currentMonthKey;
+      if (target && (!validMonthKey(maxMonth) || target <= maxMonth)) {
+        await loadMonth(target);
+      }
+    });
+
+    document.getElementById('monthPicker').addEventListener('change', async event => {
+      const target = String(event.target.value || '');
+      if (validMonthKey(target)) await loadMonth(target);
+    });
+
     document.querySelectorAll('.range').forEach(button => {
       button.addEventListener('click', async () => {
         currentRange = button.dataset.range;
-        document.querySelectorAll('.range').forEach(item => item.classList.toggle('active', item === button));
         await load(currentRange);
       });
     });
