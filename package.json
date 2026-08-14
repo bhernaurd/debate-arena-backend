@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "check": "node --check server.js && node --check aiJobs.js && node --check expandedAgoraAccess.js && node --check affiliateRoutes.js && node --check lib/affiliateProgramService.js && node --check lib/appleAffiliateAnalyticsParser.js && node --check scripts/createAffiliate.js && node --check scripts/probeAffiliateAppleAnalytics.js && node --check scripts/importAffiliateAppleAnalytics.js && node --check scripts/calculateAffiliatePayout.js && node --check scripts/finalizeAffiliatePayouts.js && node --check scripts/runMigrations.js",
+    "check": "node --check server.js && node --check aiJobs.js && node --check expandedAgoraAccess.js && node --check affiliateRoutes.js && node --check lib/affiliateProgramService.js && node --check lib/appleAffiliateAnalyticsParser.js && node --check scripts/createAffiliate.js && node --check scripts/probeAffiliateAppleAnalytics.js && node --check scripts/importAffiliateAppleAnalytics.js && node --check scripts/calculateAffiliatePayout.js && node --check scripts/finalizeAffiliatePayouts.js && node --check scripts/runMigrations.js && node --check lib/affiliateSubscriptionAttributionService.js && node --check scripts/reconcileAffiliateSubscriptionAttributions.js",
     "test": "node --test",
     "migrate": "node scripts/runMigrations.js",
     "daily-analytics-report": "node scripts/dailyAnalyticsReport.js",
@@ -16,7 +16,8 @@
     "affiliate:apple-probe": "node scripts/probeAffiliateAppleAnalytics.js",
     "affiliate:apple-import": "node scripts/importAffiliateAppleAnalytics.js",
     "affiliate:payout": "node scripts/calculateAffiliatePayout.js",
-    "affiliate:payout-all": "node scripts/finalizeAffiliatePayouts.js"
+    "affiliate:payout-all": "node scripts/finalizeAffiliatePayouts.js",
+    "affiliate:reconcile-attribution": "node scripts/reconcileAffiliateSubscriptionAttributions.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
