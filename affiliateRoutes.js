@@ -570,11 +570,11 @@ function renderPartnerDashboardPage(token) {
             )}</span><span class="number" id="promoNonRenewals">—</span></div>
             <div class="row"><span class="name name-with-info">Paid Conversion Rate ${renderInfoButton(
               'Paid Conversion Rate',
-              'The percentage of attributed referrals that have converted into a commission-earning paid subscription.'
+              'The percentage of your attributed referrals that have ever reached a commission-earning paid subscription. A subscriber still counts as converted even if they later cancel or expire.'
             )}</span><span class="number" id="paidConversionRate">—</span></div>
             <div class="row"><span class="name name-with-info">Active Retention ${renderInfoButton(
               'Active Retention',
-              'The percentage of your attributed subscriber cohort that is still active now.'
+              'The percentage of your attributed referrals that still have subscription access right now. This measures current retention, so subscribers who previously converted but later expired are not counted as active.'
             )}</span><span class="number" id="activeRetention">—</span></div>
             <div class="row"><span class="name name-with-info">Cancellation Rate ${renderInfoButton(
               'Cancellation Rate',
@@ -626,7 +626,7 @@ function renderPartnerDashboardPage(token) {
         <article class="card">
           <div class="section-title"><div class="title-with-info"><h2>Performance Breakdown</h2>${renderInfoButton(
             'Performance Breakdown',
-            'Shows conversion, retention, cancellation, and financial performance for the selected range using verified subscription and finalized payout data.'
+            'Shows promo outcomes, paid conversion, current retention, and cancellation for referrals acquired in the selected range. Paid conversion means ever converted to a commission-earning subscription; active retention means still active now.'
           )}</div></div>
           <div class="rows" id="performanceBreakdown"></div>
         </article>
@@ -961,12 +961,9 @@ function renderPartnerDashboardPage(token) {
         row('Promo Renewal Rate', percent(p.promoRenewalRate)),
         row('Promo Non-Renewals', number(s.promoNonRenewals)),
         row('Promo Non-Renewal Rate', percent(p.promoNonRenewalRate)),
-        row('Selected Cohort Paid Conversion', percent(p.paidConversionRate)),
-        row('Selected Cohort Active Retention', percent(p.activeRetention)),
+        row('Paid Conversion Rate', percent(p.paidConversionRate)),
+        row('Active Retention', percent(p.activeRetention)),
         row('Cancellation Rate', percent(p.cancellationRate)),
-        row('Eligible Revenue Generated', money(payouts.lifetimeEligibleRevenue)),
-        row('Lifetime Commission Earned', money(payouts.lifetimeCommissionEarned)),
-        row('Lifetime Paid', money(payouts.lifetimePaid)),
       ].join('');
 
       document.getElementById('subscriberActivity').className = '';
