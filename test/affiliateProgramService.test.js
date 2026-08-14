@@ -275,3 +275,31 @@ test('affiliate audit-log queries explicitly type UUID parameters reused as text
     /VALUES \(\$1, 'affiliate_dashboard_token_regenerated', \$2, 'affiliate', \$2::text\)/
   );
 });
+
+test('admin affiliate service exposes overview, alert, payout, and operational controls without changing attribution ownership', async () => {
+  const source = await readFile(
+    new URL('../lib/affiliateProgramService.js', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(source, /async function setAffiliateOperationalStatus/);
+  assert.match(source, /async function listAffiliateAlerts/);
+  assert.match(source, /async function resolveAffiliateAlert/);
+  assert.match(source, /async function listAdminPayouts/);
+  assert.match(source, /affiliate_subscription_attributions attr/);
+  assert.match(source, /CASE WHEN a\.is_test THEN 'Sandbox' ELSE 'Production' END/);
+  assert.match(source, /CASE WHEN a\.is_test THEN 'test' ELSE 'production' END/);
+  assert.match(source, /affiliate_alert_resolved/);
+  assert.match(source, /affiliate_activated/);
+  assert.match(source, /affiliate_paused/);
+});
+
+test('admin can refresh a whole payout month without finalizing it', async () => {
+  const source = await readFile(
+    new URL('../lib/affiliateProgramService.js', import.meta.url),
+    'utf8'
+  );
+  assert.match(source, /async function refreshAffiliatePayoutsForPeriod/);
+  assert.match(source, /finalize: false/);
+  assert.match(source, /refreshAffiliatePayoutsForPeriod,/);
+});
