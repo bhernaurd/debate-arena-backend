@@ -75,12 +75,12 @@ test(
 
         assert.match(
             baseMigration,
-            /NEW\s+forward migration/i
+            /created in a NEW[\s\S]*forward migration using/i
         );
 
         assert.match(
             unlockMigration,
-            /NEW\s+forward migration/i
+            /created in a NEW[\s\S]*forward migration using/i
         );
 
         assert.doesNotMatch(
