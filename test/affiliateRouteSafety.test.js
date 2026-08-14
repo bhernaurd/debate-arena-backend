@@ -38,3 +38,29 @@ test('partner dashboard stays read-only and presents anonymous subscriber activi
   assert.doesNotMatch(source, /Search creators/i);
   assert.doesNotMatch(source, /document\.cookie/);
 });
+
+
+test('performance breakdown stays cohort-focused and does not repeat lifetime financial totals', () => {
+  const start = source.indexOf("document.getElementById('performanceBreakdown').innerHTML");
+  const end = source.indexOf("document.getElementById('subscriberActivity')", start);
+
+  assert.ok(start >= 0, 'performance breakdown render block should exist');
+  assert.ok(end > start, 'performance breakdown render block should have an end marker');
+
+  const block = source.slice(start, end);
+  assert.match(block, /Promo Renewal Rate/);
+  assert.match(block, /Promo Non-Renewals/);
+  assert.match(block, /Paid Conversion Rate/);
+  assert.match(block, /Active Retention/);
+  assert.match(block, /Cancellation Rate/);
+  assert.doesNotMatch(block, /Eligible Revenue Generated/);
+  assert.doesNotMatch(block, /Lifetime Commission Earned/);
+  assert.doesNotMatch(block, /Lifetime Paid/);
+});
+
+test('conversion and retention copy distinguishes historical conversion from current access', () => {
+  assert.match(source, /ever reached a commission-earning paid subscription/);
+  assert.match(source, /still counts as converted even if they later cancel or expire/);
+  assert.match(source, /still have subscription access right now/);
+  assert.match(source, /previously converted but later expired are not counted as active/);
+});
