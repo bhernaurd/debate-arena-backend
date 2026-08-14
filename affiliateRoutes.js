@@ -228,6 +228,7 @@ function renderPartnerDashboardPage(token) {
     .section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; margin-bottom: 13px; }
     .section-title h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 22px; font-weight: 500; }
     .section-title span { color: var(--muted); font-size: 12px; }
+    .section-note { color: var(--muted); font-size: 12px; line-height: 1.45; margin: -4px 0 12px; }
     .mini-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
     .mini { position: relative; border: 1px solid rgba(255,255,255,.06); background: rgba(255,255,255,.025); border-radius: 14px; padding: 15px; }
     .mini .value { font-size: 22px; margin-top: 5px; }
@@ -419,14 +420,14 @@ function renderPartnerDashboardPage(token) {
         </article>
         <article class="card primary">
           <div class="metric-heading">
-            <div class="label">Active Subscribers</div>
+            <div class="label">Current Subscribers</div>
             ${renderInfoButton(
-              'Active Subscribers',
-              'Attributed subscribers who currently still have subscription access. This can include subscribers in the $0.99 promo period and commission-earning paid subscribers.'
+              'Current Subscribers',
+              'The number of referred subscribers who currently still have subscription access. This is one overall total, not an additional subscriber state.'
             )}
           </div>
-          <div class="value" id="activeSubscribers">—</div>
-          <div class="subvalue">Active promo and commission-earning subscriptions</div>
+          <div class="value" id="currentSubscribers">—</div>
+          <div class="subvalue">Referred subscribers with access right now</div>
         </article>
         <article class="card primary">
           <div class="metric-heading">
@@ -454,66 +455,67 @@ function renderPartnerDashboardPage(token) {
 
       <div class="section">
         <div class="section-title"><h2>Subscriber Snapshot</h2><span id="freshness"></span></div>
+        <div class="section-note">Each referred subscriber appears in one current state only.</div>
         <div class="mini-grid">
           <div class="mini">
             <div class="metric-heading">
-              <div class="label">$0.99 Promo Subscribers</div>
+              <div class="label">Promo Active</div>
               ${renderInfoButton(
-                '$0.99 Promo Subscribers',
-                'Subscribers currently in the $0.99 promotional period linked to your code. The $0.99 promotional payment itself is excluded from commission.'
+                'Promo Active',
+                'Subscribers currently in the $0.99 first-month promotional period. Each subscriber appears in only one current-state box. If auto-renew is turned off during the promo, the subscriber remains Promo Active until that access period ends.'
               )}
             </div>
-            <div class="value" id="promoSubscribers">—</div>
+            <div class="value" id="promoActiveSubscribers">—</div>
           </div>
           <div class="mini">
             <div class="metric-heading">
-              <div class="label">Commission-Earning Subscribers</div>
+              <div class="label">Paid + Renewing</div>
               ${renderInfoButton(
-                'Commission-Earning Subscribers',
-                'Attributed subscribers currently on a commission-eligible paid subscription. This excludes the $0.99 promo period and subscription states that are not commission eligible.'
+                'Paid + Renewing',
+                'Commission-earning paid subscribers who currently have access and still have auto-renew enabled.'
               )}
             </div>
-            <div class="value" id="commissionEarningSubscribers">—</div>
+            <div class="value" id="paidRenewingSubscribers">—</div>
           </div>
           <div class="mini">
             <div class="metric-heading">
-              <div class="label">Canceling</div>
+              <div class="label">Paid + Canceling</div>
               ${renderInfoButton(
-                'Canceling',
-                'Subscribers who turned off auto-renew but still have access until their current paid or promotional period ends. They can still be active until expiration.'
+                'Paid + Canceling',
+                'Commission-earning paid subscribers who turned off auto-renew but still have access until the end of their current paid period.'
               )}
             </div>
-            <div class="value" id="canceling">—</div>
-          </div>
-          <div class="mini">
-            <div class="metric-heading">
-              <div class="label">Promo Non-Renewals</div>
-              ${renderInfoButton(
-                'Promo Non-Renewals',
-                'Subscribers whose $0.99 promotional period ended without a later commission-eligible paid renewal being verified.'
-              )}
-            </div>
-            <div class="value" id="promoNonRenewals">—</div>
-          </div>
-          <div class="mini">
-            <div class="metric-heading">
-              <div class="label">Expired</div>
-              ${renderInfoButton(
-                'Expired',
-                'Attributed subscriptions whose access has ended and that are no longer active.'
-              )}
-            </div>
-            <div class="value" id="expired">—</div>
+            <div class="value" id="paidCancelingSubscribers">—</div>
           </div>
           <div class="mini">
             <div class="metric-heading">
               <div class="label">Billing Retry</div>
               ${renderInfoButton(
                 'Billing Retry',
-                'Subscriptions for which a renewal payment failed and Apple is attempting to recover billing. The subscriber may become active again if recovery succeeds.'
+                'Subscribers whose renewal payment failed and for whom Apple is attempting billing recovery. They are kept in this separate current-state bucket while recovery is pending.'
               )}
             </div>
             <div class="value" id="billingRetry">—</div>
+          </div>
+          <div class="mini">
+            <div class="metric-heading">
+              <div class="label">Expired</div>
+              ${renderInfoButton(
+                'Expired',
+                'Referred subscriptions whose access has ended. Revoked or refunded entitlements with no current access are also treated as ended for this current-state view.'
+              )}
+            </div>
+            <div class="value" id="expired">—</div>
+          </div>
+          <div class="mini hidden" id="pendingStateBox">
+            <div class="metric-heading">
+              <div class="label">Pending Apple State</div>
+              ${renderInfoButton(
+                'Pending Apple State',
+                'A verified referral exists, but the latest entitlement state has not arrived yet. This temporary safeguard prevents the subscriber from being silently omitted or double-counted while Apple data is still syncing.'
+              )}
+            </div>
+            <div class="value" id="pendingStateSubscribers">—</div>
           </div>
         </div>
       </div>
@@ -562,6 +564,10 @@ function renderPartnerDashboardPage(token) {
               'Promo Renewal Rate',
               'The percentage of attributed $0.99 promo subscribers who later produced a verified commission-eligible paid renewal.'
             )}</span><span class="number" id="promoRenewalRate">—</span></div>
+            <div class="row"><span class="name name-with-info">Promo Non-Renewals ${renderInfoButton(
+              'Promo Non-Renewals',
+              'The number of referred subscribers whose $0.99 promotional period ended without a later commission-eligible paid renewal being verified.'
+            )}</span><span class="number" id="promoNonRenewals">—</span></div>
             <div class="row"><span class="name name-with-info">Paid Conversion Rate ${renderInfoButton(
               'Paid Conversion Rate',
               'The percentage of attributed referrals that have converted into a commission-earning paid subscription.'
@@ -613,7 +619,7 @@ function renderPartnerDashboardPage(token) {
         <article class="card">
           <div class="section-title"><div class="title-with-info"><h2>Subscriber Breakdown</h2>${renderInfoButton(
             'Subscriber Breakdown',
-            'Shows the selected referral cohort and its current subscription states. Historical ranges describe subscribers acquired during that range and their current state, not a reconstructed historical snapshot.'
+            'Shows referrals acquired in the selected period and places each one into exactly one current subscription state. Historical ranges describe that cohort\'s state now, not a reconstructed historical snapshot.'
           )}</div></div>
           <div class="rows" id="subscriberBreakdown"></div>
         </article>
@@ -836,38 +842,25 @@ function renderPartnerDashboardPage(token) {
       return value ? 'Pro' : '—';
     }
 
-    function statusLabel(item) {
-      if (!item) return 'Unknown';
-      if (
-        ['active', 'trial', 'grace_period'].includes(item.status) &&
-        item.autoRenewEnabled === false
-      ) return 'Canceling';
+    function currentStateLabel(value) {
       const labels = {
-        active: 'Active',
-        trial: 'Trial',
-        grace_period: 'Grace Period',
+        promo_active: 'Promo Active',
+        paid_renewing: 'Paid + Renewing',
+        paid_canceling: 'Paid + Canceling',
         billing_retry: 'Billing Retry',
         expired: 'Expired',
-        revoked: 'Refunded / Revoked',
-        unknown: 'Unknown'
+        pending: 'Pending Apple State'
       };
-      return labels[item.status] || String(item.status || 'Unknown').replaceAll('_', ' ');
+      return labels[value] || 'Pending Apple State';
     }
 
-    function statusBadge(item) {
-      const label = statusLabel(item);
+    function currentStateBadge(value) {
+      const label = currentStateLabel(value);
       let klass = 'badge';
-      if (['Active', 'Trial', 'Grace Period'].includes(label)) klass += ' positive';
-      if (['Canceling', 'Billing Retry'].includes(label)) klass += ' warning';
-      if (['Expired', 'Refunded / Revoked'].includes(label)) klass += ' danger';
+      if (label === 'Paid + Renewing') klass += ' positive';
+      if (['Promo Active', 'Paid + Canceling', 'Billing Retry'].includes(label)) klass += ' warning';
+      if (label === 'Expired') klass += ' danger';
       return '<span class="' + klass + '">' + html(label) + '</span>';
-    }
-
-    function stageBadge(stage) {
-      if (stage === 'commission_earning') {
-        return '<span class="badge positive">Commission-Earning</span>';
-      }
-      return '<span class="badge warning">$0.99 Promo</span>';
     }
 
     function html(value) {
@@ -893,15 +886,14 @@ function renderPartnerDashboardPage(token) {
           '<td><span class="alias">' + html(item.subscriberAlias || '—') + '</span></td>' +
           '<td>' + html(dateLabel(item.joinedAt)) + '</td>' +
           '<td>' + html(planLabel(item.plan)) + '</td>' +
-          '<td>' + stageBadge(item.stage) + '</td>' +
-          '<td>' + statusBadge(item) + '</td>' +
+          '<td>' + currentStateBadge(item.currentState) + '</td>' +
           '<td>' + html(dateLabel(item.lastActivityAt, true)) + '</td>' +
         '</tr>'
       ).join('');
 
       return '<div class="activity-wrap"><table class="activity-table">' +
         '<thead><tr>' +
-          '<th>Subscriber</th><th>Joined</th><th>Plan</th><th>Stage</th><th>Status</th><th>Last Activity</th>' +
+          '<th>Subscriber</th><th>Joined</th><th>Plan</th><th>Current State</th><th>Last Activity</th>' +
         '</tr></thead><tbody>' + rows + '</tbody></table></div>';
     }
 
@@ -916,15 +908,25 @@ function renderPartnerDashboardPage(token) {
       text('partnerName', data.affiliate.displayName);
       text('partnerCode', data.affiliate.customCode);
       text('totalReferrals', number(o.totalReferrals));
-      text('activeSubscribers', number(o.activeSubscribers));
+      text('currentSubscribers', number(o.currentSubscribers ?? o.activeSubscribers));
       text('estimatedThisMonth', money(o.estimatedThisMonth));
       text('currentlyOwed', money(o.currentlyOwed));
-      text('promoSubscribers', number(o.promoSubscribers));
-      text('commissionEarningSubscribers', number(o.commissionEarningSubscribers));
-      text('canceling', number(o.canceling));
-      text('promoNonRenewals', number(o.promoNonRenewals));
-      text('expired', number(o.expired));
+
+      text('promoActiveSubscribers', number(o.promoActiveSubscribers ?? o.promoSubscribers));
+      text('paidRenewingSubscribers', number(o.paidRenewingSubscribers));
+      text('paidCancelingSubscribers', number(o.paidCancelingSubscribers));
       text('billingRetry', number(o.billingRetry));
+      text('expired', number(o.expired));
+      text('pendingStateSubscribers', number(o.pendingStateSubscribers));
+
+      const pendingStateBox = document.getElementById('pendingStateBox');
+      const pendingStateCount = Number(o.pendingStateSubscribers || 0);
+      pendingStateBox.classList.toggle(
+        'hidden',
+        o.pendingStateSubscribers == null || pendingStateCount === 0
+      );
+
+      text('promoNonRenewals', number(o.promoNonRenewals));
       text('promoRenewalRate', percent(o.promoRenewalRate));
       text('paidConversionRate', percent(o.paidConversionRate));
       text('activeRetention', percent(o.activeRetention));
@@ -940,20 +942,24 @@ function renderPartnerDashboardPage(token) {
       text('freshness', freshnessValue ? 'Apple data through ' + dateLabel(freshnessValue, true) : 'Awaiting Apple data');
       document.getElementById('dataNotice').style.display = data.dataFreshness?.status === 'awaiting_apple_data' ? 'block' : 'none';
 
-      document.getElementById('subscriberBreakdown').innerHTML = [
-        row('Total Referrals', number(s.totalReferrals)),
+      const subscriberRows = [
         row('Referrals Acquired in Selected Period', number(s.newReferrals)),
-        row('Active Now from Selected Period', number(s.activeSubscribers)),
-        row('$0.99 Promo Now from Selected Period', number(s.promoSubscribers)),
-        row('Commission-Earning Now from Selected Period', number(s.commissionEarningSubscribers)),
-        row('Promo Non-Renewals', number(s.promoNonRenewals)),
-        row('Canceling Now from Selected Period', number(s.canceling)),
+        row('Promo Active', number(s.promoActiveSubscribers ?? s.promoSubscribers)),
+        row('Paid + Renewing', number(s.paidRenewingSubscribers)),
+        row('Paid + Canceling', number(s.paidCancelingSubscribers)),
+        row('Billing Retry', number(s.billingRetry)),
         row('Expired', number(s.expired)),
-        row('Billing Retry Now from Selected Period', number(s.billingRetry)),
-      ].join('');
+      ];
+      if (Number(s.pendingStateSubscribers || 0) > 0) {
+        subscriberRows.push(
+          row('Pending Apple State', number(s.pendingStateSubscribers))
+        );
+      }
+      document.getElementById('subscriberBreakdown').innerHTML = subscriberRows.join('');
 
       document.getElementById('performanceBreakdown').innerHTML = [
         row('Promo Renewal Rate', percent(p.promoRenewalRate)),
+        row('Promo Non-Renewals', number(s.promoNonRenewals)),
         row('Promo Non-Renewal Rate', percent(p.promoNonRenewalRate)),
         row('Selected Cohort Paid Conversion', percent(p.paidConversionRate)),
         row('Selected Cohort Active Retention', percent(p.activeRetention)),
