@@ -30,6 +30,15 @@ function parseArgs(argv) {
   return values;
 }
 
+function readPresenceFlag(args, key) {
+  if (args[key] == null) return false;
+  if (args[key] === true) return true;
+
+  throw new Error(
+    `--${key} is a presence-only flag. Use --${key} with no value, or omit it.`
+  );
+}
+
 function usage() {
   console.log(`
 Create an affiliate for The Agora.
@@ -38,22 +47,25 @@ Required:
   --name "Max"
   --code MAXAGORA
   --since 2026-08-13
+  --offer-reference MAXAGORA     App Store Connect offer reference name
 
 Optional:
   --display-name "Max"
   --rate 0.5
-  --basis base_price
+  --basis base_price           50% of approved revenue/base-price basis
+  --basis net_proceeds         50% of Apple-reported actual net proceeds
   --test
 
 Example:
-  npm run affiliate:create -- --name "Max" --code MAXAGORA --since 2026-08-13
+  npm run affiliate:create -- --name "Max" --code MAXAGORA --since 2026-08-13 --offer-reference MAXAGORA
 `);
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+  const isTest = readPresenceFlag(args, 'test');
 
-  if (!args.name || !args.code || !args.since) {
+  if (!args.name || !args.code || !args.since || (!isTest && !args['offer-reference'])) {
     usage();
     process.exitCode = 1;
     return;
@@ -87,16 +99,18 @@ async function main() {
       internalName: args.name,
       displayName: args['display-name'] || args.name,
       customCode: args.code,
+      appleOfferIdentifier: args['offer-reference'] || null,
       affiliateSince: args.since,
       commissionRate: args.rate || '0.5',
       commissionBasis: args.basis || 'base_price',
-      isTest: Boolean(args.test),
+      isTest,
       codeStatus: 'active',
     }, 'createAffiliate_script');
 
     console.log('\nAffiliate created.\n');
     console.log(`Name: ${result.affiliate.display_name}`);
     console.log(`Code: ${result.affiliate.normalized_code}`);
+    console.log(`Apple offer reference: ${result.affiliate.apple_offer_identifier || 'test-only / not configured'}`);
     console.log(`Referral link: ${result.referralUrl}`);
     console.log(`Apple redemption: ${result.appleRedemptionUrl}`);
     console.log(`Private dashboard: ${result.dashboardUrl}`);
