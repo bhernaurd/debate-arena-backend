@@ -1,12 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import { DateTime } from 'luxon';
 
 import {
   buildAppleOfferRedemptionUrl,
   calculateBasePriceCommission,
   hashPartnerToken,
   normalizeAffiliateCode,
+  parseAffiliateDashboardRange,
 } from '../lib/affiliateProgramService.js';
 import { renderPartnerDashboardPage } from '../affiliateRoutes.js';
 
@@ -30,6 +32,31 @@ test('partner tokens are hashed deterministically', () => {
   const token = 'abcdefghijklmnopqrstuvwxyz0123456789ABCDE';
   assert.equal(hashPartnerToken(token), hashPartnerToken(token));
   assert.notEqual(hashPartnerToken(token), hashPartnerToken(token + 'x'));
+});
+
+
+test('dashboard supports explicit calendar-month accounting periods', () => {
+  const now = DateTime.fromISO('2026-08-14T17:21:00', { zone: 'America/Chicago' });
+
+  const july = parseAffiliateDashboardRange('month:2026-07', now);
+  assert.equal(july.key, 'month:2026-07');
+  assert.equal(july.kind, 'month');
+  assert.equal(july.monthKey, '2026-07');
+  assert.equal(july.currentMonthKey, '2026-08');
+  assert.equal(july.start, '2026-07-01');
+  assert.equal(july.endExclusive, '2026-08-01');
+  assert.equal(july.label, 'July 2026');
+  assert.equal(july.isCurrentMonth, false);
+
+  const current = parseAffiliateDashboardRange('this_month', now);
+  assert.equal(current.key, 'month:2026-08');
+  assert.equal(current.label, 'August 2026');
+  assert.equal(current.isCurrentMonth, true);
+
+  assert.throws(
+    () => parseAffiliateDashboardRange('month:2026-09', now),
+    (error) => error?.code === 'invalid_dashboard_month'
+  );
 });
 
 test('base-price commission rounds once at the monthly level', () => {
