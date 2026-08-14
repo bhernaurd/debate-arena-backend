@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 
 import {
   buildAppleOfferRedemptionUrl,
@@ -167,5 +168,30 @@ test('production affiliate creation requires an Apple offer reference name befor
       isTest: false,
     }),
     (error) => error?.code === 'affiliate_offer_identifier_required'
+  );
+});
+
+test('affiliate audit-log queries explicitly type UUID parameters reused as text', async () => {
+  const source = await readFile(
+    new URL('../lib/affiliateProgramService.js', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(
+    source,
+    /VALUES \(\$1, 'affiliate_created', \$2::uuid, 'affiliate', \$2::uuid::text, \$3::jsonb\)/
+  );
+  assert.match(
+    source,
+    /VALUES \(\$1, 'affiliate_dashboard_token_regenerated', \$2::uuid, 'affiliate', \$2::uuid::text\)/
+  );
+
+  assert.doesNotMatch(
+    source,
+    /VALUES \(\$1, 'affiliate_created', \$2, 'affiliate', \$2::text, \$3::jsonb\)/
+  );
+  assert.doesNotMatch(
+    source,
+    /VALUES \(\$1, 'affiliate_dashboard_token_regenerated', \$2, 'affiliate', \$2::text\)/
   );
 });
