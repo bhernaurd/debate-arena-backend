@@ -15,6 +15,7 @@ import { createAnalyticsRouter } from './analytics.js';
 import aiJobsRouter from './aiJobs.js';
 import { createAppStoreSubscriptionRouter } from './appStoreSubscriptionRoutes.js';
 import { createPaywallConfigurationRouter } from './paywallConfigurationRoutes.js';
+import { createAffiliateRouter } from './affiliateRoutes.js';
 import { createAccountAuthRouter } from './accountAuthRoutes.js';
 import { createAccountDebateHistoryRouter } from './accountDebateHistoryRoutes.js';
 import { createAccountAchievementRouter } from './accountAchievementRoutes.js';
@@ -120,6 +121,10 @@ app.use(cors());
 // can be larger than ordinary app requests. Their route-specific parsers are
 // installed before the existing 50 KB global parser.
 app.use('/api/app-store', express.json({ limit: '128kb' }));
+
+// Apple Analytics imports can contain thousands of normalized aggregate rows.
+// This parser must run before the existing 50 KB global JSON parser.
+app.use('/api/admin/affiliate-apple-metrics', express.json({ limit: '2mb' }));
 
 const accountHistoryLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -490,6 +495,14 @@ app.use('/api/account/apple/challenge', accountChallengeLimiter);
 app.use('/api/account/apple/sign-in', accountSignInLimiter);
 app.use('/api/account/session', accountSessionLimiter);
 app.use('/api/account', accountAuthRouter);
+
+app.use(createAffiliateRouter(pool, {
+  adminKey: process.env.AFFILIATE_ADMIN_KEY,
+  appAppleId: process.env.AFFILIATE_APPLE_APP_ID,
+  tokenEncryptionKey: process.env.AFFILIATE_TOKEN_ENCRYPTION_KEY,
+  partnerBaseUrl: process.env.AFFILIATE_PARTNER_BASE_URL,
+  referralBaseUrl: process.env.AFFILIATE_REFERRAL_BASE_URL,
+}));
 
 app.use(createPaywallConfigurationRouter());
 app.use(createDailyChallengeRouter(pool));
