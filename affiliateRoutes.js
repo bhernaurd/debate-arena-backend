@@ -145,9 +145,7 @@ function renderPartnerDashboardPage(token) {
         radial-gradient(circle at 50% -10%, rgba(111, 74, 151, 0.15), transparent 36rem),
         var(--bg);
     }
-
     button, input { font: inherit; }
-
     .shell { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 34px 0 70px; }
     .eyebrow { color: var(--gold); letter-spacing: .17em; font-size: 11px; font-weight: 700; }
     .header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin: 18px 0 26px; }
@@ -163,7 +161,6 @@ function renderPartnerDashboardPage(token) {
       white-space: nowrap;
     }
     .copy-button:hover { background: rgba(216, 171, 82, .13); }
-
     .tabs {
       display: inline-flex;
       gap: 5px;
@@ -184,7 +181,6 @@ function renderPartnerDashboardPage(token) {
       font-weight: 650;
     }
     .tab.active { background: var(--panel-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
-
     .notice {
       display: none;
       border: 1px solid rgba(228,190,120,.24);
@@ -194,9 +190,10 @@ function renderPartnerDashboardPage(token) {
       border-radius: 12px;
       margin-bottom: 18px;
       font-size: 13px;
+      line-height: 1.45;
     }
-
     .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+    .financial-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
     .card {
       position: relative;
       overflow: hidden;
@@ -212,23 +209,19 @@ function renderPartnerDashboardPage(token) {
     .value { margin-top: 9px; font-size: 31px; font-weight: 720; letter-spacing: -.04em; }
     .subvalue { margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.4; }
     .money { color: var(--gold-soft); }
-
     .section { margin-top: 28px; }
     .section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; margin-bottom: 13px; }
     .section-title h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 22px; font-weight: 500; }
     .section-title span { color: var(--muted); font-size: 12px; }
-
-    .mini-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+    .mini-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
     .mini { border: 1px solid rgba(255,255,255,.06); background: rgba(255,255,255,.025); border-radius: 14px; padding: 15px; }
     .mini .value { font-size: 22px; margin-top: 5px; }
-
     .split { display: grid; grid-template-columns: 1.15fr .85fr; gap: 14px; }
     .rows { display: grid; gap: 0; }
     .row { display: flex; justify-content: space-between; gap: 20px; padding: 13px 0; border-bottom: 1px solid rgba(255,255,255,.055); }
     .row:last-child { border-bottom: 0; }
     .row .name { color: #d7d1df; }
-    .row .number { font-variant-numeric: tabular-nums; font-weight: 650; }
-
+    .row .number { font-variant-numeric: tabular-nums; font-weight: 650; text-align: right; }
     .range-bar { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 14px; }
     .range {
       border: 1px solid rgba(255,255,255,.07);
@@ -240,11 +233,7 @@ function renderPartnerDashboardPage(token) {
       font-size: 12px;
     }
     .range.active { border-color: var(--border-strong); color: var(--gold-soft); background: rgba(216,171,82,.08); }
-
-    .payout {
-      padding: 16px 0;
-      border-bottom: 1px solid rgba(255,255,255,.055);
-    }
+    .payout { padding: 16px 0; border-bottom: 1px solid rgba(255,255,255,.055); }
     .payout:last-child { border-bottom: 0; }
     .payout-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
     .payout-month { font-weight: 700; }
@@ -252,19 +241,47 @@ function renderPartnerDashboardPage(token) {
     .payout-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 12px; }
     .payout-metric strong { display: block; margin-top: 4px; font-size: 15px; }
     .payout-metric span { color: var(--muted); font-size: 11px; }
-
+    .activity-wrap { overflow-x: auto; border-radius: 12px; }
+    .activity-table { width: 100%; border-collapse: collapse; min-width: 760px; }
+    .activity-table th {
+      color: var(--muted);
+      font-size: 11px;
+      text-align: left;
+      font-weight: 650;
+      padding: 0 12px 10px;
+      border-bottom: 1px solid rgba(255,255,255,.075);
+    }
+    .activity-table td {
+      padding: 13px 12px;
+      border-bottom: 1px solid rgba(255,255,255,.05);
+      font-size: 13px;
+      color: #ddd7e5;
+      white-space: nowrap;
+    }
+    .activity-table tr:last-child td { border-bottom: 0; }
+    .alias { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--gold-soft); font-size: 12px; }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      border: 1px solid rgba(255,255,255,.08);
+      background: rgba(255,255,255,.035);
+      padding: 4px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      color: #d8d1df;
+    }
+    .badge.positive { color: var(--positive); border-color: rgba(143,208,174,.22); background: rgba(143,208,174,.06); }
+    .badge.warning { color: var(--warning); border-color: rgba(228,190,120,.22); background: rgba(228,190,120,.06); }
+    .badge.danger { color: var(--danger); border-color: rgba(223,143,146,.22); background: rgba(223,143,146,.06); }
     .empty { color: var(--muted); font-size: 14px; padding: 16px 0; }
     .fine-print { color: var(--muted); font-size: 11px; line-height: 1.55; margin-top: 20px; }
     .hidden { display: none !important; }
-    .skeleton { color: transparent; background: linear-gradient(90deg, #27222f, #342c3d, #27222f); border-radius: 8px; min-width: 48px; animation: pulse 1.5s infinite; }
-    @keyframes pulse { 50% { opacity: .62; } }
 
     @media (max-width: 820px) {
       .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .mini-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .mini-grid, .financial-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .split { grid-template-columns: 1fr; }
     }
-
     @media (max-width: 520px) {
       .shell { width: min(100% - 22px, 1120px); padding-top: 24px; }
       .header { align-items: flex-start; flex-direction: column; }
@@ -272,7 +289,7 @@ function renderPartnerDashboardPage(token) {
       .grid { gap: 9px; }
       .card { border-radius: 15px; padding: 16px; }
       .value { font-size: 27px; }
-      .mini-grid { gap: 8px; }
+      .mini-grid, .financial-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
       .tabs { width: 100%; }
       .tab { flex: 1; }
       .payout-grid { grid-template-columns: repeat(2, 1fr); }
@@ -296,7 +313,7 @@ function renderPartnerDashboardPage(token) {
     </div>
 
     <div id="dataNotice" class="notice">
-      Apple subscription data has not been imported yet. Financial totals will appear after Apple data is available and reconciled.
+      No verified affiliate subscription activity yet. Subscriber metrics will populate as verified Apple transactions arrive; financial totals appear after payout data is calculated and reconciled.
     </div>
 
     <section id="overviewTab">
@@ -304,12 +321,12 @@ function renderPartnerDashboardPage(token) {
         <article class="card primary">
           <div class="label">Total Referrals</div>
           <div class="value" id="totalReferrals">—</div>
-          <div class="subvalue">Verified through Apple custom-code reporting</div>
+          <div class="subvalue">Verified from Apple offer-code and subscription data</div>
         </article>
         <article class="card primary">
           <div class="label">Active Subscribers</div>
           <div class="value" id="activeSubscribers">—</div>
-          <div class="subvalue">Active paid plans and promotional plans</div>
+          <div class="subvalue">Active promo and commission-earning subscriptions</div>
         </article>
         <article class="card primary">
           <div class="label">Estimated This Month</div>
@@ -326,10 +343,21 @@ function renderPartnerDashboardPage(token) {
       <div class="section">
         <div class="section-title"><h2>Subscriber Snapshot</h2><span id="freshness"></span></div>
         <div class="mini-grid">
-          <div class="mini"><div class="label">In $0.99 Promo</div><div class="value" id="promoSubscribers">—</div></div>
-          <div class="mini"><div class="label">Active Paid</div><div class="value" id="activePaidSubscribers">—</div></div>
+          <div class="mini"><div class="label">$0.99 Promo Subscribers</div><div class="value" id="promoSubscribers">—</div></div>
+          <div class="mini"><div class="label">Commission-Earning Subscribers</div><div class="value" id="commissionEarningSubscribers">—</div></div>
           <div class="mini"><div class="label">Canceling</div><div class="value" id="canceling">—</div></div>
           <div class="mini"><div class="label">Promo Non-Renewals</div><div class="value" id="promoNonRenewals">—</div></div>
+          <div class="mini"><div class="label">Expired</div><div class="value" id="expired">—</div></div>
+          <div class="mini"><div class="label">Billing Retry</div><div class="value" id="billingRetry">—</div></div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-title"><h2>Financial Snapshot</h2></div>
+        <div class="financial-grid">
+          <div class="mini"><div class="label">Eligible Revenue Generated</div><div class="value money" id="lifetimeEligibleRevenue">—</div></div>
+          <div class="mini"><div class="label">Lifetime Commission Earned</div><div class="value money" id="lifetimeCommissionEarned">—</div></div>
+          <div class="mini"><div class="label">Lifetime Paid</div><div class="value money" id="lifetimePaid">—</div></div>
         </div>
       </div>
 
@@ -338,6 +366,9 @@ function renderPartnerDashboardPage(token) {
           <div class="section-title"><h2>Performance</h2></div>
           <div class="rows">
             <div class="row"><span class="name">Promo Renewal Rate</span><span class="number" id="promoRenewalRate">—</span></div>
+            <div class="row"><span class="name">Paid Conversion Rate</span><span class="number" id="paidConversionRate">—</span></div>
+            <div class="row"><span class="name">Active Retention</span><span class="number" id="activeRetention">—</span></div>
+            <div class="row"><span class="name">Cancellation Rate</span><span class="number" id="cancellationRate">—</span></div>
             <div class="row"><span class="name">Last Payment</span><span class="number" id="lastPayment">—</span></div>
           </div>
         </article>
@@ -374,6 +405,13 @@ function renderPartnerDashboardPage(token) {
 
       <div class="section">
         <article class="card">
+          <div class="section-title"><h2>Anonymous Subscriber Activity</h2><span>Up to 100 referrals in the selected period</span></div>
+          <div id="subscriberActivity" class="empty">No verified subscriber activity yet.</div>
+        </article>
+      </div>
+
+      <div class="section">
+        <article class="card">
           <div class="section-title">
             <h2>Commission Breakdown</h2>
             <span id="commissionDataStatus"></span>
@@ -390,7 +428,7 @@ function renderPartnerDashboardPage(token) {
       </div>
 
       <div class="fine-print">
-        Apple provides the underlying subscription and offer-code metrics. The Agora applies the affiliate's agreed commission terms and payout accounting. Promotional $0.99 payments are excluded from commission.
+        Apple provides the underlying verified subscription and offer-code data. The Agora applies the affiliate's agreed commission terms and payout accounting. Promotional $0.99 payments are excluded from commission. Subscriber activity is anonymous and does not expose customer identity or Apple transaction identifiers.
       </div>
     </section>
   </main>
@@ -408,9 +446,21 @@ function renderPartnerDashboardPage(token) {
       return value == null ? '—' : Number(value).toLocaleString();
     }
 
+    function currencyCode() {
+      const raw = String(currentData?.affiliate?.payoutCurrency || 'USD').toUpperCase();
+      return /^[A-Z]{3}$/.test(raw) ? raw : 'USD';
+    }
+
     function money(value) {
       if (value == null || value === '') return '—';
-      return '$' + Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+      const numeric = Number(value);
+      if (!Number.isFinite(numeric)) return '—';
+      return new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: currencyCode(),
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(numeric);
     }
 
     function percent(value) {
@@ -420,7 +470,7 @@ function renderPartnerDashboardPage(token) {
 
     function readableBasis(value) {
       if (value === 'base_price') return 'Base Price';
-      if (value === 'net_proceeds') return 'Net Proceeds';
+      if (value === 'net_proceeds') return 'Apple Net Proceeds';
       return '—';
     }
 
@@ -428,6 +478,55 @@ function renderPartnerDashboardPage(token) {
       if (!value) return '';
       const date = new Date(value + 'T12:00:00Z');
       return date.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    }
+
+    function dateLabel(value, withTime = false) {
+      if (!value) return '—';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return '—';
+      return date.toLocaleDateString(undefined, withTime
+        ? { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }
+        : { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    function planLabel(value) {
+      if (value === 'agora_pro_yearly') return 'Yearly';
+      if (value === 'agora_pro_monthly') return 'Monthly';
+      return value ? 'Pro' : '—';
+    }
+
+    function statusLabel(item) {
+      if (!item) return 'Unknown';
+      if (
+        ['active', 'trial', 'grace_period'].includes(item.status) &&
+        item.autoRenewEnabled === false
+      ) return 'Canceling';
+      const labels = {
+        active: 'Active',
+        trial: 'Trial',
+        grace_period: 'Grace Period',
+        billing_retry: 'Billing Retry',
+        expired: 'Expired',
+        revoked: 'Refunded / Revoked',
+        unknown: 'Unknown'
+      };
+      return labels[item.status] || String(item.status || 'Unknown').replaceAll('_', ' ');
+    }
+
+    function statusBadge(item) {
+      const label = statusLabel(item);
+      let klass = 'badge';
+      if (['Active', 'Trial', 'Grace Period'].includes(label)) klass += ' positive';
+      if (['Canceling', 'Billing Retry'].includes(label)) klass += ' warning';
+      if (['Expired', 'Refunded / Revoked'].includes(label)) klass += ' danger';
+      return '<span class="' + klass + '">' + html(label) + '</span>';
+    }
+
+    function stageBadge(stage) {
+      if (stage === 'commission_earning') {
+        return '<span class="badge positive">Commission-Earning</span>';
+      }
+      return '<span class="badge warning">$0.99 Promo</span>';
     }
 
     function html(value) {
@@ -441,6 +540,28 @@ function renderPartnerDashboardPage(token) {
 
     function row(name, value) {
       return '<div class="row"><span class="name">' + html(name) + '</span><span class="number">' + html(value) + '</span></div>';
+    }
+
+    function renderSubscriberActivity(items) {
+      if (!Array.isArray(items) || items.length === 0) {
+        return '<div class="empty">No verified subscriber activity in this range.</div>';
+      }
+
+      const rows = items.map(item =>
+        '<tr>' +
+          '<td><span class="alias">' + html(item.subscriberAlias || '—') + '</span></td>' +
+          '<td>' + html(dateLabel(item.joinedAt)) + '</td>' +
+          '<td>' + html(planLabel(item.plan)) + '</td>' +
+          '<td>' + stageBadge(item.stage) + '</td>' +
+          '<td>' + statusBadge(item) + '</td>' +
+          '<td>' + html(dateLabel(item.lastActivityAt, true)) + '</td>' +
+        '</tr>'
+      ).join('');
+
+      return '<div class="activity-wrap"><table class="activity-table">' +
+        '<thead><tr>' +
+          '<th>Subscriber</th><th>Joined</th><th>Plan</th><th>Stage</th><th>Status</th><th>Last Activity</th>' +
+        '</tr></thead><tbody>' + rows + '</tbody></table></div>';
     }
 
     function render(data) {
@@ -458,32 +579,51 @@ function renderPartnerDashboardPage(token) {
       text('estimatedThisMonth', money(o.estimatedThisMonth));
       text('currentlyOwed', money(o.currentlyOwed));
       text('promoSubscribers', number(o.promoSubscribers));
-      text('activePaidSubscribers', number(o.activePaidSubscribers));
+      text('commissionEarningSubscribers', number(o.commissionEarningSubscribers));
       text('canceling', number(o.canceling));
       text('promoNonRenewals', number(o.promoNonRenewals));
+      text('expired', number(o.expired));
+      text('billingRetry', number(o.billingRetry));
       text('promoRenewalRate', percent(o.promoRenewalRate));
+      text('paidConversionRate', percent(o.paidConversionRate));
+      text('activeRetention', percent(o.activeRetention));
+      text('cancellationRate', percent(o.cancellationRate));
       text('lastPayment', o.lastPayment ? money(o.lastPayment.amount) : '—');
+      text('lifetimeEligibleRevenue', money(o.lifetimeEligibleRevenue));
+      text('lifetimeCommissionEarned', money(o.lifetimeCommissionEarned));
+      text('lifetimePaid', money(o.lifetimePaid));
       text('commissionRate', data.compensation ? percent(Number(data.compensation.rate) * 100) : '—');
       text('commissionBasis', readableBasis(data.compensation?.basis));
-      text('freshness', data.dataFreshness.latestAppleStateDate ? 'Apple data through ' + data.dataFreshness.latestAppleStateDate : 'Awaiting Apple data');
 
-      document.getElementById('dataNotice').style.display = data.dataFreshness.status === 'awaiting_apple_data' ? 'block' : 'none';
+      const freshnessValue = data.dataFreshness?.latestVerifiedSubscriptionAt || data.dataFreshness?.latestAppleStateDate;
+      text('freshness', freshnessValue ? 'Apple data through ' + dateLabel(freshnessValue, true) : 'Awaiting Apple data');
+      document.getElementById('dataNotice').style.display = data.dataFreshness?.status === 'awaiting_apple_data' ? 'block' : 'none';
 
       document.getElementById('subscriberBreakdown').innerHTML = [
         row('Total Referrals', number(s.totalReferrals)),
-        row('New Referrals in Selected Period', number(s.newReferrals)),
-        row('Active Subscribers', number(s.activeSubscribers)),
-        row('$0.99 Promo Subscribers', number(s.promoSubscribers)),
-        row('Active Paid Subscribers', number(s.activePaidSubscribers)),
+        row('Referrals Acquired in Selected Period', number(s.newReferrals)),
+        row('Active Now from Selected Period', number(s.activeSubscribers)),
+        row('$0.99 Promo Now from Selected Period', number(s.promoSubscribers)),
+        row('Commission-Earning Now from Selected Period', number(s.commissionEarningSubscribers)),
         row('Promo Non-Renewals', number(s.promoNonRenewals)),
-        row('Canceling', number(s.canceling)),
-        row('Billing Retry', number(s.billingRetry)),
+        row('Canceling Now from Selected Period', number(s.canceling)),
+        row('Expired', number(s.expired)),
+        row('Billing Retry Now from Selected Period', number(s.billingRetry)),
       ].join('');
 
       document.getElementById('performanceBreakdown').innerHTML = [
         row('Promo Renewal Rate', percent(p.promoRenewalRate)),
         row('Promo Non-Renewal Rate', percent(p.promoNonRenewalRate)),
+        row('Selected Cohort Paid Conversion', percent(p.paidConversionRate)),
+        row('Selected Cohort Active Retention', percent(p.activeRetention)),
+        row('Cancellation Rate', percent(p.cancellationRate)),
+        row('Eligible Revenue Generated', money(payouts.lifetimeEligibleRevenue)),
+        row('Lifetime Commission Earned', money(payouts.lifetimeCommissionEarned)),
+        row('Lifetime Paid', money(payouts.lifetimePaid)),
       ].join('');
+
+      document.getElementById('subscriberActivity').className = '';
+      document.getElementById('subscriberActivity').innerHTML = renderSubscriberActivity(b.anonymousSubscriberActivity);
 
       const history = Array.isArray(payouts.history) ? payouts.history : [];
       const rangeStart = String(data.range?.start || '2000-01-01').slice(0, 10);
@@ -514,6 +654,7 @@ function renderPartnerDashboardPage(token) {
               money(line.revenue)
             )),
             row('Eligible Revenue', money(item.eligible_revenue)),
+            row('Commission Basis', readableBasis(item.commission_basis)),
             row('Commission Rate', percent(Number(item.commission_rate) * 100)),
           ];
           if (adjustment !== 0) rows.push(row('Adjustments', money(adjustment)));
