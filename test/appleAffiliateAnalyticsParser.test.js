@@ -5,7 +5,7 @@ import {
   normalizeAppleSubscriptionEventRows,
   normalizeAppleSubscriptionStateRows,
   parseAppleTsv,
-} from './lib/appleAffiliateAnalyticsParser.js';
+} from '../lib/appleAffiliateAnalyticsParser.js';
 
 test('parses Apple subscription event Vanity Code into the affiliate code', () => {
   const tsv = [
