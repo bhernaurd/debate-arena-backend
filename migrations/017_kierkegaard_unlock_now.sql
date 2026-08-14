@@ -1,50 +1,25 @@
 -- 017_kierkegaard_unlock_now.sql
 --
--- Unlocks Søren Kierkegaard for Agora Pro immediately while preserving the
--- already-approved September 11-13, 2026 Open Access Weekend and the existing
--- post-event grace-preview rules.
+-- RETIRED BEFORE PRODUCTION APPLICATION on August 14, 2026.
 --
--- Official timezone: America/New_York
--- Pro access begins: Wednesday, August 12, 2026 at 12:00 AM EDT
---                    (2026-08-12 04:00:00+00)
--- Open Access remains: September 11, 2026 at 12:00 AM EDT for 72 hours
+-- The original version of this migration immediately unlocked Kierkegaard
+-- using an obsolete August 2026 launch date. Production never applied migration
+-- 017, so that behavior has been removed before this migration enters database
+-- history.
+--
+-- This migration is intentionally inert. It exists only to preserve migration
+-- version 017 so the normal migration runner can advance safely.
+--
+-- IMPORTANT:
+--   * Do not unlock Kierkegaard from migration 017.
+--   * Do not change Kierkegaard release dates from migration 017.
+--   * Do not change Dostoevsky or any other philosopher from migration 017.
+--   * Do not change Ranked configuration from migration 017.
+--   * Kierkegaard's planned Open Access Weekend is September 11-13, 2026.
+--   * The real Kierkegaard release configuration must be created in a NEW
+--     forward migration using the next unused migration version after 018.
 --
 -- The migration runner wraps this file in a transaction. Do not add BEGIN or
 -- COMMIT statements here.
 
-UPDATE expanded_philosopher_releases
-SET
-    pro_launch_at = TIMESTAMPTZ '2026-08-12 04:00:00+00',
-    updated_at = CURRENT_TIMESTAMP
-WHERE philosopher_id = 'kierkegaard';
-
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM expanded_philosopher_releases
-        WHERE philosopher_id = 'kierkegaard'
-          AND pro_launch_at = TIMESTAMPTZ '2026-08-12 04:00:00+00'
-          AND free_event_starts_at = TIMESTAMPTZ '2026-09-11 04:00:00+00'
-          AND free_event_duration_hours = 72
-          AND is_enabled = TRUE
-    ) THEN
-        RAISE EXCEPTION
-            'Kierkegaard immediate unlock failed or release schedule is not the approved configuration';
-    END IF;
-END
-$$;
-
-SELECT
-    philosopher_id,
-    display_name,
-    pro_launch_at,
-    free_event_starts_at,
-    free_event_ends_at,
-    grace_starts_at,
-    grace_ends_at,
-    preview_debate_limit,
-    official_time_zone,
-    is_enabled
-FROM expanded_philosopher_release_schedule
-WHERE philosopher_id = 'kierkegaard';
+SELECT 1 AS retired_migration_017;
