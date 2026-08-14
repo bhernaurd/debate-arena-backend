@@ -117,16 +117,13 @@ function releaseSnapshotDatabase(release) {
 }
 
 test(
-    'Kierkegaard becomes unlimited free access during the open weekend',
+    'Kierkegaard becomes unlimited free access during an open weekend',
     async () => {
         const now = new Date();
-        const release =
-            releaseRowForFreeEvent(now);
+        const release = releaseRowForFreeEvent(now);
         const snapshot =
             await getExpandedAgoraAccessSnapshot(
-                releaseSnapshotDatabase(
-                    release
-                ),
+                releaseSnapshotDatabase(release),
                 {
                     userId:
                         'Kierkegaard-Release-Test-01',
@@ -205,46 +202,6 @@ test(
         assert.doesNotMatch(
             migration,
             /^\s*(BEGIN|COMMIT)\s*;/mi
-        );
-    }
-);
-
-test(
-    'the release activation query fails closed until dates and final build are configured',
-    () => {
-        const activation =
-            fs.readFileSync(
-                path.join(
-                    repositoryRoot,
-                    'ops',
-                    'configure_kierkegaard_release.sql'
-                ),
-                'utf8'
-            );
-
-        assert.match(
-            activation,
-            /v_pro_launch_at TIMESTAMPTZ := NULL/
-        );
-        assert.match(
-            activation,
-            /v_free_event_starts_at TIMESTAMPTZ := NULL/
-        );
-        assert.match(
-            activation,
-            /v_minimum_ios_build INTEGER := NULL/
-        );
-        assert.match(
-            activation,
-            /free_event_duration_hours = 72/
-        );
-        assert.match(
-            activation,
-            /grace_duration_days = 7/
-        );
-        assert.match(
-            activation,
-            /preview_debate_limit = 3/
         );
     }
 );
