@@ -196,7 +196,7 @@ test(
 
         assert.match(
             migration,
-            /NEW\s+forward migration/i
+            /created in a NEW[\s\S]*forward migration using/i
         );
 
         assert.doesNotMatch(
