@@ -64,3 +64,18 @@ test('conversion and retention copy distinguishes historical conversion from cur
   assert.match(source, /still have subscription access right now/);
   assert.match(source, /previously converted but later expired are not counted as active/);
 });
+
+
+test('breakdown uses explicit calendar-month navigation with YTD and Lifetime shortcuts', () => {
+  assert.match(source, /id="selectedMonthLabel"/);
+  assert.match(source, /id="monthPicker" type="month"/);
+  assert.match(source, /id="previousMonth"/);
+  assert.match(source, /id="nextMonth"/);
+  assert.match(source, /data-range="ytd"/);
+  assert.match(source, /data-range="lifetime"/);
+  assert.match(source, /month:/);
+  assert.match(source, /In Progress/);
+  assert.match(source, /Awaiting Finalization/);
+  assert.doesNotMatch(source, /data-range="last_month"/);
+  assert.doesNotMatch(source, /data-range="last_3_months"/);
+});
