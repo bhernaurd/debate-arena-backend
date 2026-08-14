@@ -79,3 +79,31 @@ test('breakdown uses explicit calendar-month navigation with YTD and Lifetime sh
   assert.doesNotMatch(source, /data-range="last_month"/);
   assert.doesNotMatch(source, /data-range="last_3_months"/);
 });
+
+test('owner affiliate admin dashboard is a locked shell backed by admin-only APIs', () => {
+  assert.match(source, /\/admin\/affiliates/);
+  assert.match(source, /AFFILIATE_ADMIN_KEY/);
+  assert.match(source, /sessionStorage\.getItem\('agoraAffiliateAdminKey'\)/);
+  assert.match(source, /Overview/);
+  assert.match(source, /Monthly Payouts/);
+  assert.match(source, /Affiliate Alerts/);
+  assert.match(source, /Production only/);
+  assert.match(source, /\/api\/admin\/affiliates\/:id\/operational-status', adminOnly/);
+  assert.match(source, /\/api\/admin\/affiliate-alerts', adminOnly/);
+  assert.match(source, /\/api\/admin\/affiliate-payouts', adminOnly/);
+  assert.doesNotMatch(source, /const\s+adminKey\s*=\s*['"][A-Za-z0-9+/=_-]{32,}['"]/);
+});
+
+test('admin dashboard keeps destructive financial writes explicit', () => {
+  assert.match(source, /Only record money that was actually sent/);
+  assert.match(source, /Record Actual Payment/);
+  assert.match(source, /Only a completed prior calendar month can be finalized/);
+  assert.match(source, /later Apple corrections carry forward/);
+  assert.match(source, /Regenerate .*private dashboard link/);
+});
+
+test('admin payout UI can build a month before payout rows already exist', () => {
+  assert.match(source, /id="refreshMonth"/);
+  assert.match(source, /\/api\/admin\/affiliate-payouts\/refresh-period/);
+  assert.match(source, /Refresh Month after Apple data is available/);
+});
