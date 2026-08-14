@@ -41,6 +41,9 @@ import { createRankedTopicGeneratorService } from './lib/rankedTopicGeneratorSer
 import {
   createAccountSubscriptionOwnershipService,
 } from './lib/accountSubscriptionOwnership.js';
+import {
+  createAffiliateSubscriptionAttributionService,
+} from './lib/affiliateSubscriptionAttributionService.js';
 
 import './pushScheduler.js';
 import './aiJobWorker.js';
@@ -310,6 +313,27 @@ const accountSubscriptionOwnershipService =
     accountAuthService,
   });
 
+const affiliateSubscriptionAttributionEnabled =
+  String(
+    process.env.AFFILIATE_SUBSCRIPTION_ATTRIBUTION_ENABLED ??
+      'true'
+  )
+    .trim()
+    .toLowerCase() !== 'false';
+
+const affiliateSubscriptionAttributionService =
+  affiliateSubscriptionAttributionEnabled
+    ? createAffiliateSubscriptionAttributionService({
+        pool,
+      })
+    : null;
+
+if (!affiliateSubscriptionAttributionEnabled) {
+  console.warn(
+    '[AffiliateAttribution] Live Apple subscription attribution is disabled. Stored verified transactions can be reconciled later.'
+  );
+}
+
 const accountDebateHistoryService =
   createAccountDebateHistoryService({
     pool,
@@ -511,6 +535,7 @@ app.use(questionsRouter);
 app.use(aiJobsRouter);
 app.use(createAppStoreSubscriptionRouter(pool, {
   accountSubscriptionOwnershipService,
+  affiliateSubscriptionAttributionService,
 }));
 
 app.use('/analytics', createAnalyticsRouter(pool, {
