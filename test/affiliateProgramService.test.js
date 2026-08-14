@@ -68,6 +68,19 @@ test('partner dashboard contains Overview and Breakdown tabs', () => {
   assert.match(html, /Currently Owed/);
 });
 
+test('partner dashboard uses one mutually exclusive current-state model', () => {
+  const html = renderPartnerDashboardPage('abcdefghijklmnopqrstuvwxyz0123456789ABCDE');
+  assert.match(html, /Each referred subscriber appears in one current state only/);
+  assert.match(html, /Promo Active/);
+  assert.match(html, /Paid \+ Renewing/);
+  assert.match(html, /Paid \+ Canceling/);
+  assert.match(html, /Billing Retry/);
+  assert.match(html, /Expired/);
+  assert.match(html, /Pending Apple State/);
+  assert.match(html, /Current State<\/th>/);
+  assert.doesNotMatch(html, /<th>Stage<\/th>/);
+});
+
 test('classifies only unambiguous Apple renewal/recovery metrics as automatic base-price commission', async () => {
   const { classifyAppleMetricForBasePrice } = await import('../lib/affiliateProgramService.js');
   assert.deepEqual(classifyAppleMetricForBasePrice('full_price_renewals'), {
@@ -93,13 +106,19 @@ test('processing-date comparison rejects older Apple instances', async () => {
 test('partner dashboard exposes the approved affiliate metrics without a creator-name browser', () => {
   const html = renderPartnerDashboardPage('abcdefghijklmnopqrstuvwxyz0123456789ABCDE');
   assert.doesNotMatch(html, /Search creators/i);
-  assert.match(html, /Commission-Earning Subscribers/);
+  assert.match(html, /Current Subscribers/);
+  assert.match(html, /Promo Active/);
+  assert.match(html, /Paid \+ Renewing/);
+  assert.match(html, /Paid \+ Canceling/);
+  assert.match(html, /Billing Retry/);
+  assert.match(html, /Expired/);
   assert.match(html, /Eligible Revenue Generated/);
   assert.match(html, /Lifetime Commission Earned/);
   assert.match(html, /Lifetime Paid/);
-  assert.match(html, /Expired/);
   assert.match(html, /Anonymous Subscriber Activity/);
   assert.match(html, /Promotional \$0\.99 payments are excluded from commission/);
+  assert.doesNotMatch(html, /Commission-Earning Subscribers/);
+  assert.doesNotMatch(html, />Canceling<\/div>/);
 });
 
 
@@ -114,6 +133,11 @@ test('dashboard service derives anonymous subscriber state from verified Apple s
   assert.match(source, /LEFT JOIN app_store_transactions t/);
   assert.match(source, /affiliate\.is_test \? 'Sandbox' : 'Production'/);
   assert.match(source, /commissionEarningSubscribers/);
+  assert.match(source, /promoActiveSubscribers/);
+  assert.match(source, /paidRenewingSubscribers/);
+  assert.match(source, /paidCancelingSubscribers/);
+  assert.match(source, /pendingStateSubscribers/);
+  assert.match(source, /current_state/);
   assert.match(source, /anonymousSubscriberActivity/);
   assert.match(source, /subscriberAlias/);
   assert.match(source, /offer_type::text/);
