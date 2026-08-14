@@ -985,6 +985,70 @@ async function insertSubscriptionEvent(client, {
     );
 }
 
+async function observeAffiliateAttributionSafely(
+    client,
+    {
+        affiliateSubscriptionAttributionService,
+        transaction,
+        environment,
+        source,
+    }
+) {
+    if (!affiliateSubscriptionAttributionService) {
+        return null;
+    }
+
+    // Affiliate accounting must never prevent Apple-authoritative subscription
+    // access from being persisted. The verified transaction is already stored,
+    // so an unexpected attribution failure can be reconciled later without
+    // denying or delaying Pro access. Expected review states (unknown offer,
+    // missing identifier, conflicts) are handled by the attribution service and
+    // do not throw.
+    const savepoint = 'affiliate_subscription_attribution';
+    await client.query(`SAVEPOINT ${savepoint}`);
+
+    try {
+        const result =
+            await affiliateSubscriptionAttributionService
+                .observeVerifiedTransaction({
+                    client,
+                    transaction,
+                    environment,
+                    source,
+                });
+
+        await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+        return result;
+    } catch (error) {
+        try {
+            await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
+            await client.query(`RELEASE SAVEPOINT ${savepoint}`);
+        } catch (savepointError) {
+            // If savepoint recovery itself fails, the outer transaction is no
+            // longer trustworthy. Re-throw so the normal subscription rollback
+            // path can protect database consistency.
+            savepointError.cause = error;
+            throw savepointError;
+        }
+
+        console.error(
+            '[AppStoreSubscriptions] Affiliate attribution deferred for reconciliation.',
+            {
+                errorCode:
+                    error?.code ||
+                    'affiliate_attribution_processing_failed',
+                source,
+                environment,
+            }
+        );
+
+        return {
+            status: 'processing_deferred',
+            attributed: false,
+        };
+    }
+}
+
 async function persistVerifiedSnapshot(client, {
     transaction,
     renewal = null,
@@ -999,6 +1063,7 @@ async function persistVerifiedSnapshot(client, {
     metadata = null,
     pricingCohortHint = 'unknown',
     paywallSessionId = null,
+    affiliateSubscriptionAttributionService = null,
 }) {
     const userId = await resolveUserId({
         client,
@@ -1056,10 +1121,22 @@ async function persistVerifiedSnapshot(client, {
         metadata,
     });
 
+    const affiliateAttribution =
+        await observeAffiliateAttributionSafely(
+            client,
+            {
+                affiliateSubscriptionAttributionService,
+                transaction,
+                environment,
+                source,
+            }
+        );
+
     return {
         ignored: false,
         userId,
         entitlement,
+        affiliateAttribution,
     };
 }
 
@@ -1067,6 +1144,7 @@ export function createAppStoreSubscriptionRouter(
     pool,
     {
         accountSubscriptionOwnershipService = null,
+        affiliateSubscriptionAttributionService = null,
     } = {}
 ) {
     const router = express.Router();
@@ -1083,6 +1161,17 @@ export function createAppStoreSubscriptionRouter(
     ) {
         throw new Error(
             'A valid account subscription ownership service is required.'
+        );
+    }
+
+
+    if (
+        affiliateSubscriptionAttributionService != null &&
+        typeof affiliateSubscriptionAttributionService
+            .observeVerifiedTransaction !== 'function'
+    ) {
+        throw new Error(
+            'A valid affiliate subscription attribution service is required.'
         );
     }
 
@@ -1190,6 +1279,7 @@ export function createAppStoreSubscriptionRouter(
                 },
                 pricingCohortHint,
                 paywallSessionId,
+                affiliateSubscriptionAttributionService,
             });
 
             let accountOwnership = null;
@@ -1443,6 +1533,7 @@ export function createAppStoreSubscriptionRouter(
                         notificationType,
                         subtype,
                     },
+                    affiliateSubscriptionAttributionService,
                 });
             }
 
