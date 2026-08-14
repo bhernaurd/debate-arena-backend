@@ -109,6 +109,21 @@ function escapeHtml(value) {
     .replaceAll("'", '&#039;');
 }
 
+function renderInfoButton(label, description) {
+  const safeLabel = escapeHtml(label);
+  const safeDescription = escapeHtml(description);
+
+  return `<button
+    class="info-button"
+    type="button"
+    aria-label="About ${safeLabel}"
+    aria-expanded="false"
+    aria-describedby="infoTooltip"
+    data-info-title="${safeLabel}"
+    data-info-text="${safeDescription}"
+  >i</button>`;
+}
+
 function renderPartnerDashboardPage(token) {
   const safeToken = escapeHtml(token);
 
@@ -214,8 +229,80 @@ function renderPartnerDashboardPage(token) {
     .section-title h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 22px; font-weight: 500; }
     .section-title span { color: var(--muted); font-size: 12px; }
     .mini-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-    .mini { border: 1px solid rgba(255,255,255,.06); background: rgba(255,255,255,.025); border-radius: 14px; padding: 15px; }
+    .mini { position: relative; border: 1px solid rgba(255,255,255,.06); background: rgba(255,255,255,.025); border-radius: 14px; padding: 15px; }
     .mini .value { font-size: 22px; margin-top: 5px; }
+    .metric-heading {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+    .metric-heading .label { min-width: 0; }
+    .name-with-info,
+    .title-with-info {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+    }
+    .info-button {
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      min-width: 18px;
+      padding: 0;
+      border: 1px solid rgba(216,171,82,.34);
+      border-radius: 999px;
+      background: rgba(216,171,82,.055);
+      color: var(--gold-soft);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1;
+      cursor: pointer;
+      opacity: .72;
+      transition: opacity .15s ease, background .15s ease, border-color .15s ease, transform .15s ease;
+      flex: 0 0 auto;
+    }
+    .info-button:hover,
+    .info-button:focus-visible,
+    .info-button[aria-expanded="true"] {
+      opacity: 1;
+      border-color: rgba(216,171,82,.66);
+      background: rgba(216,171,82,.12);
+      outline: none;
+    }
+    .info-button:active { transform: scale(.96); }
+    .info-tooltip {
+      position: fixed;
+      z-index: 1000;
+      display: none;
+      width: min(300px, calc(100vw - 24px));
+      padding: 13px 14px;
+      border: 1px solid rgba(216,171,82,.34);
+      border-radius: 12px;
+      background: rgba(22,18,28,.985);
+      box-shadow: 0 18px 55px rgba(0,0,0,.52);
+      color: #ddd5e2;
+      pointer-events: none;
+    }
+    .info-tooltip.open { display: block; }
+    .info-tooltip-title {
+      color: var(--gold-soft);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.3;
+      margin-bottom: 5px;
+    }
+    .info-tooltip-text {
+      color: #c8c0ce;
+      font-size: 12px;
+      line-height: 1.48;
+    }
     .split { display: grid; grid-template-columns: 1.15fr .85fr; gap: 14px; }
     .rows { display: grid; gap: 0; }
     .row { display: flex; justify-content: space-between; gap: 20px; padding: 13px 0; border-bottom: 1px solid rgba(255,255,255,.055); }
@@ -293,6 +380,7 @@ function renderPartnerDashboardPage(token) {
       .tabs { width: 100%; }
       .tab { flex: 1; }
       .payout-grid { grid-template-columns: repeat(2, 1fr); }
+      .info-button { width: 20px; height: 20px; min-width: 20px; }
     }
   </style>
 </head>
@@ -319,22 +407,46 @@ function renderPartnerDashboardPage(token) {
     <section id="overviewTab">
       <div class="grid">
         <article class="card primary">
-          <div class="label">Total Referrals</div>
+          <div class="metric-heading">
+            <div class="label">Total Referrals</div>
+            ${renderInfoButton(
+              'Total Referrals',
+              'The total number of verified Apple subscription chains attributed to your creator code. Each subscription chain is counted once, even when it renews.'
+            )}
+          </div>
           <div class="value" id="totalReferrals">—</div>
           <div class="subvalue">Verified from Apple offer-code and subscription data</div>
         </article>
         <article class="card primary">
-          <div class="label">Active Subscribers</div>
+          <div class="metric-heading">
+            <div class="label">Active Subscribers</div>
+            ${renderInfoButton(
+              'Active Subscribers',
+              'Attributed subscribers who currently still have subscription access. This can include subscribers in the $0.99 promo period and commission-earning paid subscribers.'
+            )}
+          </div>
           <div class="value" id="activeSubscribers">—</div>
           <div class="subvalue">Active promo and commission-earning subscriptions</div>
         </article>
         <article class="card primary">
-          <div class="label">Estimated This Month</div>
+          <div class="metric-heading">
+            <div class="label">Estimated This Month</div>
+            ${renderInfoButton(
+              'Estimated This Month',
+              'Your current-month commission estimate based on data available so far. It can change before the month is finalized and reconciled.'
+            )}
+          </div>
           <div class="value money" id="estimatedThisMonth">—</div>
           <div class="subvalue">Current month, not yet finalized</div>
         </article>
         <article class="card owed">
-          <div class="label">Currently Owed</div>
+          <div class="metric-heading">
+            <div class="label">Currently Owed</div>
+            ${renderInfoButton(
+              'Currently Owed',
+              'Finalized commission that has not yet been paid. Open monthly estimates are not included here until they are finalized.'
+            )}
+          </div>
           <div class="value money" id="currentlyOwed">—</div>
           <div class="subvalue">Finalized unpaid commission</div>
         </article>
@@ -343,21 +455,102 @@ function renderPartnerDashboardPage(token) {
       <div class="section">
         <div class="section-title"><h2>Subscriber Snapshot</h2><span id="freshness"></span></div>
         <div class="mini-grid">
-          <div class="mini"><div class="label">$0.99 Promo Subscribers</div><div class="value" id="promoSubscribers">—</div></div>
-          <div class="mini"><div class="label">Commission-Earning Subscribers</div><div class="value" id="commissionEarningSubscribers">—</div></div>
-          <div class="mini"><div class="label">Canceling</div><div class="value" id="canceling">—</div></div>
-          <div class="mini"><div class="label">Promo Non-Renewals</div><div class="value" id="promoNonRenewals">—</div></div>
-          <div class="mini"><div class="label">Expired</div><div class="value" id="expired">—</div></div>
-          <div class="mini"><div class="label">Billing Retry</div><div class="value" id="billingRetry">—</div></div>
+          <div class="mini">
+            <div class="metric-heading">
+              <div class="label">$0.99 Promo Subscribers</div>
+              ${renderInfoButton(
+                '$0.99 Promo Subscribers',
+                'Subscribers currently in the $0.99 promotional period linked to your code. The $0.99 promotional payment itself is excluded from commission.'
+              )}
+            </div>
+            <div class="value" id="promoSubscribers">—</div>
+          </div>
+          <div class="mini">
+            <div class="metric-heading">
+              <div class="label">Commission-Earning Subscribers</div>
+              ${renderInfoButton(
+                'Commission-Earning Subscribers',
+                'Attributed subscribers currently on a commission-eligible paid subscription. This excludes the $0.99 promo period and subscription states that are not commission eligible.'
+              )}
+            </div>
+            <div class="value" id="commissionEarningSubscribers">—</div>
+          </div>
+          <div class="mini">
+            <div class="metric-heading">
+              <div class="label">Canceling</div>
+              ${renderInfoButton(
+                'Canceling',
+                'Subscribers who turned off auto-renew but still have access until their current paid or promotional period ends. They can still be active until expiration.'
+              )}
+            </div>
+            <div class="value" id="canceling">—</div>
+          </div>
+          <div class="mini">
+            <div class="metric-heading">
+              <div class="label">Promo Non-Renewals</div>
+              ${renderInfoButton(
+                'Promo Non-Renewals',
+                'Subscribers whose $0.99 promotional period ended without a later commission-eligible paid renewal being verified.'
+              )}
+            </div>
+            <div class="value" id="promoNonRenewals">—</div>
+          </div>
+          <div class="mini">
+            <div class="metric-heading">
+              <div class="label">Expired</div>
+              ${renderInfoButton(
+                'Expired',
+                'Attributed subscriptions whose access has ended and that are no longer active.'
+              )}
+            </div>
+            <div class="value" id="expired">—</div>
+          </div>
+          <div class="mini">
+            <div class="metric-heading">
+              <div class="label">Billing Retry</div>
+              ${renderInfoButton(
+                'Billing Retry',
+                'Subscriptions for which a renewal payment failed and Apple is attempting to recover billing. The subscriber may become active again if recovery succeeds.'
+              )}
+            </div>
+            <div class="value" id="billingRetry">—</div>
+          </div>
         </div>
       </div>
 
       <div class="section">
         <div class="section-title"><h2>Financial Snapshot</h2></div>
         <div class="financial-grid">
-          <div class="mini"><div class="label">Eligible Revenue Generated</div><div class="value money" id="lifetimeEligibleRevenue">—</div></div>
-          <div class="mini"><div class="label">Lifetime Commission Earned</div><div class="value money" id="lifetimeCommissionEarned">—</div></div>
-          <div class="mini"><div class="label">Lifetime Paid</div><div class="value money" id="lifetimePaid">—</div></div>
+          <div class="mini">
+            <div class="metric-heading">
+              <div class="label">Eligible Revenue Generated</div>
+              ${renderInfoButton(
+                'Eligible Revenue Generated',
+                'The total revenue that has been accepted as commission eligible under your compensation agreement. Promotional $0.99 payments are excluded.'
+              )}
+            </div>
+            <div class="value money" id="lifetimeEligibleRevenue">—</div>
+          </div>
+          <div class="mini">
+            <div class="metric-heading">
+              <div class="label">Lifetime Commission Earned</div>
+              ${renderInfoButton(
+                'Lifetime Commission Earned',
+                'The total commission credited to you across finalized payout periods, including finalized adjustments.'
+              )}
+            </div>
+            <div class="value money" id="lifetimeCommissionEarned">—</div>
+          </div>
+          <div class="mini">
+            <div class="metric-heading">
+              <div class="label">Lifetime Paid</div>
+              ${renderInfoButton(
+                'Lifetime Paid',
+                'The total amount of commission payments recorded as paid to you over the life of your affiliate account.'
+              )}
+            </div>
+            <div class="value money" id="lifetimePaid">—</div>
+          </div>
         </div>
       </div>
 
@@ -365,19 +558,43 @@ function renderPartnerDashboardPage(token) {
         <article class="card">
           <div class="section-title"><h2>Performance</h2></div>
           <div class="rows">
-            <div class="row"><span class="name">Promo Renewal Rate</span><span class="number" id="promoRenewalRate">—</span></div>
-            <div class="row"><span class="name">Paid Conversion Rate</span><span class="number" id="paidConversionRate">—</span></div>
-            <div class="row"><span class="name">Active Retention</span><span class="number" id="activeRetention">—</span></div>
-            <div class="row"><span class="name">Cancellation Rate</span><span class="number" id="cancellationRate">—</span></div>
-            <div class="row"><span class="name">Last Payment</span><span class="number" id="lastPayment">—</span></div>
+            <div class="row"><span class="name name-with-info">Promo Renewal Rate ${renderInfoButton(
+              'Promo Renewal Rate',
+              'The percentage of attributed $0.99 promo subscribers who later produced a verified commission-eligible paid renewal.'
+            )}</span><span class="number" id="promoRenewalRate">—</span></div>
+            <div class="row"><span class="name name-with-info">Paid Conversion Rate ${renderInfoButton(
+              'Paid Conversion Rate',
+              'The percentage of attributed referrals that have converted into a commission-earning paid subscription.'
+            )}</span><span class="number" id="paidConversionRate">—</span></div>
+            <div class="row"><span class="name name-with-info">Active Retention ${renderInfoButton(
+              'Active Retention',
+              'The percentage of your attributed subscriber cohort that is still active now.'
+            )}</span><span class="number" id="activeRetention">—</span></div>
+            <div class="row"><span class="name name-with-info">Cancellation Rate ${renderInfoButton(
+              'Cancellation Rate',
+              'The percentage of attributed active subscribers who have turned off auto-renew and are currently scheduled to end.'
+            )}</span><span class="number" id="cancellationRate">—</span></div>
+            <div class="row"><span class="name name-with-info">Last Payment ${renderInfoButton(
+              'Last Payment',
+              'The most recent commission payment recorded as paid to you.'
+            )}</span><span class="number" id="lastPayment">—</span></div>
           </div>
         </article>
         <article class="card">
           <div class="section-title"><h2>Commission Plan</h2></div>
           <div class="rows">
-            <div class="row"><span class="name">Commission</span><span class="number" id="commissionRate">—</span></div>
-            <div class="row"><span class="name">Basis</span><span class="number" id="commissionBasis">—</span></div>
-            <div class="row"><span class="name">$0.99 Promo</span><span class="number">Excluded</span></div>
+            <div class="row"><span class="name name-with-info">Commission ${renderInfoButton(
+              'Commission',
+              'Your agreed commission percentage. The current early-affiliate rate is 50%.'
+            )}</span><span class="number" id="commissionRate">—</span></div>
+            <div class="row"><span class="name name-with-info">Basis ${renderInfoButton(
+              'Commission Basis',
+              'Base Price means commission is calculated from the approved revenue basis. Apple Net Proceeds means commission is calculated from Apple\'s actual reported proceeds rather than estimated fees, taxes, or currency deductions.'
+            )}</span><span class="number" id="commissionBasis">—</span></div>
+            <div class="row"><span class="name name-with-info">$0.99 Promo ${renderInfoButton(
+              '$0.99 Promo',
+              'The promotional $0.99 payment is excluded from commission. Commission begins only when a transaction becomes commission eligible under your plan.'
+            )}</span><span class="number">Excluded</span></div>
           </div>
         </article>
       </div>
@@ -394,18 +611,27 @@ function renderPartnerDashboardPage(token) {
 
       <div class="split">
         <article class="card">
-          <div class="section-title"><h2>Subscriber Breakdown</h2></div>
+          <div class="section-title"><div class="title-with-info"><h2>Subscriber Breakdown</h2>${renderInfoButton(
+            'Subscriber Breakdown',
+            'Shows the selected referral cohort and its current subscription states. Historical ranges describe subscribers acquired during that range and their current state, not a reconstructed historical snapshot.'
+          )}</div></div>
           <div class="rows" id="subscriberBreakdown"></div>
         </article>
         <article class="card">
-          <div class="section-title"><h2>Performance Breakdown</h2></div>
+          <div class="section-title"><div class="title-with-info"><h2>Performance Breakdown</h2>${renderInfoButton(
+            'Performance Breakdown',
+            'Shows conversion, retention, cancellation, and financial performance for the selected range using verified subscription and finalized payout data.'
+          )}</div></div>
           <div class="rows" id="performanceBreakdown"></div>
         </article>
       </div>
 
       <div class="section">
         <article class="card">
-          <div class="section-title"><h2>Anonymous Subscriber Activity</h2><span>Up to 100 referrals in the selected period</span></div>
+          <div class="section-title"><div class="title-with-info"><h2>Anonymous Subscriber Activity</h2>${renderInfoButton(
+            'Anonymous Subscriber Activity',
+            'A privacy-safe activity view of attributed subscriptions. It intentionally does not expose customer identity, Agora account IDs, Apple transaction IDs, or other personal identifiers.'
+          )}</div><span>Up to 100 referrals in the selected period</span></div>
           <div id="subscriberActivity" class="empty">No verified subscriber activity yet.</div>
         </article>
       </div>
@@ -413,7 +639,10 @@ function renderPartnerDashboardPage(token) {
       <div class="section">
         <article class="card">
           <div class="section-title">
-            <h2>Commission Breakdown</h2>
+            <div class="title-with-info"><h2>Commission Breakdown</h2>${renderInfoButton(
+              'Commission Breakdown',
+              'Shows how commission was calculated for the selected payout period, including eligible revenue, commission basis, commission rate, adjustments, and any items held for review.'
+            )}</div>
             <span id="commissionDataStatus"></span>
           </div>
           <div id="commissionBreakdown" class="empty">Awaiting a calculated monthly payout.</div>
@@ -422,7 +651,10 @@ function renderPartnerDashboardPage(token) {
 
       <div class="section">
         <article class="card">
-          <div class="section-title"><h2>Payout History</h2></div>
+          <div class="section-title"><div class="title-with-info"><h2>Payout History</h2>${renderInfoButton(
+            'Payout History',
+            'A record of finalized affiliate payout periods and payments recorded as sent, including any remaining unpaid balance.'
+          )}</div></div>
           <div id="payoutHistory" class="empty">No payout history yet.</div>
         </article>
       </div>
@@ -433,10 +665,119 @@ function renderPartnerDashboardPage(token) {
     </section>
   </main>
 
+  <div id="infoTooltip" class="info-tooltip" role="tooltip" aria-hidden="true">
+    <div id="infoTooltipTitle" class="info-tooltip-title"></div>
+    <div id="infoTooltipText" class="info-tooltip-text"></div>
+  </div>
+
   <script>
     const partnerToken = ${JSON.stringify(safeToken)};
     let currentRange = 'this_month';
     let currentData = null;
+    const infoTooltip = document.getElementById('infoTooltip');
+    const infoTooltipTitle = document.getElementById('infoTooltipTitle');
+    const infoTooltipText = document.getElementById('infoTooltipText');
+    let activeInfoButton = null;
+    let infoTooltipPinned = false;
+
+    function positionInfoTooltip(button) {
+      if (!button || !infoTooltip.classList.contains('open')) return;
+
+      const margin = 12;
+      const gap = 8;
+      const buttonRect = button.getBoundingClientRect();
+      const tooltipRect = infoTooltip.getBoundingClientRect();
+
+      let left = buttonRect.right - tooltipRect.width;
+      left = Math.max(margin, Math.min(left, window.innerWidth - tooltipRect.width - margin));
+
+      let top = buttonRect.bottom + gap;
+      if (top + tooltipRect.height > window.innerHeight - margin) {
+        top = buttonRect.top - tooltipRect.height - gap;
+      }
+      top = Math.max(margin, Math.min(top, window.innerHeight - tooltipRect.height - margin));
+
+      infoTooltip.style.left = Math.round(left) + 'px';
+      infoTooltip.style.top = Math.round(top) + 'px';
+    }
+
+    function showInfoTooltip(button, pinned = false) {
+      if (!button) return;
+
+      if (activeInfoButton && activeInfoButton !== button) {
+        activeInfoButton.setAttribute('aria-expanded', 'false');
+      }
+
+      activeInfoButton = button;
+      infoTooltipPinned = pinned;
+      infoTooltipTitle.textContent = button.dataset.infoTitle || 'About this metric';
+      infoTooltipText.textContent = button.dataset.infoText || '';
+      button.setAttribute('aria-expanded', 'true');
+      infoTooltip.setAttribute('aria-hidden', 'false');
+      infoTooltip.classList.add('open');
+      positionInfoTooltip(button);
+    }
+
+    function hideInfoTooltip() {
+      if (activeInfoButton) {
+        activeInfoButton.setAttribute('aria-expanded', 'false');
+      }
+      activeInfoButton = null;
+      infoTooltipPinned = false;
+      infoTooltip.classList.remove('open');
+      infoTooltip.setAttribute('aria-hidden', 'true');
+    }
+
+    document.querySelectorAll('.info-button').forEach(button => {
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+
+        if (activeInfoButton === button && infoTooltipPinned) {
+          hideInfoTooltip();
+          return;
+        }
+
+        showInfoTooltip(button, true);
+      });
+
+      button.addEventListener('mouseenter', () => {
+        if (!infoTooltipPinned) showInfoTooltip(button, false);
+      });
+
+      button.addEventListener('mouseleave', () => {
+        if (!infoTooltipPinned && activeInfoButton === button) {
+          hideInfoTooltip();
+        }
+      });
+
+      button.addEventListener('focus', () => {
+        if (!infoTooltipPinned) showInfoTooltip(button, false);
+      });
+
+      button.addEventListener('blur', () => {
+        if (!infoTooltipPinned && activeInfoButton === button) {
+          hideInfoTooltip();
+        }
+      });
+    });
+
+    document.addEventListener('click', event => {
+      if (!activeInfoButton) return;
+      if (activeInfoButton.contains(event.target)) return;
+      hideInfoTooltip();
+    });
+
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') hideInfoTooltip();
+    });
+
+    window.addEventListener('resize', () => {
+      if (activeInfoButton) positionInfoTooltip(activeInfoButton);
+    });
+
+    window.addEventListener('scroll', () => {
+      if (activeInfoButton) positionInfoTooltip(activeInfoButton);
+    }, true);
 
     function text(id, value) {
       document.getElementById(id).textContent = value;
