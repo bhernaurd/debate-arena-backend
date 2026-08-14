@@ -1279,6 +1279,838 @@ function renderPartnerDashboardPage(token) {
 </html>`;
 }
 
+function adminPageSecurityHeaders(_req, res, next) {
+  res.removeHeader('Access-Control-Allow-Origin');
+  res.removeHeader('Access-Control-Allow-Credentials');
+  res.setHeader('Cache-Control', 'no-store, private');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+  );
+  return next();
+}
+
+function renderAffiliateAdminDashboardPage() {
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow,noarchive" />
+  <title>The Agora · Affiliate Admin</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #09080d;
+      --panel: #121019;
+      --panel-2: #17141f;
+      --panel-3: #1c1824;
+      --border: rgba(216,171,82,.18);
+      --border-strong: rgba(216,171,82,.42);
+      --gold: #d8ab52;
+      --gold-soft: #f0d89f;
+      --text: #f7f2e8;
+      --muted: #9d97aa;
+      --positive: #8fd0ae;
+      --warning: #e4be78;
+      --danger: #df8f92;
+      --info: #9ab9df;
+      --shadow: 0 20px 70px rgba(0,0,0,.34);
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+    body {
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at 50% -10%, rgba(111,74,151,.16), transparent 38rem), var(--bg);
+    }
+    button, input, select, textarea { font: inherit; }
+    button { color: inherit; }
+    .shell { width: min(1260px, calc(100% - 32px)); margin: 0 auto; padding: 30px 0 70px; }
+    .topbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 22px; }
+    .eyebrow { color: var(--gold); letter-spacing: .17em; font-size: 11px; font-weight: 750; }
+    h1 { margin: 8px 0 0; font: 500 clamp(32px,5vw,48px)/1.05 Georgia,"Times New Roman",serif; }
+    .top-actions { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+    .button {
+      border: 1px solid rgba(255,255,255,.09); background: rgba(255,255,255,.035); color: #ddd6e2;
+      padding: 10px 13px; border-radius: 11px; cursor: pointer; font-weight: 650; font-size: 13px;
+    }
+    .button:hover { background: rgba(255,255,255,.065); }
+    .button.gold { border-color: var(--border-strong); background: rgba(216,171,82,.10); color: var(--gold-soft); }
+    .button.gold:hover { background: rgba(216,171,82,.16); }
+    .button.danger { border-color: rgba(223,143,146,.28); color: #efb8ba; background: rgba(223,143,146,.07); }
+    .button.small { padding: 7px 9px; font-size: 11px; border-radius: 9px; }
+    .button:disabled { opacity: .38; cursor: not-allowed; }
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; margin-right: 6px; }
+    .status-dot.live { background: var(--positive); box-shadow: 0 0 0 4px rgba(143,208,174,.08); }
+    .session { color: var(--muted); font-size: 12px; display: flex; align-items: center; }
+    .tabs { display: inline-flex; gap: 5px; padding: 5px; border: 1px solid rgba(255,255,255,.07); background: rgba(255,255,255,.025); border-radius: 14px; margin-bottom: 22px; }
+    .tab { border: 0; background: transparent; color: var(--muted); padding: 10px 18px; border-radius: 10px; cursor: pointer; font-weight: 700; }
+    .tab.active { background: var(--panel-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+    .hidden { display: none !important; }
+    .summary-grid { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 10px; }
+    .card { background: linear-gradient(180deg, rgba(23,20,31,.98), rgba(16,14,22,.98)); border: 1px solid rgba(255,255,255,.07); border-radius: 17px; box-shadow: var(--shadow); }
+    .summary { padding: 16px; min-width: 0; }
+    .summary .label { color: var(--muted); font-size: 11px; font-weight: 700; line-height: 1.3; }
+    .summary .value { margin-top: 7px; font-size: 25px; font-weight: 760; letter-spacing: -.035em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .summary .sub { margin-top: 4px; color: #777181; font-size: 10px; }
+    .money { color: var(--gold-soft); }
+    .section { margin-top: 24px; }
+    .section-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 11px; flex-wrap: wrap; }
+    .section-head h2 { margin: 0; font: 500 23px Georgia,"Times New Roman",serif; }
+    .muted { color: var(--muted); }
+    .tiny { font-size: 11px; }
+    .table-card { overflow: hidden; }
+    .table-wrap { overflow-x: auto; }
+    table { width: 100%; border-collapse: collapse; min-width: 1020px; }
+    th { text-align: left; color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .07em; font-weight: 750; padding: 13px 14px; border-bottom: 1px solid rgba(255,255,255,.075); }
+    td { padding: 13px 14px; border-bottom: 1px solid rgba(255,255,255,.05); font-size: 12px; vertical-align: middle; }
+    tr:last-child td { border-bottom: 0; }
+    tbody tr:hover { background: rgba(255,255,255,.018); }
+    .partner-name { font-weight: 750; color: #eee8f1; }
+    .code { font-family: ui-monospace,SFMono-Regular,Menlo,monospace; color: var(--gold-soft); font-size: 11px; }
+    .badge { display: inline-flex; align-items: center; gap: 5px; border: 1px solid rgba(255,255,255,.09); background: rgba(255,255,255,.035); border-radius: 999px; padding: 4px 7px; font-size: 10px; color: #d7d0dc; white-space: nowrap; }
+    .badge.positive { color: var(--positive); border-color: rgba(143,208,174,.22); background: rgba(143,208,174,.06); }
+    .badge.warning { color: var(--warning); border-color: rgba(228,190,120,.22); background: rgba(228,190,120,.06); }
+    .badge.danger { color: var(--danger); border-color: rgba(223,143,146,.22); background: rgba(223,143,146,.06); }
+    .badge.info { color: var(--info); border-color: rgba(154,185,223,.22); background: rgba(154,185,223,.06); }
+    .actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .field, .select, textarea {
+      width: 100%; border: 1px solid rgba(255,255,255,.09); background: rgba(255,255,255,.035); color: var(--text);
+      border-radius: 10px; padding: 10px 11px; outline: none;
+    }
+    .field:focus, .select:focus, textarea:focus { border-color: var(--border-strong); box-shadow: 0 0 0 3px rgba(216,171,82,.07); }
+    .toolbar .field, .toolbar .select { width: auto; min-width: 150px; }
+    input[type="month"], input[type="date"] { color-scheme: dark; }
+    .empty { padding: 28px 20px; text-align: center; color: var(--muted); font-size: 13px; }
+    .notice { border: 1px solid rgba(228,190,120,.22); background: rgba(228,190,120,.06); color: #d8c7a4; padding: 11px 13px; border-radius: 11px; font-size: 12px; line-height: 1.5; margin-bottom: 14px; }
+    .notice.danger { border-color: rgba(223,143,146,.24); background: rgba(223,143,146,.06); color: #e9b2b5; }
+    .alert-list { display: grid; gap: 9px; }
+    .alert-item { padding: 15px 16px; }
+    .alert-top { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+    .alert-title { font-weight: 750; }
+    .alert-message { color: #c5bdca; font-size: 12px; line-height: 1.5; margin-top: 6px; }
+    .alert-meta { color: var(--muted); font-size: 10px; margin-top: 8px; }
+    .modal-backdrop, .login-backdrop { position: fixed; inset: 0; z-index: 2000; background: rgba(4,3,7,.79); backdrop-filter: blur(8px); display: flex; align-items: center; justify-content: center; padding: 18px; }
+    .modal { width: min(640px,100%); max-height: min(760px,calc(100vh - 36px)); overflow-y: auto; background: #131019; border: 1px solid var(--border-strong); border-radius: 20px; box-shadow: 0 35px 100px rgba(0,0,0,.55); padding: 21px; }
+    .modal h2 { margin: 0; font: 500 27px Georgia,"Times New Roman",serif; }
+    .modal-sub { color: var(--muted); font-size: 12px; line-height: 1.5; margin-top: 6px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
+    .form-group { min-width: 0; }
+    .form-group.full { grid-column: 1/-1; }
+    .form-group label { display: block; color: var(--muted); font-size: 10px; font-weight: 750; text-transform: uppercase; letter-spacing: .06em; margin-bottom: 6px; }
+    .check-row { display: flex; gap: 8px; align-items: flex-start; color: #d5ceda; font-size: 12px; line-height: 1.4; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+    .result-box { margin-top: 16px; border: 1px solid rgba(143,208,174,.22); background: rgba(143,208,174,.055); border-radius: 12px; padding: 13px; }
+    .result-line { margin-top: 8px; display: grid; grid-template-columns: 110px 1fr auto; align-items: center; gap: 8px; }
+    .result-line:first-child { margin-top: 0; }
+    .result-label { color: var(--muted); font-size: 10px; text-transform: uppercase; letter-spacing: .06em; }
+    .result-value { font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size: 10px; color: #ddd6e2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .login-card { width: min(440px,100%); background: #131019; border: 1px solid var(--border-strong); border-radius: 20px; box-shadow: 0 35px 100px rgba(0,0,0,.55); padding: 24px; }
+    .login-card h2 { margin: 8px 0 0; font: 500 30px Georgia,"Times New Roman",serif; }
+    .login-card p { color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .login-error { color: #efb8ba; font-size: 11px; margin-top: 8px; min-height: 15px; }
+    .login-actions { margin-top: 12px; display: flex; justify-content: flex-end; }
+    .toast { position: fixed; z-index: 3000; right: 18px; bottom: 18px; max-width: min(420px,calc(100vw - 36px)); background: #17131d; border: 1px solid var(--border-strong); border-radius: 12px; padding: 11px 13px; box-shadow: 0 18px 60px rgba(0,0,0,.45); font-size: 12px; color: #e8e1eb; }
+    .toast.error { border-color: rgba(223,143,146,.4); color: #efb8ba; }
+    @media (max-width: 1120px) { .summary-grid { grid-template-columns: repeat(3,minmax(0,1fr)); } }
+    @media (max-width: 700px) {
+      .shell { width: min(100% - 20px,1260px); padding-top: 20px; }
+      .topbar { align-items: flex-start; flex-direction: column; }
+      .top-actions { justify-content: flex-start; }
+      .tabs { width: 100%; }
+      .tab { flex: 1; padding: 9px 8px; }
+      .summary-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+      .form-grid { grid-template-columns: 1fr; }
+      .form-group.full { grid-column: auto; }
+      .result-line { grid-template-columns: 1fr; }
+      .toolbar .field, .toolbar .select { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <div class="topbar">
+      <div>
+        <div class="eyebrow">THE AGORA · OWNER CONTROL CENTER</div>
+        <h1>Affiliate Admin</h1>
+      </div>
+      <div class="top-actions">
+        <div class="session"><span id="sessionDot" class="status-dot"></span><span id="sessionLabel">Locked</span></div>
+        <button id="refreshAll" class="button" type="button">Refresh</button>
+        <button id="createAffiliate" class="button gold" type="button">+ New Affiliate</button>
+        <button id="signOut" class="button" type="button">Lock</button>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-tab="overview" type="button">Overview</button>
+      <button class="tab" data-tab="payouts" type="button">Payouts</button>
+      <button class="tab" data-tab="alerts" type="button">Alerts <span id="alertTabCount"></span></button>
+    </div>
+
+    <section id="overviewTab">
+      <div class="summary-grid">
+        <div class="card summary"><div class="label">Active Affiliates</div><div id="sumAffiliates" class="value">—</div><div class="sub">Production only</div></div>
+        <div class="card summary"><div class="label">Total Referrals</div><div id="sumReferrals" class="value">—</div><div class="sub">Verified chains</div></div>
+        <div class="card summary"><div class="label">Current Subscribers</div><div id="sumSubscribers" class="value">—</div><div class="sub">Active access now</div></div>
+        <div class="card summary"><div class="label">Estimated This Month</div><div id="sumEstimated" class="value money">—</div><div id="sumEstimatedSub" class="sub">Open estimate</div></div>
+        <div class="card summary"><div class="label">Currently Owed</div><div id="sumOwed" class="value money">—</div><div id="sumOwedSub" class="sub">Finalized unpaid</div></div>
+        <div class="card summary"><div class="label">Open Partner Alerts</div><div id="sumAlerts" class="value">—</div><div class="sub">Production only</div></div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
+          <div><h2>Affiliates</h2><div class="muted tiny">Production and Sandbox partners. Money summary above excludes test affiliates.</div></div>
+          <div class="toolbar">
+            <input id="affiliateSearch" class="field" type="search" placeholder="Search partner or code" />
+            <select id="affiliateFilter" class="select">
+              <option value="all">All</option>
+              <option value="production">Production</option>
+              <option value="test">Sandbox</option>
+              <option value="active">Active</option>
+              <option value="paused">Paused</option>
+            </select>
+          </div>
+        </div>
+        <div class="card table-card">
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>Partner</th><th>Code</th><th>Env</th><th>Status</th><th>Referrals</th><th>Subscribers</th><th>This Month</th><th>Owed</th><th>Commission</th><th>Alerts</th><th>Actions</th>
+              </tr></thead>
+              <tbody id="affiliateRows"><tr><td colspan="11" class="empty">Unlock the admin dashboard to load affiliates.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="payoutsTab" class="hidden">
+      <div class="section-head">
+        <div><h2>Monthly Payouts</h2><div class="muted tiny">Refresh estimates, finalize completed calendar months, and record actual payments.</div></div>
+        <div class="toolbar">
+          <input id="payoutMonth" class="field" type="month" />
+          <label class="check-row"><input id="includeTestPayouts" type="checkbox" checked /> Include Sandbox</label>
+          <button id="loadPayouts" class="button" type="button">Load Month</button>
+          <button id="refreshMonth" class="button" type="button">Refresh Month</button>
+          <button id="finalizeMonth" class="button gold" type="button">Finalize Month</button>
+        </div>
+      </div>
+      <div id="payoutNotice" class="notice">Finalization is allowed only for completed prior calendar months. Production finalization remains subject to the server's Apple-data safety rules.</div>
+      <div class="card table-card">
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Partner</th><th>Month</th><th>Env</th><th>Eligible Revenue</th><th>Due</th><th>Paid</th><th>Remaining</th><th>Data</th><th>Status</th><th>Adjustments</th><th>Actions</th></tr></thead>
+            <tbody id="payoutRows"><tr><td colspan="11" class="empty">Choose a month to load payout records.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="alertsTab" class="hidden">
+      <div class="section-head">
+        <div><h2>Affiliate Alerts</h2><div class="muted tiny">Attribution conflicts, Apple-data issues, and commission-processing warnings.</div></div>
+        <div class="toolbar">
+          <select id="alertFilter" class="select"><option value="open">Open</option><option value="resolved">Resolved</option><option value="all">All</option></select>
+          <button id="loadAlerts" class="button" type="button">Refresh Alerts</button>
+        </div>
+      </div>
+      <div id="alertList" class="alert-list"><div class="card empty">Unlock the admin dashboard to load alerts.</div></div>
+    </section>
+  </main>
+
+  <div id="loginBackdrop" class="login-backdrop">
+    <div class="login-card">
+      <div class="eyebrow">OWNER AUTHENTICATION</div>
+      <h2>Unlock Affiliate Admin</h2>
+      <p>Enter the existing <strong>AFFILIATE_ADMIN_KEY</strong>. It is sent only to this backend over HTTPS and kept in this browser tab's session storage. It is never embedded in the page source.</p>
+      <input id="adminKey" class="field" type="password" autocomplete="off" placeholder="Affiliate admin key" />
+      <div id="loginError" class="login-error"></div>
+      <div class="login-actions"><button id="unlockAdmin" class="button gold" type="button">Unlock</button></div>
+    </div>
+  </div>
+
+  <div id="modalBackdrop" class="modal-backdrop hidden"><div id="modal" class="modal"></div></div>
+  <div id="toast" class="toast hidden"></div>
+
+  <script>
+    let adminKey = sessionStorage.getItem('agoraAffiliateAdminKey') || '';
+    let affiliates = [];
+    let payouts = [];
+    let alerts = [];
+    let activeTab = 'overview';
+
+    const $ = id => document.getElementById(id);
+    const html = value => String(value == null ? '' : value)
+      .replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('"','&quot;').replaceAll("'",'&#039;');
+    const number = value => Number(value || 0).toLocaleString();
+    const numeric = value => Number.isFinite(Number(value)) ? Number(value) : 0;
+    const currencyCode = value => /^[A-Z]{3}$/.test(String(value || '').toUpperCase()) ? String(value).toUpperCase() : 'USD';
+    const money = (value, currency) => new Intl.NumberFormat(undefined,{style:'currency',currency:currencyCode(currency),minimumFractionDigits:2,maximumFractionDigits:2}).format(numeric(value));
+    const groupedMoney = (rows, field) => {
+      const groups = new Map();
+      rows.forEach(row => {
+        const code = currencyCode(row.payout_currency);
+        groups.set(code, (groups.get(code) || 0) + numeric(row[field]));
+      });
+      const entries = Array.from(groups.entries());
+      if (!entries.length) return { text:'—', sub:'' };
+      if (entries.length === 1) return { text:money(entries[0][1], entries[0][0]), sub:'' };
+      return {
+        text:'Mixed',
+        sub:entries.map(entry => money(entry[1], entry[0])).join(' · ')
+      };
+    };
+    const percent = value => value == null ? '—' : (Number(value) * 100).toFixed(0) + '%';
+    const monthName = value => {
+      if (!value) return '—';
+      const raw = String(value).slice(0,7);
+      const parts = raw.split('-');
+      if (parts.length !== 2) return raw;
+      return new Date(Number(parts[0]), Number(parts[1]) - 1, 1).toLocaleDateString(undefined,{month:'short',year:'numeric'});
+    };
+    const dateTime = value => {
+      if (!value) return '—';
+      const d = new Date(value);
+      return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString(undefined,{month:'short',day:'numeric',year:'numeric',hour:'numeric',minute:'2-digit'});
+    };
+    const currentMonthKey = () => {
+      const d = new Date();
+      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2,'0');
+    };
+    const basisLabel = value => value === 'base_price' ? 'Base Price' : value === 'net_proceeds' ? 'Apple Net' : '—';
+
+    function toast(message, error) {
+      const el = $('toast');
+      el.textContent = message;
+      el.className = 'toast' + (error ? ' error' : '');
+      clearTimeout(toast.timer);
+      toast.timer = setTimeout(() => { el.className = 'toast hidden'; }, 3500);
+    }
+
+    function badge(text, kind) {
+      return '<span class="badge ' + (kind || '') + '">' + html(text) + '</span>';
+    }
+
+    function statusBadge(row) {
+      if (row.status === 'terminated_for_cause' || row.status === 'archived') return badge(String(row.status).replaceAll('_',' '),'danger');
+      if (row.status === 'inactive') return badge('Paused','warning');
+      if (row.status === 'active' && row.code_status === 'active') return badge('Active','positive');
+      if (row.status === 'active' && row.code_status === 'disabled') return badge('Code Disabled','warning');
+      return badge(String(row.code_status || row.status || 'Unknown').replaceAll('_',' '),'warning');
+    }
+
+    function payoutStatusBadge(row) {
+      const value = String(row.status || 'open');
+      if (value === 'paid') return badge('Paid','positive');
+      if (value === 'partially_paid') return badge('Partially Paid','warning');
+      if (value === 'ready_to_pay') return badge('Ready to Pay','info');
+      return badge('Open','');
+    }
+
+    function dataStatusBadge(value) {
+      if (value === 'reconciled') return badge('Reconciled','positive');
+      if (value === 'needs_review') return badge('Needs Review','danger');
+      if (value === 'provisional') return badge('Provisional','warning');
+      return badge('Awaiting Apple','');
+    }
+
+    async function adminFetch(path, options) {
+      if (!adminKey) throw new Error('Admin key required.');
+      const opts = Object.assign({}, options || {});
+      opts.headers = Object.assign({}, opts.headers || {}, {
+        'x-admin-key': adminKey,
+        'x-admin-actor': 'owner_admin'
+      });
+      if (opts.body && typeof opts.body !== 'string') {
+        opts.headers['content-type'] = 'application/json';
+        opts.body = JSON.stringify(opts.body);
+      }
+      const response = await fetch(path, opts);
+      let payload = null;
+      try { payload = await response.json(); } catch { payload = null; }
+      if (!response.ok) {
+        if (response.status === 401) {
+          lockAdmin();
+        }
+        const err = new Error(payload?.error?.message || ('Request failed (' + response.status + ')'));
+        err.code = payload?.error?.code || null;
+        err.status = response.status;
+        throw err;
+      }
+      return payload || {};
+    }
+
+    function unlockUi() {
+      $('loginBackdrop').classList.add('hidden');
+      $('sessionDot').classList.add('live');
+      $('sessionLabel').textContent = 'Owner session unlocked';
+    }
+
+    function lockAdmin() {
+      adminKey = '';
+      sessionStorage.removeItem('agoraAffiliateAdminKey');
+      $('sessionDot').classList.remove('live');
+      $('sessionLabel').textContent = 'Locked';
+      $('loginBackdrop').classList.remove('hidden');
+      $('adminKey').value = '';
+    }
+
+    async function verifyAndLoad() {
+      try {
+        const payload = await adminFetch('/api/admin/affiliates');
+        affiliates = Array.isArray(payload.affiliates) ? payload.affiliates : [];
+        unlockUi();
+        renderOverview();
+        await Promise.all([loadAlerts(false), loadPayouts(false)]);
+      } catch (error) {
+        $('loginError').textContent = error.message;
+        if (error.status !== 401) toast(error.message, true);
+      }
+    }
+
+    async function loadAffiliates(showToast) {
+      try {
+        const payload = await adminFetch('/api/admin/affiliates');
+        affiliates = Array.isArray(payload.affiliates) ? payload.affiliates : [];
+        renderOverview();
+        if (showToast) toast('Affiliate data refreshed.');
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function productionAffiliates() { return affiliates.filter(a => !a.is_test); }
+
+    function renderOverview() {
+      const prod = productionAffiliates();
+      $('sumAffiliates').textContent = number(prod.filter(a => a.status === 'active').length);
+      $('sumReferrals').textContent = number(prod.reduce((sum,a) => sum + numeric(a.total_referrals),0));
+      $('sumSubscribers').textContent = number(prod.reduce((sum,a) => sum + numeric(a.current_subscribers),0));
+      const knownEstimates = prod.filter(a => a.estimated_this_month != null);
+      const awaitingEstimates = prod.length - knownEstimates.length;
+      const estimateGroup = groupedMoney(knownEstimates, 'estimated_this_month');
+      $('sumEstimated').textContent = estimateGroup.text;
+      $('sumEstimatedSub').textContent = [
+        estimateGroup.sub,
+        awaitingEstimates ? (number(awaitingEstimates) + ' affiliate' + (awaitingEstimates === 1 ? '' : 's') + ' awaiting data') : 'Open estimate'
+      ].filter(Boolean).join(' · ');
+      const owedGroup = groupedMoney(prod, 'currently_owed');
+      $('sumOwed').textContent = owedGroup.text;
+      $('sumOwedSub').textContent = owedGroup.sub || 'Finalized unpaid';
+      $('sumAlerts').textContent = number(prod.reduce((sum,a) => sum + numeric(a.open_alerts),0));
+      renderAffiliateRows();
+    }
+
+    function renderAffiliateRows() {
+      const query = $('affiliateSearch').value.trim().toLowerCase();
+      const filter = $('affiliateFilter').value;
+      const filtered = affiliates.filter(a => {
+        if (query && !String(a.display_name || '').toLowerCase().includes(query) && !String(a.normalized_code || '').toLowerCase().includes(query)) return false;
+        if (filter === 'production' && a.is_test) return false;
+        if (filter === 'test' && !a.is_test) return false;
+        if (filter === 'active' && a.status !== 'active') return false;
+        if (filter === 'paused' && a.status === 'active') return false;
+        return true;
+      });
+
+      if (!filtered.length) {
+        $('affiliateRows').innerHTML = '<tr><td colspan="11" class="empty">No affiliates match this view.</td></tr>';
+        return;
+      }
+
+      $('affiliateRows').innerHTML = filtered.map(a => {
+        const alertKind = numeric(a.critical_alerts) > 0 ? 'danger' : numeric(a.open_alerts) > 0 ? 'warning' : 'positive';
+        const operationalActive = a.status === 'active';
+        const canToggle = ['active','inactive'].includes(a.status);
+        return '<tr>' +
+          '<td><div class="partner-name">' + html(a.display_name) + '</div><div class="muted tiny">Since ' + html(String(a.affiliate_since || '').slice(0,10)) + '</div></td>' +
+          '<td><span class="code">' + html(a.normalized_code) + '</span></td>' +
+          '<td>' + badge(a.is_test ? 'Sandbox' : 'Production', a.is_test ? 'warning' : 'info') + '</td>' +
+          '<td>' + statusBadge(a) + '</td>' +
+          '<td>' + number(a.total_referrals) + '</td>' +
+          '<td>' + number(a.current_subscribers) + '</td>' +
+          '<td class="money">' + (a.estimated_this_month == null ? '—' : money(a.estimated_this_month, a.payout_currency)) + '<div style="margin-top:5px">' + (a.current_month_data_status ? dataStatusBadge(a.current_month_data_status) : badge('Awaiting payout data','')) + '</div></td>' +
+          '<td class="money">' + money(a.currently_owed, a.payout_currency) + '</td>' +
+          '<td>' + percent(a.commission_rate) + '<div class="muted tiny">' + html(basisLabel(a.commission_basis)) + '</div></td>' +
+          '<td>' + badge(number(a.open_alerts), alertKind) + '</td>' +
+          '<td><div class="actions">' +
+            '<button class="button small" data-action="details" data-id="' + html(a.id) + '">Details</button>' +
+            '<button class="button small" data-action="dashboard" data-id="' + html(a.id) + '">Dashboard</button>' +
+            (canToggle ? '<button class="button small ' + (operationalActive ? 'danger' : 'gold') + '" data-action="toggle" data-id="' + html(a.id) + '" data-active="' + (operationalActive ? 'false' : 'true') + '">' + (operationalActive ? 'Pause' : 'Activate') + '</button>' : '') +
+          '</div></td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    function affiliateById(id) { return affiliates.find(a => a.id === id); }
+
+    function openDetails(id) {
+      const a = affiliateById(id);
+      if (!a) return;
+      const rows = [
+        ['Partner', a.display_name], ['Creator Code', a.normalized_code], ['Apple Offer Reference', a.apple_offer_identifier || 'Not configured'],
+        ['Environment', a.is_test ? 'Sandbox' : 'Production'], ['Affiliate Since', String(a.affiliate_since || '').slice(0,10)],
+        ['Status', String(a.status || '') + ' / ' + String(a.code_status || '')], ['Commission', percent(a.commission_rate) + ' · ' + basisLabel(a.commission_basis)],
+        ['Total Referrals', number(a.total_referrals)], ['Current Subscribers', number(a.current_subscribers)], ['Estimated This Month', a.estimated_this_month == null ? 'Awaiting payout data' : money(a.estimated_this_month, a.payout_currency)],
+        ['Currently Owed', money(a.currently_owed, a.payout_currency)], ['Lifetime Commission', money(a.lifetime_commission_earned, a.payout_currency)], ['Lifetime Paid', money(a.lifetime_paid, a.payout_currency)],
+        ['Contact', a.contact_email || '—'], ['Payout Method', a.payout_method || '—']
+      ];
+      openModal(
+        '<h2>' + html(a.display_name) + '</h2><div class="modal-sub">Owner-only affiliate record. Customer identity is never exposed here.</div>' +
+        '<div class="section"><div class="card" style="padding:14px">' + rows.map(r => '<div style="display:flex;justify-content:space-between;gap:18px;padding:9px 0;border-bottom:1px solid rgba(255,255,255,.05)"><span class="muted">' + html(r[0]) + '</span><span style="text-align:right">' + html(r[1]) + '</span></div>').join('') + '</div></div>' +
+        (a.internal_notes ? '<div class="section"><div class="muted tiny">INTERNAL NOTES</div><div style="margin-top:7px;line-height:1.5">' + html(a.internal_notes) + '</div></div>' : '') +
+        '<div class="modal-actions"><button class="button" data-modal-action="copy-referral">Copy Referral Link</button><button class="button" data-modal-action="regenerate">Regenerate Dashboard Link</button><button class="button gold" data-modal-action="open-dashboard">Open Dashboard</button><button class="button" data-modal-action="close">Close</button></div>',
+        { affiliateId: id }
+      );
+    }
+
+    async function openPartnerDashboard(id) {
+      const popup = window.open('about:blank', '_blank');
+      try {
+        const payload = await adminFetch('/api/admin/affiliates/' + encodeURIComponent(id) + '/dashboard-link');
+        if (!payload.dashboardUrl) throw new Error('Dashboard link is unavailable.');
+        if (popup) {
+          popup.opener = null;
+          popup.location.replace(payload.dashboardUrl);
+        } else {
+          await navigator.clipboard.writeText(payload.dashboardUrl);
+          toast('Popup was blocked, so the private dashboard link was copied instead.');
+        }
+      } catch (error) {
+        if (popup) popup.close();
+        if (error.code === 'affiliate_dashboard_token_not_recoverable') {
+          toast('This older dashboard token must be regenerated once before it can be opened.', true);
+        } else toast(error.message, true);
+      }
+    }
+
+    async function toggleAffiliate(id, shouldActivate) {
+      const a = affiliateById(id);
+      if (!a) return;
+      const verb = shouldActivate ? 'activate' : 'pause';
+      if (!confirm((shouldActivate ? 'Activate ' : 'Pause ') + a.display_name + '?')) return;
+      try {
+        await adminFetch('/api/admin/affiliates/' + encodeURIComponent(id) + '/operational-status', { method:'POST', body:{ active: shouldActivate } });
+        toast('Affiliate ' + verb + 'd.');
+        await loadAffiliates(false);
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function openCreateAffiliate() {
+      const today = new Date();
+      const localDate = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+      openModal(
+        '<h2>Create Affiliate</h2><div class="modal-sub">Creates the partner record, compensation term, private dashboard token, and referral link. The Apple Offer Code campaign itself must already exist in App Store Connect.</div>' +
+        '<div class="form-grid">' +
+          '<div class="form-group"><label>Display Name</label><input id="newDisplayName" class="field" placeholder="Max Agora" /></div>' +
+          '<div class="form-group"><label>Creator Code</label><input id="newCode" class="field" placeholder="MAXAGORA" /></div>' +
+          '<div class="form-group full"><label>Apple Offer Reference Name</label><input id="newOfferRef" class="field" placeholder="AGORA_AFFILIATE_MAX" /><div class="muted tiny" style="margin-top:5px">Required for Production attribution. Sandbox-only test records may omit it.</div></div>' +
+          '<div class="form-group"><label>Affiliate Since</label><input id="newSince" class="field" type="date" value="' + localDate + '" /></div>' +
+          '<div class="form-group"><label>Commission</label><input id="newRate" class="field" type="number" min="0" max="100" step="0.1" value="50" /></div>' +
+          '<div class="form-group"><label>Commission Basis</label><select id="newBasis" class="select"><option value="base_price">Base Price</option><option value="net_proceeds">Apple Net Proceeds</option></select></div>' +
+          '<div class="form-group"><label>Payout Currency</label><input id="newCurrency" class="field" value="USD" maxlength="3" /></div>' +
+          '<div class="form-group full"><label>Contact Email (optional)</label><input id="newEmail" class="field" type="email" /></div>' +
+          '<div class="form-group full"><label>Internal Notes (optional)</label><textarea id="newNotes" rows="3"></textarea></div>' +
+          '<div class="form-group full"><label class="check-row"><input id="newIsTest" type="checkbox" /> Sandbox / test affiliate. Excluded from production summary and payouts.</label></div>' +
+        '</div>' +
+        '<div id="createAffiliateError" class="login-error"></div>' +
+        '<div class="modal-actions"><button class="button" data-modal-action="close">Cancel</button><button class="button gold" data-modal-action="create-affiliate">Create Affiliate</button></div>'
+      );
+    }
+
+    async function createAffiliateFromModal() {
+      const name = $('newDisplayName').value.trim();
+      const code = $('newCode').value.trim().toUpperCase();
+      const ratePct = Number($('newRate').value);
+      const isTest = $('newIsTest').checked;
+      const offerRef = $('newOfferRef').value.trim();
+      if (!name || !code || !Number.isFinite(ratePct) || ratePct < 0 || ratePct > 100) {
+        $('createAffiliateError').textContent = 'Name, creator code, and a valid commission percentage are required.';
+        return;
+      }
+      if (!isTest && !offerRef) {
+        $('createAffiliateError').textContent = 'Production affiliates require the App Store Connect offer reference name.';
+        return;
+      }
+      try {
+        const payload = await adminFetch('/api/admin/affiliates', {
+          method:'POST',
+          body:{
+            internalName:name, displayName:name, customCode:code, appleOfferIdentifier:offerRef || null,
+            affiliateSince:$('newSince').value, commissionRate:String(ratePct / 100), commissionBasis:$('newBasis').value,
+            codeStatus:'active', payoutCurrency:$('newCurrency').value.trim().toUpperCase() || 'USD', isTest,
+            contactEmail:$('newEmail').value.trim() || null, internalNotes:$('newNotes').value.trim() || null
+          }
+        });
+        $('modal').innerHTML = '<h2>Affiliate Created</h2><div class="modal-sub">Copy these links now. The private dashboard link can also be recovered later from this admin dashboard when encrypted token storage is configured.</div>' +
+          '<div class="result-box">' + resultLine('Referral Link', payload.referralUrl) + resultLine('Private Dashboard', payload.dashboardUrl) + resultLine('Apple Redemption', payload.appleRedemptionUrl) + '</div>' +
+          '<div class="modal-actions"><button class="button gold" data-modal-action="close-refresh">Done</button></div>';
+        await loadAffiliates(false);
+      } catch (error) { $('createAffiliateError').textContent = error.message; }
+    }
+
+    function resultLine(label, value) {
+      return '<div class="result-line"><span class="result-label">' + html(label) + '</span><span class="result-value">' + html(value || '—') + '</span><button class="button small" data-copy-value="' + html(value || '') + '">Copy</button></div>';
+    }
+
+    async function loadAlerts(showToast) {
+      if (!adminKey) return;
+      try {
+        const status = $('alertFilter')?.value || 'open';
+        const payload = await adminFetch('/api/admin/affiliate-alerts?status=' + encodeURIComponent(status));
+        alerts = Array.isArray(payload.alerts) ? payload.alerts : [];
+        renderAlerts();
+        const openCount = affiliates.reduce((sum,a) => sum + numeric(a.open_alerts),0);
+        $('alertTabCount').textContent = openCount ? '(' + number(openCount) + ')' : '';
+        if (showToast) toast('Alerts refreshed.');
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function renderAlerts() {
+      if (!alerts.length) {
+        $('alertList').innerHTML = '<div class="card empty">No alerts in this view.</div>';
+        return;
+      }
+      $('alertList').innerHTML = alerts.map(a => {
+        const kind = a.severity === 'critical' ? 'danger' : a.severity === 'warning' ? 'warning' : 'info';
+        const canResolve = a.status === 'open';
+        return '<article class="card alert-item"><div class="alert-top"><div><div>' + badge(a.severity || 'warning',kind) + ' ' + (a.affiliate_code ? badge(a.affiliate_code,a.affiliate_is_test ? 'warning' : '') : '') + '</div><div class="alert-title" style="margin-top:8px">' + html(a.title) + '</div></div>' +
+          (canResolve ? '<button class="button small" data-alert-resolve="' + html(a.id) + '">Resolve</button>' : badge('Resolved','positive')) +
+          '</div><div class="alert-message">' + html(a.message) + '</div><div class="alert-meta">' + html(a.affiliate_display_name || 'System-wide') + ' · ' + html(dateTime(a.triggered_at)) + '</div></article>';
+      }).join('');
+    }
+
+    async function resolveAlert(id) {
+      const note = prompt('Resolution note (optional):', 'Reviewed by owner admin.');
+      if (note === null) return;
+      try {
+        await adminFetch('/api/admin/affiliate-alerts/' + encodeURIComponent(id) + '/resolve', { method:'POST', body:{ resolutionNote:note } });
+        toast('Alert resolved.');
+        await Promise.all([loadAlerts(false), loadAffiliates(false)]);
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function loadPayouts(showToast) {
+      if (!adminKey) return;
+      try {
+        const key = $('payoutMonth').value || currentMonthKey();
+        $('payoutMonth').value = key;
+        const includeTest = $('includeTestPayouts').checked;
+        const payload = await adminFetch('/api/admin/affiliate-payouts?payoutPeriod=' + encodeURIComponent(key + '-01') + '&includeTest=' + (includeTest ? 'true' : 'false'));
+        payouts = Array.isArray(payload.payouts) ? payload.payouts : [];
+        renderPayouts();
+        updateFinalizeButton();
+        if (showToast) toast('Payout month loaded.');
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function renderPayouts() {
+      if (!payouts.length) {
+        $('payoutRows').innerHTML = '<tr><td colspan="11" class="empty">No payout rows exist for this month yet. Use Refresh Month after Apple data is available to build or update the month for all included affiliates.</td></tr>';
+        return;
+      }
+      $('payoutRows').innerHTML = payouts.map(p => {
+        const canPay = ['ready_to_pay','partially_paid'].includes(p.status) && numeric(p.remaining_owed) > 0;
+        return '<tr>' +
+          '<td><div class="partner-name">' + html(p.affiliate_display_name) + '</div><div class="code">' + html(p.affiliate_code) + '</div></td>' +
+          '<td>' + html(monthName(p.payout_period)) + '</td>' +
+          '<td>' + badge(p.affiliate_is_test ? 'Sandbox' : 'Production', p.affiliate_is_test ? 'warning' : 'info') + '</td>' +
+          '<td class="money">' + money(p.eligible_revenue, p.payout_currency) + '</td>' +
+          '<td class="money">' + money(p.amount_due, p.payout_currency) + '</td>' +
+          '<td class="money">' + money(p.amount_paid, p.payout_currency) + '</td>' +
+          '<td class="money">' + money(p.remaining_owed, p.payout_currency) + '</td>' +
+          '<td>' + dataStatusBadge(p.data_status) + '</td>' +
+          '<td>' + payoutStatusBadge(p) + '</td>' +
+          '<td>' + number(p.adjustment_count) + '</td>' +
+          '<td><div class="actions"><button class="button small" data-payout-refresh="' + html(p.affiliate_id) + '">Refresh</button>' +
+          (canPay ? '<button class="button small gold" data-payout-pay="' + html(p.id) + '">Record Payment</button>' : '') + '</div></td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    async function refreshAffiliatePayout(affiliateId) {
+      const month = $('payoutMonth').value;
+      try {
+        await adminFetch('/api/admin/affiliate-payouts/refresh', { method:'POST', body:{ affiliateId, payoutPeriod:month + '-01', finalize:false, markReconciled:false } });
+        toast('Payout refreshed.');
+        await Promise.all([loadPayouts(false), loadAffiliates(false)]);
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function updateFinalizeButton() {
+      const month = $('payoutMonth').value || currentMonthKey();
+      $('finalizeMonth').disabled = month >= currentMonthKey();
+    }
+
+    async function refreshSelectedMonth() {
+      const month = $('payoutMonth').value;
+      if (!month) { toast('Choose a calendar month.', true); return; }
+      const includeTest = $('includeTestPayouts').checked;
+      try {
+        const payload = await adminFetch('/api/admin/affiliate-payouts/refresh-period', {
+          method:'POST',
+          body:{ payoutPeriod:month + '-01', includeTest }
+        });
+        if (Array.isArray(payload.failures) && payload.failures.length) {
+          toast('Refreshed ' + payload.refreshed + ' affiliate(s); ' + payload.failures.length + ' require review.', true);
+        } else {
+          toast('Refreshed ' + number(payload.refreshed) + ' affiliate payout(s).');
+        }
+        await Promise.all([loadPayouts(false), loadAffiliates(false), loadAlerts(false)]);
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function finalizeSelectedMonth() {
+      const month = $('payoutMonth').value;
+      if (!month || month >= currentMonthKey()) {
+        toast('Only a completed prior calendar month can be finalized.', true); return;
+      }
+      const includeTest = $('includeTestPayouts').checked;
+      if (!confirm('Finalize affiliate payouts for ' + monthName(month) + '? This locks completed payout rows; later Apple corrections carry forward.')) return;
+      try {
+        const payload = await adminFetch('/api/admin/affiliate-payouts/finalize-period', { method:'POST', body:{ payoutPeriod:month + '-01', includeTest, markReconciled:false } });
+        if (Array.isArray(payload.failures) && payload.failures.length) {
+          toast('Finalized ' + payload.finalized + ' affiliate(s); ' + payload.failures.length + ' require review.', true);
+        } else toast('Month finalized for ' + number(payload.finalized) + ' affiliate(s).');
+        await Promise.all([loadPayouts(false), loadAffiliates(false), loadAlerts(false)]);
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function openPaymentModal(payoutId) {
+      const p = payouts.find(x => x.id === payoutId);
+      if (!p) return;
+      const today = new Date();
+      const localDate = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+      openModal('<h2>Record Payment</h2><div class="modal-sub">' + html(p.affiliate_display_name) + ' · ' + html(monthName(p.payout_period)) + '. This writes to the payout ledger and Lifetime Paid.</div>' +
+        '<div class="notice danger" style="margin-top:16px">Only record money that was actually sent. Corrections should be entered as correction records rather than deleting history.</div>' +
+        '<div class="form-grid"><div class="form-group"><label>Amount</label><input id="payAmount" class="field" type="number" min="0.01" step="0.01" value="' + html(Number(p.remaining_owed).toFixed(2)) + '" /></div>' +
+        '<div class="form-group"><label>Payment Date</label><input id="payDate" class="field" type="date" value="' + localDate + '" /></div>' +
+        '<div class="form-group"><label>Method</label><input id="payMethod" class="field" placeholder="ACH, PayPal, Venmo..." /></div>' +
+        '<div class="form-group"><label>Reference</label><input id="payReference" class="field" placeholder="Confirmation / transaction ID" /></div>' +
+        '<div class="form-group full"><label>Note</label><textarea id="payNote" rows="3"></textarea></div></div>' +
+        '<div id="paymentError" class="login-error"></div>' +
+        '<div class="modal-actions"><button class="button" data-modal-action="close">Cancel</button><button class="button gold" data-modal-action="record-payment" data-payout-id="' + html(payoutId) + '">Record Actual Payment</button></div>');
+    }
+
+    async function recordPayment(payoutId) {
+      const amount = $('payAmount').value.trim();
+      const paymentDate = $('payDate').value;
+      if (!amount || Number(amount) <= 0 || !paymentDate) { $('paymentError').textContent = 'A positive amount and payment date are required.'; return; }
+      if (!confirm('Confirm that ' + money(amount, p.payout_currency) + ' was actually paid?')) return;
+      try {
+        await adminFetch('/api/admin/affiliate-payouts/' + encodeURIComponent(payoutId) + '/payments', {
+          method:'POST',
+          headers:{ 'idempotency-key': crypto.randomUUID() },
+          body:{ amount, paymentDate, paymentMethod:$('payMethod').value.trim() || null, paymentReference:$('payReference').value.trim() || null, note:$('payNote').value.trim() || null }
+        });
+        closeModal();
+        toast('Payment recorded.');
+        await Promise.all([loadPayouts(false), loadAffiliates(false)]);
+      } catch (error) { $('paymentError').textContent = error.message; }
+    }
+
+    function openModal(content, context) {
+      $('modal').innerHTML = content;
+      $('modal').dataset.affiliateId = context?.affiliateId || '';
+      $('modalBackdrop').classList.remove('hidden');
+    }
+    function closeModal() { $('modalBackdrop').classList.add('hidden'); $('modal').innerHTML = ''; $('modal').dataset.affiliateId = ''; }
+
+    async function regenerateDashboardLink(id) {
+      const a = affiliateById(id);
+      if (!a || !confirm('Regenerate ' + a.display_name + "'s private dashboard link? Their old private link will stop working.")) return;
+      try {
+        const payload = await adminFetch('/api/admin/affiliates/' + encodeURIComponent(id) + '/regenerate-dashboard-token', { method:'POST' });
+        $('modal').innerHTML = '<h2>New Dashboard Link</h2><div class="modal-sub">The old private dashboard URL is now invalid.</div><div class="result-box">' + resultLine('Private Dashboard', payload.dashboardUrl) + '</div><div class="modal-actions"><button class="button gold" data-modal-action="close">Done</button></div>';
+      } catch (error) { toast(error.message, true); }
+    }
+
+    document.querySelectorAll('.tab').forEach(button => button.addEventListener('click', () => {
+      activeTab = button.dataset.tab;
+      document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x === button));
+      $('overviewTab').classList.toggle('hidden', activeTab !== 'overview');
+      $('payoutsTab').classList.toggle('hidden', activeTab !== 'payouts');
+      $('alertsTab').classList.toggle('hidden', activeTab !== 'alerts');
+      if (activeTab === 'payouts') loadPayouts(false);
+      if (activeTab === 'alerts') loadAlerts(false);
+    }));
+
+    $('unlockAdmin').addEventListener('click', async () => {
+      const value = $('adminKey').value.trim();
+      if (!value) { $('loginError').textContent = 'Enter the admin key.'; return; }
+      adminKey = value;
+      sessionStorage.setItem('agoraAffiliateAdminKey', adminKey);
+      $('loginError').textContent = '';
+      await verifyAndLoad();
+    });
+    $('adminKey').addEventListener('keydown', event => { if (event.key === 'Enter') $('unlockAdmin').click(); });
+    $('signOut').addEventListener('click', lockAdmin);
+    $('refreshAll').addEventListener('click', () => Promise.all([loadAffiliates(true), loadAlerts(false), loadPayouts(false)]));
+    $('createAffiliate').addEventListener('click', openCreateAffiliate);
+    $('affiliateSearch').addEventListener('input', renderAffiliateRows);
+    $('affiliateFilter').addEventListener('change', renderAffiliateRows);
+    $('loadAlerts').addEventListener('click', () => loadAlerts(true));
+    $('alertFilter').addEventListener('change', () => loadAlerts(false));
+    $('loadPayouts').addEventListener('click', () => loadPayouts(true));
+    $('refreshMonth').addEventListener('click', refreshSelectedMonth);
+    $('includeTestPayouts').addEventListener('change', () => loadPayouts(false));
+    $('payoutMonth').addEventListener('change', () => { updateFinalizeButton(); loadPayouts(false); });
+    $('finalizeMonth').addEventListener('click', finalizeSelectedMonth);
+
+    $('affiliateRows').addEventListener('click', event => {
+      const button = event.target.closest('button[data-action]');
+      if (!button) return;
+      const id = button.dataset.id;
+      if (button.dataset.action === 'details') openDetails(id);
+      if (button.dataset.action === 'dashboard') openPartnerDashboard(id);
+      if (button.dataset.action === 'toggle') toggleAffiliate(id, button.dataset.active === 'true');
+    });
+
+    $('alertList').addEventListener('click', event => {
+      const button = event.target.closest('button[data-alert-resolve]');
+      if (button) resolveAlert(button.dataset.alertResolve);
+    });
+
+    $('payoutRows').addEventListener('click', event => {
+      const refresh = event.target.closest('button[data-payout-refresh]');
+      const pay = event.target.closest('button[data-payout-pay]');
+      if (refresh) refreshAffiliatePayout(refresh.dataset.payoutRefresh);
+      if (pay) openPaymentModal(pay.dataset.payoutPay);
+    });
+
+    $('modalBackdrop').addEventListener('click', async event => {
+      if (event.target === $('modalBackdrop')) { closeModal(); return; }
+      const copy = event.target.closest('button[data-copy-value]');
+      if (copy) { await navigator.clipboard.writeText(copy.dataset.copyValue || ''); toast('Copied.'); return; }
+      const action = event.target.closest('button[data-modal-action]');
+      if (!action) return;
+      const name = action.dataset.modalAction;
+      const affiliateId = $('modal').dataset.affiliateId;
+      if (name === 'close') closeModal();
+      if (name === 'close-refresh') { closeModal(); await loadAffiliates(false); }
+      if (name === 'create-affiliate') await createAffiliateFromModal();
+      if (name === 'open-dashboard') await openPartnerDashboard(affiliateId);
+      if (name === 'copy-referral') {
+        const a = affiliateById(affiliateId); if (a?.referral_url) { await navigator.clipboard.writeText(a.referral_url); toast('Referral link copied.'); }
+      }
+      if (name === 'regenerate') await regenerateDashboardLink(affiliateId);
+      if (name === 'record-payment') await recordPayment(action.dataset.payoutId);
+    });
+
+    $('payoutMonth').value = currentMonthKey();
+    updateFinalizeButton();
+    if (adminKey) verifyAndLoad(); else lockAdmin();
+  </script>
+</body>
+</html>`;
+}
+
 export function createAffiliateRouter(pool, options = {}) {
   const router = express.Router();
   const adminKey = options.adminKey || process.env.AFFILIATE_ADMIN_KEY;
@@ -1345,6 +2177,16 @@ export function createAffiliateRouter(pool, options = {}) {
     }
   });
 
+  router.get('/admin/affiliates', adminLimiter, adminPageSecurityHeaders, (_req, res) => {
+    return res.type('html').send(renderAffiliateAdminDashboardPage());
+  });
+
+  router.get('/', adminLimiter, adminPageSecurityHeaders, (req, res, next) => {
+    const host = String(req.hostname || '').toLowerCase();
+    if (!host.startsWith('admin.')) return next();
+    return res.type('html').send(renderAffiliateAdminDashboardPage());
+  });
+
   router.get('/partners/:token', partnerLimiter, partnerSecurityHeaders, async (req, res) => {
     try {
       await service.resolvePartnerToken(req.params.token, { touch: false });
@@ -1383,6 +2225,61 @@ export function createAffiliateRouter(pool, options = {}) {
     try {
       const affiliates = await service.listAffiliates();
       return res.json({ success: true, affiliates });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.post('/api/admin/affiliates/:id/operational-status', adminOnly, async (req, res) => {
+    try {
+      const actor = req.get('x-admin-actor') || 'owner_admin';
+      const affiliate = await service.setAffiliateOperationalStatus({
+        affiliateId: req.params.id,
+        active: req.body?.active,
+        actor,
+      });
+      return res.json({ success: true, affiliate });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.get('/api/admin/affiliate-alerts', adminOnly, async (req, res) => {
+    try {
+      const alerts = await service.listAffiliateAlerts({
+        status: req.query?.status,
+        limit: req.query?.limit,
+      });
+      return res.json({ success: true, alerts });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.post('/api/admin/affiliate-alerts/:id/resolve', adminOnly, async (req, res) => {
+    try {
+      const actor = req.get('x-admin-actor') || 'owner_admin';
+      const result = await service.resolveAffiliateAlert({
+        alertId: req.params.id,
+        resolutionNote: req.body?.resolutionNote,
+        actor,
+      });
+      return res.json({ success: true, ...result });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.get('/api/admin/affiliate-payouts', adminOnly, async (req, res) => {
+    try {
+      const payouts = await service.listAdminPayouts({
+        payoutPeriod: req.query?.payoutPeriod,
+        includeTest: req.query?.includeTest == null
+          ? true
+          : String(req.query.includeTest).trim().toLowerCase() === 'true',
+        limit: req.query?.limit,
+      });
+      return res.json({ success: true, payouts });
     } catch (error) {
       return jsonError(res, error);
     }
@@ -1448,6 +2345,20 @@ export function createAffiliateRouter(pool, options = {}) {
       const result = await service.importNormalizedAppleMetrics({
         rows: req.body?.rows,
         source: req.body?.source,
+        actor,
+      });
+      return res.json({ success: true, ...result });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.post('/api/admin/affiliate-payouts/refresh-period', adminOnly, async (req, res) => {
+    try {
+      const actor = req.get('x-admin-actor') || 'owner_admin';
+      const result = await service.refreshAffiliatePayoutsForPeriod({
+        payoutPeriod: req.body?.payoutPeriod,
+        includeTest: readJsonBoolean(req.body?.includeTest, 'includeTest', false),
         actor,
       });
       return res.json({ success: true, ...result });
@@ -1546,4 +2457,4 @@ export function createAffiliateRouter(pool, options = {}) {
   return router;
 }
 
-export { renderPartnerDashboardPage };
+export { renderPartnerDashboardPage, renderAffiliateAdminDashboardPage };
