@@ -2,10 +2,6 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import test from 'node:test';
 
-import {
-    rankedTopicGeneratorConstants,
-} from '../lib/rankedTopicGeneratorService.js';
-
 const baseMigration = readFileSync(
     new URL('../migrations/016_kierkegaard_release.sql', import.meta.url),
     'utf8'
@@ -16,82 +12,75 @@ const unlockMigration = readFileSync(
     'utf8'
 );
 
+function executableSql(source) {
+    return source
+        .split('\n')
+        .filter(
+            (line) =>
+                !line
+                    .trimStart()
+                    .startsWith('--')
+        )
+        .join('\n')
+        .trim();
+}
+
 test(
-    'Kierkegaard release migrations unlock Pro access on August 12 while preserving the September Open Access Weekend',
+    'retired Kierkegaard migrations 016 and 017 are intentionally inert',
     () => {
-        assert.match(
+        const baseSql =
+            executableSql(baseMigration);
+        const unlockSql =
+            executableSql(unlockMigration);
+
+        assert.equal(
+            baseSql,
+            'SELECT 1 AS retired_migration_016;'
+        );
+
+        assert.equal(
+            unlockSql,
+            'SELECT 1 AS retired_migration_017;'
+        );
+
+        assert.doesNotMatch(
+            baseSql,
+            /\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE|TRUNCATE)\b/i
+        );
+
+        assert.doesNotMatch(
+            unlockSql,
+            /\b(INSERT|UPDATE|DELETE|ALTER|DROP|CREATE|TRUNCATE)\b/i
+        );
+
+        assert.doesNotMatch(
             baseMigration,
-            /'kierkegaard'/
+            /2026-08-(12|21)/
+        );
+
+        assert.doesNotMatch(
+            unlockMigration,
+            /2026-08-(12|21)/
         );
 
         assert.match(
             baseMigration,
-            /2026-08-21 04:00:00\+00/
+            /September 11-13, 2026/
         );
 
         assert.match(
             unlockMigration,
-            /2026-08-12 04:00:00\+00/
+            /September 11-13, 2026/
+        );
+
+        assert.match(
+            baseMigration,
+            /NEW\s+forward migration/i
         );
 
         assert.match(
             unlockMigration,
-            /WHERE philosopher_id = 'kierkegaard'/
-        );
-
-        assert.match(
-            baseMigration,
-            /2026-09-11 04:00:00\+00/
-        );
-
-        assert.match(
-            baseMigration,
-            /\n\s*72,\n\s*7,\n\s*3,/
-        );
-
-        assert.match(
-            baseMigration,
-            /'America\/New_York'/
-        );
-
-        assert.match(
-            baseMigration,
-            /'3\.8'/
-        );
-
-        assert.match(
-            baseMigration,
-            /philosopher-prompts-v2-kierkegaard/
-        );
-
-        assert.match(
-            baseMigration,
-            /ranked-topic-v2-kierkegaard/
-        );
-
-
-        assert.match(
-            baseMigration,
-            new RegExp(
-                rankedTopicGeneratorConstants.defaultGeneratorVersion
-                    .replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-            )
-        );
-
-
-        assert.match(
-            baseMigration,
-            /account_ranked_start_requests_voiced_topic_version_chk/
-        );
-
-        assert.match(
-            baseMigration,
-            /account_ranked_debates_voiced_topic_version_chk/
-        );
-
-        assert.match(
-            baseMigration,
-            /ranked-topic-v2-philosopher-voiced/
+            /NEW\s+forward migration/i
         );
 
         assert.doesNotMatch(
@@ -103,7 +92,6 @@ test(
             baseMigration,
             /^\s*COMMIT\s*;/im
         );
-
 
         assert.doesNotMatch(
             unlockMigration,
