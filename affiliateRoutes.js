@@ -1,4 +1,4 @@
-// PARTNER_PRICING_V4: App Store Connect current/scheduled pricing + active subscriber price tiers.
+// PARTNER_PRICING_V5: current/scheduled pricing + preserved-price subscriber tiers.
 // PRODUCTION_CLEAN_UI_V3: hides dedicated sandbox offer warning from normal Affiliate Admin.
 import crypto from 'crypto';
 import express from 'express';
@@ -1006,11 +1006,16 @@ function renderPartnerDashboardPage(token) {
 
       if (apple.status === 'available') {
         const appleCurrency = apple.currency || 'USD';
-        // Keep this card uncluttered: always surface the current and next Apple
-        // price. Older preserved prices appear only when an affiliate actually
-        // still has an active subscriber paying that tier.
-        [apple.current, apple.next]
-          .filter(Boolean)
+        const preservedPrices = Array.isArray(apple.preservedPrices)
+          ? apple.preservedPrices
+          : [];
+
+        // Always surface the current public price, the next scheduled price,
+        // and preserved subscriber prices. This keeps founding-price tiers
+        // visible at zero subscribers and after a scheduled increase becomes
+        // the new public price. normalizedPriceKey() removes duplicates.
+        [apple.current, apple.next, ...preservedPrices]
+          .filter(price => price?.customerPrice)
           .forEach(price => addCandidate({
             amount: price.customerPrice,
             currency: price.currency || appleCurrency,
