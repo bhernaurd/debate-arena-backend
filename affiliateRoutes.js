@@ -8,6 +8,9 @@ import {
 import {
   createAppStoreConnectAffiliateService,
 } from './lib/appStoreConnectAffiliateService.js';
+import {
+  createAffiliateAppleImportPreferencesService,
+} from './lib/affiliateAppleImportPreferencesService.js';
 
 function jsonError(res, error) {
   const statusCode = Number(error?.statusCode) || 500;
@@ -1473,6 +1476,7 @@ function renderAffiliateAdminDashboardPage() {
           <div><h2>App Store Connect Imports</h2><div class="muted tiny">Offers created in App Store Connect appear here automatically after sync. Complete setup to turn them into Agora affiliates.</div></div>
           <div class="toolbar">
             <div id="appleSyncStatus" class="muted tiny">Not synced yet</div>
+            <button id="toggleIgnoredAppleImports" class="button hidden" type="button">Show Ignored</button>
             <button id="syncAppleOffers" class="button" type="button">Sync App Store Connect</button>
           </div>
         </div>
@@ -1569,7 +1573,9 @@ function renderAffiliateAdminDashboardPage() {
     let affiliates = [];
     let appleImports = [];
     let appleLinked = [];
+    let appleIgnored = [];
     let appleSync = null;
+    let showIgnoredAppleImports = false;
     let payouts = [];
     let alerts = [];
     let activeTab = 'overview';
@@ -1718,6 +1724,7 @@ function renderAffiliateAdminDashboardPage() {
         const payload = await adminFetch('/api/admin/app-store-connect/imports');
         appleImports = Array.isArray(payload.imports) ? payload.imports : [];
         appleLinked = Array.isArray(payload.linked) ? payload.linked : [];
+        appleIgnored = Array.isArray(payload.ignored) ? payload.ignored : [];
         appleSync = {
           configured: payload.configured !== false,
           syncedAt: payload.syncedAt || null,
@@ -1729,6 +1736,7 @@ function renderAffiliateAdminDashboardPage() {
       } catch (error) {
         appleImports = [];
         appleLinked = [];
+        appleIgnored = [];
         appleSync = { configured: false, syncedAt: null, warnings: [], errorMessage: error.message };
         renderAppleImports();
         toast(error.message, true);
@@ -1799,55 +1807,193 @@ function renderAffiliateAdminDashboardPage() {
       }).join('');
     }
 
+    function appleBooleanBadge(value, trueLabel = 'Active', falseLabel = 'Inactive') {
+      if (value === true) return badge(trueLabel, 'positive');
+      if (value === false) return badge(falseLabel, 'warning');
+      return badge('Unknown', '');
+    }
+
+    function appleCodeCountLabel(item) {
+      if (item?.numberOfCodes == null) return 'Code count unavailable';
+      return number(item.numberOfCodes) + ' code' + (Number(item.numberOfCodes) === 1 ? '' : 's');
+    }
+
+    function canonicalConfigurationLabel(item) {
+      if (!item?.canonical) return item?.configurationCount > 1 ? 'Choose current configuration' : 'No current configuration';
+      const bits = [appleCodeCountLabel(item.canonical)];
+      if (item.canonical.createdDate) bits.push('created ' + dateTime(item.canonical.createdDate));
+      return bits.join(' · ');
+    }
+
+    function renderAppleImportRow(item, mode) {
+      const canonical = item.canonical || null;
+      const offerName = canonical?.offerName || item.configurations?.[0]?.offerName || '—';
+      const eligibility = canonical?.customerEligibilities || item.configurations?.[0]?.customerEligibilities || [];
+      const versions = Number(item.configurationCount || 0);
+      const versionText = versions > 1 ? (versions + ' Apple configurations') : canonicalConfigurationLabel(item);
+      const sharedOffer = canonical?.distinctCustomCodesOnOffer > 1;
+      const statusHtml = canonical
+        ? appleBooleanBadge(canonical.customCodeActive, 'Active', 'Inactive') + '<div style="margin-top:5px">' + appleBooleanBadge(canonical.offerActive, 'Offer Active', 'Offer Inactive') + '</div>'
+        : badge('Selection Required', 'warning');
+
+      let linkedHtml = '';
+      let actionsHtml = '';
+
+      if (mode === 'ignored') {
+        linkedHtml = badge('Ignored', '');
+        actionsHtml = '<button class="button small" data-apple-import-restore="' + html(item.customCode) + '">Restore</button>';
+      } else if (item.linkedAffiliate) {
+        linkedHtml = badge(item.linkedAffiliate.displayName || 'Linked', 'positive');
+        actionsHtml = '<span class="muted tiny">Already linked</span>';
+        if (versions > 1) actionsHtml += '<button class="button small" data-apple-import-choose="' + html(item.customCode) + '">Configurations</button>';
+      } else {
+        if (sharedOffer) {
+          linkedHtml = badge('Attribution Blocked', 'danger');
+          actionsHtml = '<button class="button small danger" data-apple-import-blocked="' + html(item.customCode) + '">Fix Apple Setup</button>';
+        } else if (item.needsCanonicalChoice || !canonical) {
+          linkedHtml = badge('Choose Current', 'warning');
+          actionsHtml = '<button class="button small gold" data-apple-import-choose="' + html(item.customCode) + '">Choose Current</button>';
+        } else {
+          linkedHtml = badge('Needs Setup', 'warning');
+          actionsHtml = '<button class="button small gold" data-apple-import-setup="' + html(item.customCode) + '">Complete Setup</button>';
+        }
+        if (versions > 1 && canonical && !item.needsCanonicalChoice) {
+          actionsHtml += '<button class="button small" data-apple-import-choose="' + html(item.customCode) + '">Change Current</button>';
+        }
+        actionsHtml += '<button class="button small" data-apple-import-ignore="' + html(item.customCode) + '">Ignore</button>';
+      }
+
+      const attributionNote = sharedOffer
+        ? '<div class="muted tiny" style="margin-top:5px;color:#df8f92">Shared with ' + html(String(canonical.distinctCustomCodesOnOffer)) + ' creator codes. Exact chain attribution is not safe.</div>'
+        : '';
+
+      return '<tr>' +
+        '<td><div class="partner-name">' + html(offerName) + '</div><div class="muted tiny">' + html(versionText) + '</div>' + attributionNote + '</td>' +
+        '<td><span class="code">' + html(item.customCode || '—') + '</span></td>' +
+        '<td>' + statusHtml + '</td>' +
+        '<td>' + html(eligibility.join(', ') || '—') + '</td>' +
+        '<td>' + linkedHtml + '</td>' +
+        '<td><div class="actions">' + actionsHtml + '</div></td>' +
+      '</tr>';
+    }
+
     function renderAppleImports() {
       const rowsEl = $('appleImportRows');
       const statusEl = $('appleSyncStatus');
       const warningsEl = $('appleImportWarnings');
-      if (!rowsEl || !statusEl || !warningsEl) return;
+      const ignoredToggle = $('toggleIgnoredAppleImports');
+      if (!rowsEl || !statusEl || !warningsEl || !ignoredToggle) return;
 
       if (!appleSync) {
         statusEl.textContent = 'Not synced yet';
         rowsEl.innerHTML = '<tr><td colspan="6" class="empty">Use “Sync App Store Connect” to discover Apple offers and custom codes.</td></tr>';
         warningsEl.textContent = '';
+        ignoredToggle.classList.add('hidden');
         return;
       }
 
       if (appleSync.configured === false && !appleSync.syncedAt) {
         statusEl.textContent = appleSync.errorMessage || 'App Store Connect is not configured.';
-        rowsEl.innerHTML = '<tr><td colspan="6" class="empty">Add APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_PRIVATE_KEY, and AFFILIATE_APPLE_SUBSCRIPTION_ID to Railway, then redeploy.</td></tr>';
+        rowsEl.innerHTML = '<tr><td colspan="6" class="empty">App Store Connect sync is unavailable. Check the Railway credentials and backend logs for the exact error.</td></tr>';
         warningsEl.textContent = '';
+        ignoredToggle.classList.add('hidden');
         return;
       }
 
       statusEl.textContent = appleSync.syncedAt ? ('Synced ' + dateTime(appleSync.syncedAt)) : 'Ready to sync';
       warningsEl.textContent = (appleSync.warnings || []).map(x => x.offerName + ': ' + x.message).join(' · ');
+      ignoredToggle.classList.toggle('hidden', appleIgnored.length === 0);
+      ignoredToggle.textContent = (showIgnoredAppleImports ? 'Hide Ignored' : 'Show Ignored') + (appleIgnored.length ? ' (' + appleIgnored.length + ')' : '');
 
-      const linkedRows = appleLinked.map(item => '<tr>' +
-        '<td><div class="partner-name">' + html(item.offerName || '—') + '</div><div class="muted tiny">Offer ID ' + html(item.offerId || '—') + '</div></td>' +
-        '<td><span class="code">' + html(item.customCode || '—') + '</span></td>' +
-        '<td>' + badge((item.offerState || 'unknown').replaceAll('_',' '), 'info') + '<div style="margin-top:5px">' + badge((item.customCodeState || 'unknown').replaceAll('_',' '), '') + '</div></td>' +
-        '<td>' + html((item.customerEligibilities || []).join(', ') || '—') + '</td>' +
-        '<td>' + badge(item.linkedAffiliate?.displayName || 'Linked', 'positive') + '</td>' +
-        '<td><span class="muted tiny">Already linked</span></td>' +
-      '</tr>');
+      const importRows = appleImports.map(item => renderAppleImportRow(item, 'import'));
+      const linkedRows = appleLinked.map(item => renderAppleImportRow(item, 'linked'));
+      const ignoredRows = showIgnoredAppleImports ? appleIgnored.map(item => renderAppleImportRow(item, 'ignored')) : [];
+      const combined = importRows.concat(linkedRows, ignoredRows);
 
-      const importRows = appleImports.map(item => '<tr>' +
-        '<td><div class="partner-name">' + html(item.offerName || '—') + '</div><div class="muted tiny">Offer ID ' + html(item.offerId || '—') + '</div></td>' +
-        '<td><span class="code">' + html(item.customCode || '—') + '</span></td>' +
-        '<td>' + badge((item.offerState || 'unknown').replaceAll('_',' '), 'info') + '<div style="margin-top:5px">' + badge((item.customCodeState || 'unknown').replaceAll('_',' '), '') + '</div></td>' +
-        '<td>' + html((item.customerEligibilities || []).join(', ') || '—') + '</td>' +
-        '<td>' + badge('Needs Setup', 'warning') + '</td>' +
-        '<td><button class="button small gold" data-apple-import-setup="' + html(item.externalKey) + '">Complete Setup</button></td>' +
-      '</tr>');
-
-      const combined = importRows.concat(linkedRows);
       rowsEl.innerHTML = combined.length
         ? combined.join('')
-        : '<tr><td colspan="6" class="empty">No unlinked Apple offers found right now.</td></tr>';
+        : '<tr><td colspan="6" class="empty">No Apple creator-code imports need attention right now.</td></tr>';
     }
 
-    function appleImportByKey(key) {
-      return appleImports.find(item => item.externalKey === key) || null;
+    function appleImportByCode(code) {
+      const normalized = String(code || '').trim().toUpperCase();
+      return appleImports.concat(appleLinked, appleIgnored).find(item => item.customCode === normalized) || null;
+    }
+
+    function openAppleConfigurationPicker(code) {
+      const item = appleImportByCode(code);
+      if (!item) { toast('Apple import could not be found. Please sync again.', true); return; }
+      const selectedKey = item.canonical?.externalKey || '';
+      const options = (item.configurations || []).map((config, index) => {
+        const key = config.externalKey;
+        const checked = key === selectedKey ? ' checked' : '';
+        const details = [
+          config.customCodeActive === true ? 'Active' : 'Inactive',
+          appleCodeCountLabel(config),
+          config.createdDate ? ('Created ' + dateTime(config.createdDate)) : null,
+          config.expirationDate ? ('Expires ' + dateTime(config.expirationDate)) : null,
+          'Offer ID ' + config.offerId,
+        ].filter(Boolean).join(' · ');
+        return '<label class="card" style="display:block;padding:14px;margin-top:10px;cursor:pointer">' +
+          '<div style="display:flex;gap:10px;align-items:flex-start"><input type="radio" name="appleCanonical" value="' + html(key) + '"' + checked + ' />' +
+          '<div><div class="partner-name">' + html(config.offerName || item.customCode) + '</div><div class="muted tiny" style="margin-top:5px">' + html(details) + '</div></div></div>' +
+        '</label>';
+      }).join('');
+      openModal(
+        '<h2>Choose Current Apple Configuration</h2><div class="modal-sub">' + html(item.customCode) + ' has ' + number(item.configurationCount) + ' Apple configuration' + (item.configurationCount === 1 ? '' : 's') + '. Choose the one that should represent the current creator code. Older configurations stay preserved as history.</div>' +
+        options +
+        '<div id="applePreferenceError" class="login-error"></div>' +
+        '<div class="modal-actions"><button class="button" data-modal-action="close">Cancel</button><button class="button gold" data-modal-action="save-apple-canonical" data-code="' + html(item.customCode) + '">Save Current</button></div>'
+      );
+    }
+
+    async function saveAppleCanonical(code) {
+      const item = appleImportByCode(code);
+      const selected = document.querySelector('input[name="appleCanonical"]:checked');
+      if (!item || !selected) { $('applePreferenceError').textContent = 'Choose one Apple configuration.'; return; }
+      const config = (item.configurations || []).find(x => x.externalKey === selected.value);
+      if (!config) { $('applePreferenceError').textContent = 'That Apple configuration is no longer available. Sync again.'; return; }
+      try {
+        await adminFetch('/api/admin/app-store-connect/imports/' + encodeURIComponent(item.customCode) + '/canonical', {
+          method:'POST', body:{ offerId:config.offerId, customCodeId:config.customCodeId }
+        });
+        closeModal();
+        toast('Current Apple configuration saved for ' + item.customCode + '.');
+        await loadAppleImports(false);
+      } catch (error) { $('applePreferenceError').textContent = error.message; }
+    }
+
+    async function ignoreAppleImport(code) {
+      const item = appleImportByCode(code);
+      if (!item) return;
+      if (!confirm('Ignore ' + item.customCode + ' as an affiliate import? This only hides it in Affiliate Admin. Nothing is deleted from App Store Connect.')) return;
+      try {
+        await adminFetch('/api/admin/app-store-connect/imports/' + encodeURIComponent(item.customCode) + '/ignore', { method:'POST' });
+        toast(item.customCode + ' moved to Ignored.');
+        await loadAppleImports(false);
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function restoreAppleImport(code) {
+      try {
+        await adminFetch('/api/admin/app-store-connect/imports/' + encodeURIComponent(code) + '/restore', { method:'POST' });
+        toast(code + ' restored to App Store Connect Imports.');
+        await loadAppleImports(false);
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function showAppleAttributionBlocker(code) {
+      const item = appleImportByCode(code);
+      if (!item) return;
+      const canonical = item.canonical || item.configurations?.[0] || null;
+      openModal(
+        '<h2>Exact Attribution Blocked</h2>' +
+        '<div class="modal-sub">' + html(item.customCode) + ' is inside an Apple offer that contains multiple custom creator codes.</div>' +
+        '<div class="notice danger" style="margin-top:16px">For The Agora’s subscription-chain affiliate ownership, each affiliate must have its own Apple offer reference. A shared Apple offer cannot tell the verified StoreKit transaction whether AM99, LEVI99, MAXAGORA, or another custom code was used.</div>' +
+        '<div class="card" style="margin-top:14px;padding:14px"><div class="muted tiny">CURRENT APPLE OFFER</div><div style="margin-top:6px">' + html(canonical?.offerName || '—') + '</div><div class="muted tiny" style="margin-top:5px">' + html(String(canonical?.distinctCustomCodesOnOffer || 'Multiple')) + ' distinct custom codes on this offer</div></div>' +
+        '<div class="modal-sub" style="margin-top:14px">Create a separate Apple Offer Code campaign/reference for this affiliate, then place only this creator code under that offer. Sync again afterward. Old Apple configurations can remain historical.</div>' +
+        '<div class="modal-actions"><button class="button gold" data-modal-action="close">Got It</button></div>'
+      );
     }
 
     function affiliateById(id) { return affiliates.find(a => a.id === id); }
@@ -1915,15 +2061,15 @@ function renderAffiliateAdminDashboardPage() {
           : 'This creates the Agora affiliate record only. The Apple Offer Code campaign itself must already exist in App Store Connect. Once an offer exists in Apple, it will automatically appear above under App Store Connect Imports after sync.') +
         '</div>' +
         '<div class="form-grid">' +
-          '<div class="form-group"><label>Display Name</label><input id="newDisplayName" class="field" placeholder="Max Agora" value="' + html(prefill?.offerName || '') + '" /></div>' +
+          '<div class="form-group"><label>Display Name</label><input id="newDisplayName" class="field" placeholder="Max Agora" value="" /></div>' +
           '<div class="form-group"><label>Creator Code</label><input id="newCode" class="field" placeholder="MAXAGORA" value="' + html(prefill?.customCode || '') + '" /></div>' +
-          '<div class="form-group full"><label>Apple Offer Reference Name</label><input id="newOfferRef" class="field" placeholder="AGORA_AFFILIATE_MAX" value="' + html(prefill?.offerName || '') + '" /><div class="muted tiny" style="margin-top:5px">Required for Production attribution. Sandbox-only test records may omit it.</div></div>' +
+          '<div class="form-group full"><label>Apple Offer Reference Name</label><input id="newOfferRef" class="field" placeholder="AGORA_AFFILIATE_MAX" value="' + html(prefill?.canonical?.offerName || '') + '" /><div class="muted tiny" style="margin-top:5px">Required for Production attribution. Sandbox-only test records may omit it.</div></div>' +
           '<div class="form-group"><label>Affiliate Since</label><input id="newSince" class="field" type="date" value="' + localDate + '" /></div>' +
           '<div class="form-group"><label>Commission</label><input id="newRate" class="field" type="number" min="0" max="100" step="0.1" value="50" /></div>' +
           '<div class="form-group"><label>Commission Basis</label><select id="newBasis" class="select"><option value="base_price">Base Price</option><option value="net_proceeds">Apple Net Proceeds</option></select></div>' +
           '<div class="form-group"><label>Payout Currency</label><input id="newCurrency" class="field" value="USD" maxlength="3" /></div>' +
           '<div class="form-group full"><label>Contact Email (optional)</label><input id="newEmail" class="field" type="email" /></div>' +
-          '<div class="form-group full"><label>Internal Notes (optional)</label><textarea id="newNotes" rows="3">' + html(prefill ? ('Imported from App Store Connect offer ' + (prefill.offerName || '') + ' · creator code ' + (prefill.customCode || '') + '.') : '') + '</textarea></div>' +
+          '<div class="form-group full"><label>Internal Notes (optional)</label><textarea id="newNotes" rows="3">' + html(prefill ? ('Imported from App Store Connect offer ' + (prefill.canonical?.offerName || '') + ' · creator code ' + (prefill.customCode || '') + '.') : '') + '</textarea></div>' +
           '<div class="form-group full"><label class="check-row"><input id="newIsTest" type="checkbox" ' + (prefill ? '' : '') + '/> Sandbox / test affiliate. Excluded from production summary and payouts.</label></div>' +
         '</div>' +
         '<div id="createAffiliateError" class="login-error"></div>' +
@@ -1931,10 +2077,18 @@ function renderAffiliateAdminDashboardPage() {
       );
     }
 
-    function openAppleImportSetup(key) {
-      const item = appleImportByKey(key);
+    function openAppleImportSetup(code) {
+      const item = appleImportByCode(code);
       if (!item) {
         toast('Apple import could not be found. Please sync again.', true);
+        return;
+      }
+      if (!item.canonical) {
+        openAppleConfigurationPicker(code);
+        return;
+      }
+      if (!item.exactAttributionReady) {
+        showAppleAttributionBlocker(code);
         return;
       }
       openCreateAffiliate(item);
@@ -2169,6 +2323,10 @@ function renderAffiliateAdminDashboardPage() {
     $('signOut').addEventListener('click', lockAdmin);
     $('refreshAll').addEventListener('click', () => Promise.all([loadAffiliates(true), loadAppleImports(false), loadAlerts(false), loadPayouts(false)]));
     $('syncAppleOffers').addEventListener('click', () => loadAppleImports(true));
+    $('toggleIgnoredAppleImports').addEventListener('click', () => {
+      showIgnoredAppleImports = !showIgnoredAppleImports;
+      renderAppleImports();
+    });
     $('createAffiliate').addEventListener('click', openCreateAffiliate);
     $('affiliateSearch').addEventListener('input', renderAffiliateRows);
     $('affiliateFilter').addEventListener('change', renderAffiliateRows);
@@ -2190,9 +2348,16 @@ function renderAffiliateAdminDashboardPage() {
     });
 
     $('appleImportRows').addEventListener('click', event => {
-      const button = event.target.closest('button[data-apple-import-setup]');
-      if (!button) return;
-      openAppleImportSetup(button.dataset.appleImportSetup);
+      const setup = event.target.closest('button[data-apple-import-setup]');
+      const choose = event.target.closest('button[data-apple-import-choose]');
+      const ignore = event.target.closest('button[data-apple-import-ignore]');
+      const restore = event.target.closest('button[data-apple-import-restore]');
+      const blocked = event.target.closest('button[data-apple-import-blocked]');
+      if (setup) openAppleImportSetup(setup.dataset.appleImportSetup);
+      if (choose) openAppleConfigurationPicker(choose.dataset.appleImportChoose);
+      if (ignore) ignoreAppleImport(ignore.dataset.appleImportIgnore);
+      if (restore) restoreAppleImport(restore.dataset.appleImportRestore);
+      if (blocked) showAppleAttributionBlocker(blocked.dataset.appleImportBlocked);
     });
 
     $('alertList').addEventListener('click', event => {
@@ -2218,6 +2383,7 @@ function renderAffiliateAdminDashboardPage() {
       if (name === 'close') closeModal();
       if (name === 'close-refresh') { closeModal(); await loadAffiliates(false); }
       if (name === 'create-affiliate') await createAffiliateFromModal();
+      if (name === 'save-apple-canonical') await saveAppleCanonical(action.dataset.code);
       if (name === 'open-dashboard') await openPartnerDashboard(affiliateId);
       if (name === 'copy-referral') {
         const a = affiliateById(affiliateId); if (a?.referral_url) { await navigator.clipboard.writeText(a.referral_url); toast('Referral link copied.'); }
@@ -2254,6 +2420,8 @@ export function createAffiliateRouter(pool, options = {}) {
     privateKey: options.appStoreConnectPrivateKey || process.env.APP_STORE_CONNECT_PRIVATE_KEY,
     subscriptionId: options.appleSubscriptionId || process.env.AFFILIATE_APPLE_SUBSCRIPTION_ID,
   });
+
+  const appleImportPreferences = options.appleImportPreferences || createAffiliateAppleImportPreferencesService({ pool });
 
   const adminOnly = requireAdminKey(adminKey);
   const referralLimiter = rateLimit({
@@ -2369,13 +2537,62 @@ export function createAffiliateRouter(pool, options = {}) {
           syncedAt: null,
           imports: [],
           linked: [],
+          ignored: [],
           warnings: [],
           errorMessage: 'App Store Connect sync is not configured yet.',
         });
       }
-      const affiliates = await service.listAffiliates();
-      const payload = await appStoreConnectService.listImports({ existingAffiliates: affiliates });
+      const [affiliates, importPreferences] = await Promise.all([
+        service.listAffiliates(),
+        appleImportPreferences.listPreferences(),
+      ]);
+      const payload = await appStoreConnectService.listImports({
+        existingAffiliates: affiliates,
+        importPreferences,
+      });
       return res.json({ success: true, ...payload });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.post('/api/admin/app-store-connect/imports/:code/canonical', adminOnly, async (req, res) => {
+    try {
+      const actor = req.get('x-admin-actor') || 'owner_admin';
+      const preference = await appleImportPreferences.selectCanonical({
+        customCode: req.params.code,
+        offerId: req.body?.offerId,
+        customCodeId: req.body?.customCodeId,
+        actor,
+      });
+      return res.json({ success: true, preference });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.post('/api/admin/app-store-connect/imports/:code/ignore', adminOnly, async (req, res) => {
+    try {
+      const actor = req.get('x-admin-actor') || 'owner_admin';
+      const preference = await appleImportPreferences.ignoreCode({
+        customCode: req.params.code,
+        actor,
+        note: req.body?.note || 'Marked as a non-affiliate App Store Connect code from Affiliate Admin.',
+      });
+      return res.json({ success: true, preference });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.post('/api/admin/app-store-connect/imports/:code/restore', adminOnly, async (req, res) => {
+    try {
+      const actor = req.get('x-admin-actor') || 'owner_admin';
+      const preference = await appleImportPreferences.restoreCode({
+        customCode: req.params.code,
+        actor,
+      });
+      return res.json({ success: true, preference });
     } catch (error) {
       return jsonError(res, error);
     }
