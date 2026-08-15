@@ -36,20 +36,24 @@ async function loadCandidates(client, batchSize) {
       tx.product_id,
       tx.offer_type,
       tx.offer_identifier,
+      tx.app_account_token,
       tx.purchase_date,
       tx.signed_date,
       tx.price_milliunits,
       tx.currency
     FROM app_store_transactions tx
-    JOIN affiliates affiliate
-      ON affiliate.normalized_apple_offer_identifier =
-         UPPER(BTRIM(tx.offer_identifier))
-     AND affiliate.status = 'active'
-     AND affiliate.code_status = 'active'
-    WHERE UPPER(REPLACE(REPLACE(BTRIM(tx.offer_type), '-', '_'), ' ', '_')) IN ('3', 'OFFER_CODE')
+    WHERE UPPER(REPLACE(REPLACE(BTRIM(tx.offer_type), '-', '_'), ' ', '_'))
+          IN ('3', 'OFFER_CODE')
       AND tx.offer_identifier IS NOT NULL
       AND BTRIM(tx.offer_identifier) <> ''
       AND LOWER(tx.environment) IN ('production', 'sandbox')
+      AND EXISTS (
+        SELECT 1
+        FROM affiliates affiliate
+        WHERE affiliate.normalized_apple_offer_identifier =
+              UPPER(BTRIM(tx.offer_identifier))
+          AND affiliate.status IN ('active', 'inactive')
+      )
       AND NOT EXISTS (
         SELECT 1
         FROM affiliate_subscription_attributions attribution
@@ -96,6 +100,7 @@ async function reconcileCandidate(service, pool, row) {
         productId: row.product_id,
         offerType: row.offer_type,
         offerIdentifier: row.offer_identifier,
+        appAccountToken: row.app_account_token,
         purchaseDate: row.purchase_date,
         signedDate: row.signed_date,
         price: row.price_milliunits,
@@ -164,17 +169,21 @@ async function main() {
         break;
       }
 
+      let batchProgress = 0;
+
       for (const row of candidates) {
         try {
           const result = await reconcileCandidate(service, pool, row);
 
           if (result?.status === 'attributed_new') {
             attributed += 1;
+            batchProgress += 1;
           } else if (
             result?.status === 'inherited_existing' ||
             result?.status === 'conflict_preserved_existing'
           ) {
             alreadyOwned += 1;
+            batchProgress += 1;
           } else {
             reviewRequired += 1;
           }
@@ -192,7 +201,10 @@ async function main() {
         }
       }
 
-      if (candidates.length < batchSize) {
+      // Unresolved shared-offer rows can remain intentionally unassigned until
+      // an authenticated account supplies a creator-code claim. Avoid cycling
+      // over the same full batch repeatedly in one run when nothing changed.
+      if (candidates.length < batchSize || batchProgress === 0) {
         break;
       }
     }
