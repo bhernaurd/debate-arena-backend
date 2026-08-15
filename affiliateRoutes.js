@@ -11,6 +11,9 @@ import {
 import {
   createAffiliateAppleImportPreferencesService,
 } from './lib/affiliateAppleImportPreferencesService.js';
+import {
+  createAffiliateAccountReferralService,
+} from './lib/affiliateAccountReferralService.js';
 
 function jsonError(res, error) {
   const statusCode = Number(error?.statusCode) || 500;
@@ -95,6 +98,22 @@ function readJsonBoolean(value, fieldName, defaultValue = false) {
   error.statusCode = 400;
   error.code = 'invalid_boolean';
   throw error;
+}
+
+function readAccountInstallationId(req) {
+  return String(req.get('x-installation-id') || '').trim();
+}
+
+function readBearerToken(req) {
+  const authorization = String(req.get('authorization') || '').trim();
+  const match = /^Bearer\s+(.+)$/i.exec(authorization);
+  if (!match || !match[1]?.trim()) {
+    const error = new Error('A signed-in Agora account is required.');
+    error.statusCode = 401;
+    error.code = 'affiliate_account_auth_required';
+    throw error;
+  }
+  return match[1].trim();
 }
 
 function privateApiHeaders(_req, res, next) {
@@ -1819,7 +1838,11 @@ function renderAffiliateAdminDashboardPage() {
     }
 
     function canonicalConfigurationLabel(item) {
-      if (!item?.canonical) return item?.configurationCount > 1 ? 'Choose current configuration' : 'No current configuration';
+      if (!item?.canonical) {
+        return item?.configurationCount > 1
+          ? (item.configurationCount + ' Apple configurations · choose current')
+          : 'No current configuration';
+      }
       const bits = [appleCodeCountLabel(item.canonical)];
       if (item.canonical.createdDate) bits.push('created ' + dateTime(item.canonical.createdDate));
       return bits.join(' · ');
@@ -1830,8 +1853,17 @@ function renderAffiliateAdminDashboardPage() {
       const offerName = canonical?.offerName || item.configurations?.[0]?.offerName || '—';
       const eligibility = canonical?.customerEligibilities || item.configurations?.[0]?.customerEligibilities || [];
       const versions = Number(item.configurationCount || 0);
-      const versionText = versions > 1 ? (versions + ' Apple configurations') : canonicalConfigurationLabel(item);
-      const sharedOffer = canonical?.distinctCustomCodesOnOffer > 1;
+      const historicalCount = canonical ? Math.max(0, versions - 1) : 0;
+      const versionText = canonical
+        ? canonicalConfigurationLabel(item)
+        : (versions > 1 ? (versions + ' Apple configurations · choose current') : canonicalConfigurationLabel(item));
+      const historyText = historicalCount > 0
+        ? '<div class="muted tiny" style="margin-top:4px">' + html(String(historicalCount)) + ' historical configuration' + (historicalCount === 1 ? '' : 's') + '</div>'
+        : '';
+      const sharedCount = Number(canonical?.distinctCustomCodesOnOffer || item.sharedOfferCodeCount || 0);
+      const sharedOfferNote = sharedCount > 1
+        ? '<div class="muted tiny" style="margin-top:5px">Shared affiliate offer · ' + html(String(sharedCount)) + ' creator codes</div>'
+        : '';
       const statusHtml = canonical
         ? appleBooleanBadge(canonical.customCodeActive, 'Active', 'Inactive') + '<div style="margin-top:5px">' + appleBooleanBadge(canonical.offerActive, 'Offer Active', 'Offer Inactive') + '</div>'
         : badge('Selection Required', 'warning');
@@ -1847,10 +1879,7 @@ function renderAffiliateAdminDashboardPage() {
         actionsHtml = '<span class="muted tiny">Already linked</span>';
         if (versions > 1) actionsHtml += '<button class="button small" data-apple-import-choose="' + html(item.customCode) + '">Configurations</button>';
       } else {
-        if (sharedOffer) {
-          linkedHtml = badge('Attribution Blocked', 'danger');
-          actionsHtml = '<button class="button small danger" data-apple-import-blocked="' + html(item.customCode) + '">Fix Apple Setup</button>';
-        } else if (item.needsCanonicalChoice || !canonical) {
+        if (item.needsCanonicalChoice || !canonical) {
           linkedHtml = badge('Choose Current', 'warning');
           actionsHtml = '<button class="button small gold" data-apple-import-choose="' + html(item.customCode) + '">Choose Current</button>';
         } else {
@@ -1863,15 +1892,11 @@ function renderAffiliateAdminDashboardPage() {
         actionsHtml += '<button class="button small" data-apple-import-ignore="' + html(item.customCode) + '">Ignore</button>';
       }
 
-      const attributionNote = sharedOffer
-        ? '<div class="muted tiny" style="margin-top:5px;color:#df8f92">Shared with ' + html(String(canonical.distinctCustomCodesOnOffer)) + ' creator codes. Exact chain attribution is not safe.</div>'
-        : '';
-
       return '<tr>' +
-        '<td><div class="partner-name">' + html(offerName) + '</div><div class="muted tiny">' + html(versionText) + '</div>' + attributionNote + '</td>' +
+        '<td><div class="partner-name">' + html(offerName) + '</div><div class="muted tiny">' + html(versionText) + '</div>' + historyText + sharedOfferNote + '</td>' +
         '<td><span class="code">' + html(item.customCode || '—') + '</span></td>' +
         '<td>' + statusHtml + '</td>' +
-        '<td>' + html(eligibility.join(', ') || '—') + '</td>' +
+        '<td>' + html((eligibility || []).join(', ') || '—') + '</td>' +
         '<td>' + linkedHtml + '</td>' +
         '<td><div class="actions">' + actionsHtml + '</div></td>' +
       '</tr>';
@@ -1982,20 +2007,6 @@ function renderAffiliateAdminDashboardPage() {
       } catch (error) { toast(error.message, true); }
     }
 
-    function showAppleAttributionBlocker(code) {
-      const item = appleImportByCode(code);
-      if (!item) return;
-      const canonical = item.canonical || item.configurations?.[0] || null;
-      openModal(
-        '<h2>Exact Attribution Blocked</h2>' +
-        '<div class="modal-sub">' + html(item.customCode) + ' is inside an Apple offer that contains multiple custom creator codes.</div>' +
-        '<div class="notice danger" style="margin-top:16px">For The Agora’s subscription-chain affiliate ownership, each affiliate must have its own Apple offer reference. A shared Apple offer cannot tell the verified StoreKit transaction whether AM99, LEVI99, MAXAGORA, or another custom code was used.</div>' +
-        '<div class="card" style="margin-top:14px;padding:14px"><div class="muted tiny">CURRENT APPLE OFFER</div><div style="margin-top:6px">' + html(canonical?.offerName || '—') + '</div><div class="muted tiny" style="margin-top:5px">' + html(String(canonical?.distinctCustomCodesOnOffer || 'Multiple')) + ' distinct custom codes on this offer</div></div>' +
-        '<div class="modal-sub" style="margin-top:14px">Create a separate Apple Offer Code campaign/reference for this affiliate, then place only this creator code under that offer. Sync again afterward. Old Apple configurations can remain historical.</div>' +
-        '<div class="modal-actions"><button class="button gold" data-modal-action="close">Got It</button></div>'
-      );
-    }
-
     function affiliateById(id) { return affiliates.find(a => a.id === id); }
 
     function openDetails(id) {
@@ -2063,7 +2074,7 @@ function renderAffiliateAdminDashboardPage() {
         '<div class="form-grid">' +
           '<div class="form-group"><label>Display Name</label><input id="newDisplayName" class="field" placeholder="Max Agora" value="" /></div>' +
           '<div class="form-group"><label>Creator Code</label><input id="newCode" class="field" placeholder="MAXAGORA" value="' + html(prefill?.customCode || '') + '" /></div>' +
-          '<div class="form-group full"><label>Apple Offer Reference Name</label><input id="newOfferRef" class="field" placeholder="AGORA_AFFILIATE_MAX" value="' + html(prefill?.canonical?.offerName || '') + '" /><div class="muted tiny" style="margin-top:5px">Required for Production attribution. Sandbox-only test records may omit it.</div></div>' +
+          '<div class="form-group full"><label>Shared Apple Offer Reference Name</label><input id="newOfferRef" class="field" placeholder="Affiliate First Month $0.99" value="' + html(prefill?.canonical?.offerName || '') + '" /><div class="muted tiny" style="margin-top:5px">Production affiliates may intentionally share this Apple offer. The creator code identifies the affiliate inside Agora.</div></div>' +
           '<div class="form-group"><label>Affiliate Since</label><input id="newSince" class="field" type="date" value="' + localDate + '" /></div>' +
           '<div class="form-group"><label>Commission</label><input id="newRate" class="field" type="number" min="0" max="100" step="0.1" value="50" /></div>' +
           '<div class="form-group"><label>Commission Basis</label><select id="newBasis" class="select"><option value="base_price">Base Price</option><option value="net_proceeds">Apple Net Proceeds</option></select></div>' +
@@ -2087,10 +2098,6 @@ function renderAffiliateAdminDashboardPage() {
         openAppleConfigurationPicker(code);
         return;
       }
-      if (!item.exactAttributionReady) {
-        showAppleAttributionBlocker(code);
-        return;
-      }
       openCreateAffiliate(item);
     }
 
@@ -2105,7 +2112,7 @@ function renderAffiliateAdminDashboardPage() {
         return;
       }
       if (!isTest && !offerRef) {
-        $('createAffiliateError').textContent = 'Production affiliates require the App Store Connect offer reference name.';
+        $('createAffiliateError').textContent = 'Production affiliates require the shared App Store Connect offer reference name.';
         return;
       }
       try {
@@ -2352,12 +2359,10 @@ function renderAffiliateAdminDashboardPage() {
       const choose = event.target.closest('button[data-apple-import-choose]');
       const ignore = event.target.closest('button[data-apple-import-ignore]');
       const restore = event.target.closest('button[data-apple-import-restore]');
-      const blocked = event.target.closest('button[data-apple-import-blocked]');
       if (setup) openAppleImportSetup(setup.dataset.appleImportSetup);
       if (choose) openAppleConfigurationPicker(choose.dataset.appleImportChoose);
       if (ignore) ignoreAppleImport(ignore.dataset.appleImportIgnore);
       if (restore) restoreAppleImport(restore.dataset.appleImportRestore);
-      if (blocked) showAppleAttributionBlocker(blocked.dataset.appleImportBlocked);
     });
 
     $('alertList').addEventListener('click', event => {
@@ -2423,6 +2428,18 @@ export function createAffiliateRouter(pool, options = {}) {
 
   const appleImportPreferences = options.appleImportPreferences || createAffiliateAppleImportPreferencesService({ pool });
 
+  const affiliateAccountReferralService = options.affiliateAccountReferralService || (
+    options.accountAuthService
+      ? createAffiliateAccountReferralService({
+          pool,
+          accountAuthService: options.accountAuthService,
+        })
+      : null
+  );
+
+  const affiliateSubscriptionAttributionService =
+    options.affiliateSubscriptionAttributionService || null;
+
   const adminOnly = requireAdminKey(adminKey);
   const referralLimiter = rateLimit({
     windowMs: 60 * 1000,
@@ -2445,8 +2462,16 @@ export function createAffiliateRouter(pool, options = {}) {
     legacyHeaders: false,
     message: { success: false, error: { code: 'affiliate_admin_rate_limited', message: 'Too many admin requests.' } },
   });
+  const accountAffiliateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 20,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, error: { code: 'affiliate_account_rate_limited', message: 'Too many creator-code requests.' } },
+  });
 
   router.use('/api/partner', partnerLimiter, privateApiHeaders);
+  router.use('/api/account/affiliate', accountAffiliateLimiter, privateApiHeaders);
   router.use('/api/admin', adminLimiter, privateApiHeaders);
 
   router.get('/r/:code', referralLimiter, async (req, res) => {
@@ -2514,6 +2539,73 @@ export function createAffiliateRouter(pool, options = {}) {
     try {
       const data = await service.getDashboardData(req.params.token, req.query.range);
       return res.json({ success: true, data });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.get('/api/account/affiliate/claim', async (req, res) => {
+    try {
+      if (!affiliateAccountReferralService) {
+        const error = new Error('Affiliate account attribution is temporarily unavailable.');
+        error.statusCode = 503;
+        error.code = 'affiliate_account_attribution_unavailable';
+        throw error;
+      }
+      const result = await affiliateAccountReferralService.getCurrentClaim({
+        installationId: readAccountInstallationId(req),
+        accessToken: readBearerToken(req),
+      });
+      return res.json({ success: true, ...result });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.post('/api/account/affiliate/claim', async (req, res) => {
+    try {
+      if (!affiliateAccountReferralService) {
+        const error = new Error('Affiliate account attribution is temporarily unavailable.');
+        error.statusCode = 503;
+        error.code = 'affiliate_account_attribution_unavailable';
+        throw error;
+      }
+
+      const result = await affiliateAccountReferralService.claimCreatorCode({
+        installationId: readAccountInstallationId(req),
+        accessToken: readBearerToken(req),
+        customCode: req.body?.customCode,
+        source: req.body?.source || 'creator_code_entry',
+      });
+
+      let reconciliation = null;
+      if (
+        affiliateSubscriptionAttributionService &&
+        typeof affiliateSubscriptionAttributionService.reconcileAccount === 'function'
+      ) {
+        try {
+          reconciliation = await affiliateSubscriptionAttributionService.reconcileAccount(
+            result.accountId,
+            { limit: 50 }
+          );
+        } catch (reconcileError) {
+          console.error('[affiliate] creator-code claim saved; reconciliation deferred:', {
+            code: reconcileError?.code || 'affiliate_reconciliation_failed',
+            message: reconcileError?.message || String(reconcileError),
+            accountId: result.accountId,
+          });
+          reconciliation = {
+            deferred: true,
+            code: reconcileError?.code || 'affiliate_reconciliation_failed',
+          };
+        }
+      }
+
+      return res.status(result.created ? 201 : 200).json({
+        success: true,
+        ...result,
+        reconciliation,
+      });
     } catch (error) {
       return jsonError(res, error);
     }
@@ -2663,11 +2755,7 @@ export function createAffiliateRouter(pool, options = {}) {
         const constraint = String(error?.constraint || '');
         error.statusCode = 409;
 
-        if (constraint === 'affiliates_offer_identifier_unique_idx') {
-          error.code = 'affiliate_offer_identifier_already_exists';
-          error.message =
-            'That App Store Connect offer reference is already assigned to another affiliate.';
-        } else if (
+        if (
           constraint === 'affiliates_normalized_code_unique' ||
           constraint === 'affiliates_normalized_code_unique_idx' ||
           constraint === 'affiliates_custom_code_ci_uidx'
