@@ -1514,15 +1514,14 @@ function renderAffiliateAdminDashboardPage() {
 
       <div class="section">
         <div class="section-head">
-          <div><h2>Affiliates</h2><div class="muted tiny">Production and Sandbox partners. Money summary above excludes test affiliates.</div></div>
+          <div><h2>Affiliates</h2><div class="muted tiny">Production partners are shown by default. Sandbox/Test partners only appear when explicitly selected.</div></div>
           <div class="toolbar">
             <input id="affiliateSearch" class="field" type="search" placeholder="Search partner or code" />
             <select id="affiliateFilter" class="select">
-              <option value="all">All</option>
-              <option value="production">Production</option>
-              <option value="test">Sandbox</option>
+              <option value="production" selected>Production</option>
               <option value="active">Active</option>
               <option value="paused">Paused</option>
+              <option value="test">Sandbox/Test</option>
             </select>
           </div>
         </div>
@@ -1790,8 +1789,15 @@ function renderAffiliateAdminDashboardPage() {
       const filter = $('affiliateFilter').value;
       const filtered = affiliates.filter(a => {
         if (query && !String(a.display_name || '').toLowerCase().includes(query) && !String(a.normalized_code || '').toLowerCase().includes(query)) return false;
-        if (filter === 'production' && a.is_test) return false;
-        if (filter === 'test' && !a.is_test) return false;
+
+        // Keep Sandbox/Test affiliates out of every normal production view.
+        // They are only shown when the user explicitly selects Sandbox/Test.
+        if (filter === 'test') {
+          if (!a.is_test) return false;
+        } else if (a.is_test) {
+          return false;
+        }
+
         if (filter === 'active' && a.status !== 'active') return false;
         if (filter === 'paused' && a.status === 'active') return false;
         return true;
