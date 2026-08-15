@@ -1854,18 +1854,18 @@ function renderAffiliateAdminDashboardPage() {
       return bits.join(' · ');
     }
 
+// MAXAGORA_CLEAN_UI_V2: linked affiliates do not show historical configuration counts or a Configurations button.
     function renderAppleImportRow(item, mode) {
       const canonical = item.canonical || null;
       const offerName = canonical?.offerName || item.configurations?.[0]?.offerName || '—';
       const eligibility = canonical?.customerEligibilities || item.configurations?.[0]?.customerEligibilities || [];
       const versions = Number(item.configurationCount || 0);
-      const historicalCount = canonical ? Math.max(0, versions - 1) : 0;
       const versionText = canonical
         ? canonicalConfigurationLabel(item)
         : (versions > 1 ? (versions + ' Apple configurations · choose current') : canonicalConfigurationLabel(item));
-      const historyText = historicalCount > 0
-        ? '<div class="muted tiny" style="margin-top:4px">' + html(String(historicalCount)) + ' historical configuration' + (historicalCount === 1 ? '' : 's') + '</div>'
-        : '';
+      // ADMIN UI CLEANUP 2026-08-14: historical Apple configurations remain
+      // preserved in data, but their count is intentionally not shown here.
+      const historyText = '';
       const sharedCount = Number(canonical?.distinctCustomCodesOnOffer || item.sharedOfferCodeCount || 0);
       const sharedOfferNote = sharedCount > 1
         ? '<div class="muted tiny" style="margin-top:5px">Shared affiliate offer · ' + html(String(sharedCount)) + ' creator codes</div>'
@@ -1883,7 +1883,14 @@ function renderAffiliateAdminDashboardPage() {
       } else if (item.linkedAffiliate) {
         linkedHtml = badge(item.linkedAffiliate.displayName || 'Linked', 'positive');
         actionsHtml = '<span class="muted tiny">Already linked</span>';
-        if (versions > 1) actionsHtml += '<button class="button small" data-apple-import-choose="' + html(item.customCode) + '">Configurations</button>';
+
+        // Once an affiliate is linked and its current Apple configuration is
+        // resolved, historical configurations remain preserved internally but
+        // no longer clutter the production admin table. Only surface a chooser
+        // again if the current configuration genuinely needs attention.
+        if (item.needsCanonicalChoice || !canonical) {
+          actionsHtml += '<button class="button small gold" data-apple-import-choose="' + html(item.customCode) + '">Choose Current</button>';
+        }
       } else {
         if (item.needsCanonicalChoice || !canonical) {
           linkedHtml = badge('Choose Current', 'warning');
