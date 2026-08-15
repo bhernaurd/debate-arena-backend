@@ -125,10 +125,6 @@ app.use(cors());
 // installed before the existing 50 KB global parser.
 app.use('/api/app-store', express.json({ limit: '128kb' }));
 
-// Apple Analytics imports can contain thousands of normalized aggregate rows.
-// This parser must run before the existing 50 KB global JSON parser.
-app.use('/api/admin/affiliate-apple-metrics', express.json({ limit: '2mb' }));
-
 const accountHistoryLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 20,
@@ -185,6 +181,14 @@ const subscriptionSyncLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many subscription sync requests.' },
+});
+
+const affiliatePortalLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: 'Too many affiliate dashboard requests. Please try again shortly.',
 });
 
 const accountChallengeLimiter = rateLimit({
@@ -314,18 +318,14 @@ const accountSubscriptionOwnershipService =
   });
 
 const affiliateSubscriptionAttributionEnabled =
-  String(
-    process.env.AFFILIATE_SUBSCRIPTION_ATTRIBUTION_ENABLED ??
-      'true'
-  )
-    .trim()
-    .toLowerCase() !== 'false';
+  readBooleanEnvironmentVariable(
+    'AFFILIATE_SUBSCRIPTION_ATTRIBUTION_ENABLED',
+    { defaultValue: true }
+  );
 
 const affiliateSubscriptionAttributionService =
   affiliateSubscriptionAttributionEnabled
-    ? createAffiliateSubscriptionAttributionService({
-        pool,
-      })
+    ? createAffiliateSubscriptionAttributionService({ pool })
     : null;
 
 if (!affiliateSubscriptionAttributionEnabled) {
@@ -520,14 +520,12 @@ app.use('/api/account/apple/sign-in', accountSignInLimiter);
 app.use('/api/account/session', accountSessionLimiter);
 app.use('/api/account', accountAuthRouter);
 
-app.use(createAffiliateRouter(pool, {
-  adminKey: process.env.AFFILIATE_ADMIN_KEY,
-  appAppleId: process.env.AFFILIATE_APPLE_APP_ID,
-  tokenEncryptionKey: process.env.AFFILIATE_TOKEN_ENCRYPTION_KEY,
-  partnerBaseUrl: process.env.AFFILIATE_PARTNER_BASE_URL,
-  referralBaseUrl: process.env.AFFILIATE_REFERRAL_BASE_URL,
-}));
 
+app.use('/affiliate', affiliatePortalLimiter);
+app.use(createAffiliateRouter(pool, {
+  accountAuthService,
+  affiliateSubscriptionAttributionService,
+}));
 app.use(createPaywallConfigurationRouter());
 app.use(createDailyChallengeRouter(pool));
 app.use(createPushRouter(pool));
