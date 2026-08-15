@@ -109,3 +109,22 @@ test('admin dashboard exposes App Store Connect imports and sync controls', () =
   assert.match(source, /APP_STORE_CONNECT_ISSUER_ID/);
   assert.match(source, /AFFILIATE_APPLE_SUBSCRIPTION_ID/);
 });
+
+test('App Store Connect imports collapse duplicate creator-code resources and persist owner choices', () => {
+  assert.match(source, /Choose Current Apple Configuration/);
+  assert.match(source, /configurationCount/);
+  assert.match(source, /data-apple-import-choose/);
+  assert.match(source, /data-apple-import-ignore/);
+  assert.match(source, /data-apple-import-restore/);
+  assert.match(source, /\/api\/admin\/app-store-connect\/imports\/:code\/canonical', adminOnly/);
+  assert.match(source, /\/api\/admin\/app-store-connect\/imports\/:code\/ignore', adminOnly/);
+  assert.match(source, /\/api\/admin\/app-store-connect\/imports\/:code\/restore', adminOnly/);
+  assert.match(source, /Show Ignored/);
+});
+
+test('shared Apple offers are blocked from exact affiliate activation', () => {
+  assert.match(source, /Exact Attribution Blocked/);
+  assert.match(source, /each affiliate must have its own Apple offer reference/);
+  assert.match(source, /data-apple-import-blocked/);
+  assert.match(source, /exactAttributionReady/);
+});
