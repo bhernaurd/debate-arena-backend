@@ -570,6 +570,8 @@ async function upsertEntitlement(client, {
     snapshotSignedDate,
     pricingCohortHint = 'unknown',
     paywallSessionId = null,
+    affiliateAccountId = null,
+    affiliateSubscriptionAttributionService = null,
 }) {
     const originalTransactionId = cleanString(
         transaction?.originalTransactionId ||
@@ -992,18 +994,17 @@ async function observeAffiliateAttributionSafely(
         transaction,
         environment,
         source,
+        accountId = null,
     }
 ) {
     if (!affiliateSubscriptionAttributionService) {
         return null;
     }
 
-    // Affiliate accounting must never prevent Apple-authoritative subscription
-    // access from being persisted. The verified transaction is already stored,
-    // so an unexpected attribution failure can be reconciled later without
-    // denying or delaying Pro access. Expected review states (unknown offer,
-    // missing identifier, conflicts) are handled by the attribution service and
-    // do not throw.
+    // Affiliate accounting must never deny or roll back Apple-authoritative
+    // subscription access. Isolate attribution in a savepoint so any unexpected
+    // affiliate failure can be reconciled later without losing the verified
+    // transaction, entitlement, or subscription event.
     const savepoint = 'affiliate_subscription_attribution';
     await client.query(`SAVEPOINT ${savepoint}`);
 
@@ -1015,6 +1016,7 @@ async function observeAffiliateAttributionSafely(
                     transaction,
                     environment,
                     source,
+                    accountId,
                 });
 
         await client.query(`RELEASE SAVEPOINT ${savepoint}`);
@@ -1024,9 +1026,6 @@ async function observeAffiliateAttributionSafely(
             await client.query(`ROLLBACK TO SAVEPOINT ${savepoint}`);
             await client.query(`RELEASE SAVEPOINT ${savepoint}`);
         } catch (savepointError) {
-            // If savepoint recovery itself fails, the outer transaction is no
-            // longer trustworthy. Re-throw so the normal subscription rollback
-            // path can protect database consistency.
             savepointError.cause = error;
             throw savepointError;
         }
@@ -1063,7 +1062,6 @@ async function persistVerifiedSnapshot(client, {
     metadata = null,
     pricingCohortHint = 'unknown',
     paywallSessionId = null,
-    affiliateSubscriptionAttributionService = null,
 }) {
     const userId = await resolveUserId({
         client,
@@ -1129,6 +1127,7 @@ async function persistVerifiedSnapshot(client, {
                 transaction,
                 environment,
                 source,
+                accountId: affiliateAccountId,
             }
         );
 
@@ -1164,11 +1163,14 @@ export function createAppStoreSubscriptionRouter(
         );
     }
 
-
     if (
         affiliateSubscriptionAttributionService != null &&
-        typeof affiliateSubscriptionAttributionService
-            .observeVerifiedTransaction !== 'function'
+        (
+            typeof affiliateSubscriptionAttributionService
+                .observeVerifiedTransaction !== 'function' ||
+            typeof affiliateSubscriptionAttributionService
+                .reconcileAccount !== 'function'
+        )
     ) {
         throw new Error(
             'A valid affiliate subscription attribution service is required.'
@@ -1279,6 +1281,8 @@ export function createAppStoreSubscriptionRouter(
                 },
                 pricingCohortHint,
                 paywallSessionId,
+                affiliateAccountId:
+                    accountAuthorization?.accountId || null,
                 affiliateSubscriptionAttributionService,
             });
 
