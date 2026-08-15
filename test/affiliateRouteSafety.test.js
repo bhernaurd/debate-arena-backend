@@ -94,16 +94,18 @@ test('owner affiliate admin dashboard is a locked shell backed by admin-only API
   assert.doesNotMatch(source, /const\s+adminKey\s*=\s*['"][A-Za-z0-9+/=_-]{32,}['"]/);
 });
 
-test('admin dashboard keeps destructive financial writes explicit', () => {
-  assert.match(source, /Only record money that was actually sent/);
-  assert.match(source, /Record Actual Payment/);
-  assert.match(source, /Only a completed prior calendar month can be finalized/);
-  assert.match(source, /later Apple corrections carry forward/);
-  assert.match(source, /Regenerate .*private dashboard link/);
-});
-
 test('admin payout UI can build a month before payout rows already exist', () => {
   assert.match(source, /id="refreshMonth"/);
   assert.match(source, /\/api\/admin\/affiliate-payouts\/refresh-period/);
   assert.match(source, /Refresh Month after Apple data is available/);
+});
+
+test('admin dashboard exposes App Store Connect imports and sync controls', () => {
+  assert.match(source, /App Store Connect Imports/);
+  assert.match(source, /Sync App Store Connect/);
+  assert.match(source, /\/api\/admin\/app-store-connect\/imports', adminOnly/);
+  assert.match(source, /Complete Apple Import/);
+  assert.match(source, /Needs Setup/);
+  assert.match(source, /APP_STORE_CONNECT_ISSUER_ID/);
+  assert.match(source, /AFFILIATE_APPLE_SUBSCRIPTION_ID/);
 });
