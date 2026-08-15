@@ -1,3 +1,4 @@
+// PARTNER_PRICING_V4: App Store Connect current/scheduled pricing + active subscriber price tiers.
 // PRODUCTION_CLEAN_UI_V3: hides dedicated sandbox offer warning from normal Affiliate Admin.
 import crypto from 'crypto';
 import express from 'express';
@@ -693,6 +694,15 @@ function renderPartnerDashboardPage(token) {
               'Commission Basis',
               'Base Price means commission is calculated from the approved revenue basis. Apple Net Proceeds means commission is calculated from Apple\'s actual reported proceeds rather than estimated fees, taxes, or currency deductions.'
             )}</span><span class="number" id="commissionBasis">—</span></div>
+            <div class="row"><span class="name name-with-info">Current Monthly Price ${renderInfoButton(
+              'Current Monthly Price',
+              'The current U.S. customer price for new subscribers, read from App Store Connect. Existing subscribers can remain on an older preserved price, which is shown separately in the active price-tier counts.'
+            )}</span><span class="number" id="currentMonthlyPrice">—</span></div>
+            <div class="row hidden" id="scheduledMonthlyPriceRow"><span class="name name-with-info">Scheduled Monthly Price ${renderInfoButton(
+              'Scheduled Monthly Price',
+              'The next U.S. subscription price already scheduled in App Store Connect. This row disappears when no future price change is scheduled.'
+            )}</span><span class="number" id="scheduledMonthlyPrice">—</span></div>
+            <div id="activePriceTierRows"></div>
             <div class="row"><span class="name name-with-info">$0.99 Promo ${renderInfoButton(
               '$0.99 Promo',
               'The promotional $0.99 payment is excluded from commission. Commission begins only when a transaction becomes commission eligible under your plan.'
@@ -840,38 +850,45 @@ function renderPartnerDashboardPage(token) {
       infoTooltip.setAttribute('aria-hidden', 'true');
     }
 
-    document.querySelectorAll('.info-button').forEach(button => {
-      button.addEventListener('click', event => {
-        event.stopPropagation();
+    function bindInfoButtons(root = document) {
+      root.querySelectorAll('.info-button').forEach(button => {
+        if (button.dataset.infoBound === 'true') return;
+        button.dataset.infoBound = 'true';
 
-        if (activeInfoButton === button && infoTooltipPinned) {
-          hideInfoTooltip();
-          return;
-        }
+        button.addEventListener('click', event => {
+          event.stopPropagation();
 
-        showInfoTooltip(button, true);
+          if (activeInfoButton === button && infoTooltipPinned) {
+            hideInfoTooltip();
+            return;
+          }
+
+          showInfoTooltip(button, true);
+        });
+
+        button.addEventListener('mouseenter', () => {
+          if (!infoTooltipPinned) showInfoTooltip(button, false);
+        });
+
+        button.addEventListener('mouseleave', () => {
+          if (!infoTooltipPinned && activeInfoButton === button) {
+            hideInfoTooltip();
+          }
+        });
+
+        button.addEventListener('focus', () => {
+          if (!infoTooltipPinned) showInfoTooltip(button, false);
+        });
+
+        button.addEventListener('blur', () => {
+          if (!infoTooltipPinned && activeInfoButton === button) {
+            hideInfoTooltip();
+          }
+        });
       });
+    }
 
-      button.addEventListener('mouseenter', () => {
-        if (!infoTooltipPinned) showInfoTooltip(button, false);
-      });
-
-      button.addEventListener('mouseleave', () => {
-        if (!infoTooltipPinned && activeInfoButton === button) {
-          hideInfoTooltip();
-        }
-      });
-
-      button.addEventListener('focus', () => {
-        if (!infoTooltipPinned) showInfoTooltip(button, false);
-      });
-
-      button.addEventListener('blur', () => {
-        if (!infoTooltipPinned && activeInfoButton === button) {
-          hideInfoTooltip();
-        }
-      });
-    });
+    bindInfoButtons();
 
     document.addEventListener('click', event => {
       if (!activeInfoButton) return;
@@ -914,6 +931,128 @@ function renderPartnerDashboardPage(token) {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2
       }).format(numeric);
+    }
+
+
+    function priceMoney(value, currency = 'USD') {
+      if (value == null || value === '') return '—';
+      const numeric = Number(value);
+      const code = /^[A-Z]{3}$/.test(String(currency || '').toUpperCase())
+        ? String(currency).toUpperCase()
+        : 'USD';
+      if (!Number.isFinite(numeric)) return '—';
+      return new Intl.NumberFormat(undefined, {
+        style: 'currency',
+        currency: code,
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }).format(numeric);
+    }
+
+    function scheduledPriceDate(value) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return '';
+      const date = new Date(String(value) + 'T12:00:00Z');
+      if (Number.isNaN(date.getTime())) return '';
+      return date.toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        timeZone: 'UTC'
+      });
+    }
+
+    function pricePlanKind(productId) {
+      const value = String(productId || '').toLowerCase();
+      if (value.includes('year') || value.includes('annual')) return 'annual';
+      return 'monthly';
+    }
+
+    function normalizedPriceKey(amount, currency, planKind = 'monthly') {
+      const numeric = Number(amount);
+      if (!Number.isFinite(numeric)) return null;
+      return [
+        String(currency || 'USD').toUpperCase(),
+        numeric.toFixed(3),
+        planKind
+      ].join('|');
+    }
+
+    function renderActivePriceTierRows(data) {
+      const container = document.getElementById('activePriceTierRows');
+      if (!container) return;
+
+      const apple = data?.subscriptionPricing || {};
+      const subscriberPricing = data?.subscriberPricing || {};
+      const exactCountsAvailable = subscriberPricing.exactCountsAvailable === true;
+      const actualTiers = Array.isArray(subscriberPricing.activePaidPriceTiers)
+        ? subscriberPricing.activePaidPriceTiers
+        : [];
+      const candidates = new Map();
+
+      const addCandidate = ({ amount, currency, planKind = 'monthly', productId = null, count = null }) => {
+        const key = normalizedPriceKey(amount, currency, planKind);
+        if (!key) return;
+        const existing = candidates.get(key) || {
+          amount: Number(amount),
+          currency: String(currency || 'USD').toUpperCase(),
+          planKind,
+          productId,
+          count: null,
+        };
+        if (count != null && Number.isFinite(Number(count))) existing.count = Number(count);
+        if (!existing.productId && productId) existing.productId = productId;
+        candidates.set(key, existing);
+      };
+
+      if (apple.status === 'available') {
+        const appleCurrency = apple.currency || 'USD';
+        // Keep this card uncluttered: always surface the current and next Apple
+        // price. Older preserved prices appear only when an affiliate actually
+        // still has an active subscriber paying that tier.
+        [apple.current, apple.next]
+          .filter(Boolean)
+          .forEach(price => addCandidate({
+            amount: price.customerPrice,
+            currency: price.currency || appleCurrency,
+            planKind: 'monthly'
+          }));
+      }
+
+      actualTiers.forEach(tier => addCandidate({
+        amount: tier.amount,
+        currency: tier.currency || 'USD',
+        planKind: pricePlanKind(tier.productId),
+        productId: tier.productId,
+        count: tier.count,
+      }));
+
+      const rows = [...candidates.values()].sort((left, right) => {
+        if (left.planKind !== right.planKind) return left.planKind === 'monthly' ? -1 : 1;
+        return left.amount - right.amount;
+      });
+
+      if (!rows.length) {
+        container.innerHTML = '';
+        return;
+      }
+
+      container.innerHTML = rows.map(tier => {
+        const price = priceMoney(tier.amount, tier.currency);
+        const suffix = tier.planKind === 'annual' ? ' Annual' : '';
+        const label = 'Active ' + price + suffix + ' Subscribers';
+        const count = exactCountsAvailable
+          ? number(tier.count == null ? 0 : tier.count)
+          : '—';
+        const info = exactCountsAvailable
+          ? 'Active paid subscribers grouped by the price on their latest verified Apple paid transaction. The $0.99 promotional period is excluded.'
+          : 'Price-tier counts will appear once verified Apple subscription-chain data is available for this affiliate.';
+        return '<div class="row"><span class="name name-with-info">' +
+          html(label) +
+          '<button class="info-button" type="button" aria-label="About ' + html(label) + '" aria-expanded="false" aria-describedby="infoTooltip" data-info-title="' + html(label) + '" data-info-text="' + html(info) + '">i</button>' +
+          '</span><span class="number">' + html(count) + '</span></div>';
+      }).join('');
+
+      bindInfoButtons(container);
     }
 
     function percent(value) {
@@ -1128,6 +1267,25 @@ function renderPartnerDashboardPage(token) {
       text('lifetimePaid', money(o.lifetimePaid));
       text('commissionRate', data.compensation ? percent(Number(data.compensation.rate) * 100) : '—');
       text('commissionBasis', readableBasis(data.compensation?.basis));
+
+      const applePricing = data.subscriptionPricing || {};
+      const currentApplePrice = applePricing.status === 'available' ? applePricing.current : null;
+      const nextApplePrice = applePricing.status === 'available' ? applePricing.next : null;
+      text(
+        'currentMonthlyPrice',
+        currentApplePrice?.customerPrice
+          ? priceMoney(currentApplePrice.customerPrice, currentApplePrice.currency || applePricing.currency) + ' / month'
+          : '—'
+      );
+      const scheduledRow = document.getElementById('scheduledMonthlyPriceRow');
+      const scheduledText = nextApplePrice?.customerPrice
+        ? priceMoney(nextApplePrice.customerPrice, nextApplePrice.currency || applePricing.currency) +
+          ' / month' +
+          (nextApplePrice.startDate ? ' · ' + scheduledPriceDate(nextApplePrice.startDate) : '')
+        : '—';
+      text('scheduledMonthlyPrice', scheduledText);
+      scheduledRow.classList.toggle('hidden', !nextApplePrice?.customerPrice);
+      renderActivePriceTierRows(data);
 
       const freshnessValue = data.dataFreshness?.latestVerifiedSubscriptionAt || data.dataFreshness?.latestAppleStateDate;
       text('freshness', freshnessValue ? 'Apple data through ' + dateLabel(freshnessValue, true) : 'Awaiting Apple data');
@@ -2558,7 +2716,46 @@ export function createAffiliateRouter(pool, options = {}) {
   router.get('/api/partner/:token/dashboard', async (req, res) => {
     try {
       const data = await service.getDashboardData(req.params.token, req.query.range);
-      return res.json({ success: true, data });
+      let subscriptionPricing = {
+        status: 'unavailable',
+        source: 'app_store_connect',
+        territory: 'USA',
+        currency: null,
+        current: null,
+        next: null,
+        preservedPrices: [],
+        refreshedAt: null,
+      };
+
+      if (
+        data?.affiliate?.isTest !== true &&
+        typeof appStoreConnectService?.isConfigured === 'function' &&
+        appStoreConnectService.isConfigured() &&
+        typeof appStoreConnectService?.getSubscriptionPricingSummary === 'function'
+      ) {
+        try {
+          const applePricing = await appStoreConnectService.getSubscriptionPricingSummary({
+            territory: 'USA',
+          });
+          subscriptionPricing = {
+            status: 'available',
+            ...applePricing,
+          };
+        } catch (pricingError) {
+          console.error(
+            '[affiliate] App Store Connect partner pricing lookup:',
+            pricingError?.message || pricingError
+          );
+        }
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          ...data,
+          subscriptionPricing,
+        },
+      });
     } catch (error) {
       return jsonError(res, error);
     }
@@ -2662,6 +2859,23 @@ export function createAffiliateRouter(pool, options = {}) {
         existingAffiliates: affiliates,
         importPreferences,
       });
+
+      // The owner-facing Sync button also refreshes the short-lived partner
+      // pricing cache. A pricing lookup failure must never block offer imports.
+      if (typeof appStoreConnectService.getSubscriptionPricingSummary === 'function') {
+        try {
+          await appStoreConnectService.getSubscriptionPricingSummary({
+            territory: 'USA',
+            forceRefresh: true,
+          });
+        } catch (pricingError) {
+          console.error(
+            '[affiliate] App Store Connect pricing refresh during sync:',
+            pricingError?.message || pricingError
+          );
+        }
+      }
+
       return res.json({ success: true, ...payload });
     } catch (error) {
       return jsonError(res, error);
