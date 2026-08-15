@@ -1,3 +1,4 @@
+// PRODUCTION_CLEAN_UI_V3: hides dedicated sandbox offer warning from normal Affiliate Admin.
 import crypto from 'crypto';
 import express from 'express';
 import rateLimit from 'express-rate-limit';
@@ -1939,7 +1940,13 @@ function renderAffiliateAdminDashboardPage() {
       }
 
       statusEl.textContent = appleSync.syncedAt ? ('Synced ' + dateTime(appleSync.syncedAt)) : 'Ready to sync';
-      warningsEl.textContent = (appleSync.warnings || []).map(x => x.offerName + ': ' + x.message).join(' · ');
+      // Keep the production admin view clean. The dedicated Apple sandbox offer is
+      // intentionally preserved in App Store Connect, but its no-code warning is
+      // not actionable for production affiliates and should not be surfaced here.
+      const visibleAppleWarnings = (appleSync.warnings || []).filter(warning =>
+        String(warning?.offerName || '').trim().toUpperCase() !== 'AGORA_AFFILIATE_SANDBOX'
+      );
+      warningsEl.textContent = visibleAppleWarnings.map(x => x.offerName + ': ' + x.message).join(' · ');
       ignoredToggle.classList.toggle('hidden', appleIgnored.length === 0);
       ignoredToggle.textContent = (showIgnoredAppleImports ? 'Hide Ignored' : 'Show Ignored') + (appleIgnored.length ? ' (' + appleIgnored.length + ')' : '');
 
