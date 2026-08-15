@@ -128,7 +128,7 @@ test('canonical selection can point MAXAGORA at the newer 500-code resource whil
   assert.equal(max.configurations.some(x => x.numberOfCodes === 25000), true);
 });
 
-test('shared Apple offer blocks exact subscription-chain attribution across different creator codes', async () => {
+test('shared Apple offer is expected and does not block creator-code imports', async () => {
   const crypto = await import('node:crypto');
   const pair = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
   const privateKey = pair.privateKey.export({ type: 'pkcs8', format: 'pem' });
@@ -143,6 +143,42 @@ test('shared Apple offer blocks exact subscription-chain attribution across diff
 
   assert.equal(am.canonical.distinctCustomCodesOnOffer, 3);
   assert.equal(levi.canonical.distinctCustomCodesOnOffer, 3);
-  assert.equal(am.exactAttributionReady, false);
-  assert.match(am.attributionBlockReason, /multiple custom creator codes|different custom creator codes/i);
+  assert.equal(am.sharedOfferCodeCount, 3);
+  assert.equal('attributionBlockReason' in am, false);
+  assert.equal('exactAttributionReady' in am, false);
+});
+
+test('existing affiliate linking uses custom creator code, not the shared Apple offer name', async () => {
+  const crypto = await import('node:crypto');
+  const pair = crypto.generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+  const privateKey = pair.privateKey.export({ type: 'pkcs8', format: 'pem' });
+  const svc = createAppStoreConnectAffiliateService({
+    issuerId: 'issuer', keyId: 'KEY123', privateKey,
+    subscriptionId: 'subscription-1', fetchImpl: makeFetch(),
+  });
+
+  const result = await svc.listImports({
+    existingAffiliates: [
+      {
+        id: 'affiliate-max',
+        display_name: 'Max',
+        normalized_code: 'MAXAGORA',
+        apple_offer_identifier: 'Affiliate First Month $0.99',
+        normalized_apple_offer_identifier: 'AFFILIATE FIRST MONTH $0.99',
+        is_test: false,
+      },
+    ],
+    importPreferences: [
+      {
+        normalized_code: 'MAXAGORA',
+        disposition: 'pending',
+        canonical_offer_id: 'offer-affiliate-shared',
+        canonical_custom_code_id: 'max-new',
+      },
+    ],
+  });
+
+  assert.deepEqual(result.linked.map(x => x.customCode), ['MAXAGORA']);
+  assert.deepEqual(result.imports.map(x => x.customCode), ['AM99', 'BHERNAURD', 'LEVI99']);
+  assert.equal(result.linked[0].linkedAffiliate.id, 'affiliate-max');
 });
