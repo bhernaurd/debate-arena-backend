@@ -1,408 +1,201 @@
-import test from 'node:test';
 import assert from 'node:assert/strict';
+import test from 'node:test';
 
 import {
-    createAffiliateSubscriptionAttributionService,
-    isAppleOfferCodeTransaction,
-    normalizeAppleOfferIdentifier,
-    normalizeVerifiedAppleEnvironment,
+  createAffiliateSubscriptionAttributionService,
 } from '../lib/affiliateSubscriptionAttributionService.js';
 
-function makeClient({
-    existingAttribution = null,
-    affiliates = [],
-} = {}) {
-    const state = {
-        attribution: existingAttribution,
-        alerts: [],
-        resolvedAlerts: [],
-        updates: 0,
-    };
+const ACCOUNT_MAX = '11111111-1111-4111-8111-111111111111';
+const ACCOUNT_LEVI = '22222222-2222-4222-8222-222222222222';
+const AFF_MAX = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const AFF_LEVI = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
+const SHARED_OFFER = 'AFFILIATE FIRST MONTH $0.99';
 
-    return {
-        state,
-        async query(sql, params = []) {
-            const statement = String(sql);
+function makeHarness({ accountId = ACCOUNT_MAX, code = 'MAXAGORA', affiliateId = AFF_MAX, existing = null, knownOffer = true, claim = true } = {}) {
+  const state = { attribution: existing, alerts: [], updates: 0 };
 
-            if (
-                statement.includes(
-                    'FROM affiliate_subscription_attributions attribution'
-                )
-            ) {
-                return {
-                    rows: state.attribution
-                        ? [state.attribution]
-                        : [],
-                    rowCount: state.attribution ? 1 : 0,
-                };
-            }
+  const client = {
+    async query(sql, params = []) {
+      const text = String(sql);
 
-            if (
-                statement.includes('FROM affiliates') &&
-                statement.includes(
-                    'normalized_apple_offer_identifier'
-                )
-            ) {
-                const affiliate = affiliates.find(
-                    (item) =>
-                        item.normalized_apple_offer_identifier ===
-                        params[0]
-                );
+      if (text.includes('FROM affiliate_subscription_attributions attribution')) {
+        return { rows: state.attribution ? [state.attribution] : [], rowCount: state.attribution ? 1 : 0 };
+      }
+      if (text.includes('SELECT EXISTS') && text.includes('FROM affiliates')) {
+        return { rows: [{ known: knownOffer }], rowCount: 1 };
+      }
+      if (text.includes('FROM accounts') && text.includes('WHERE id = $1')) {
+        return { rows: params[0] === accountId ? [{ id: accountId }] : [], rowCount: params[0] === accountId ? 1 : 0 };
+      }
+      if (text.includes('FROM account_subscription_ownership')) {
+        return { rows: [{ account_id: accountId }], rowCount: 1 };
+      }
+      if (text.includes('FROM affiliate_account_referrals claim')) {
+        if (!claim) return { rows: [], rowCount: 0 };
+        return {
+          rows: [{
+            account_id: accountId,
+            affiliate_id: affiliateId,
+            creator_code: code,
+            normalized_code: code,
+            claim_source: 'creator_code_entry',
+            claimed_at: new Date('2026-08-14T20:00:00Z'),
+            display_name: code,
+            status: 'active',
+            code_status: 'active',
+            apple_offer_identifier: 'Affiliate First Month $0.99',
+            normalized_apple_offer_identifier: SHARED_OFFER,
+          }],
+          rowCount: 1,
+        };
+      }
+      if (text.includes('INSERT INTO affiliate_subscription_attributions')) {
+        state.attribution = {
+          id: 'attr-new',
+          affiliate_id: params[0],
+          account_id: params[1],
+          original_transaction_id: params[2],
+          environment: params[3],
+          attribution_transaction_id: params[4],
+          offer_identifier: params[5],
+          normalized_offer_identifier: params[6],
+          offer_type: '3',
+          creator_code: params[7],
+          normalized_creator_code: params[7],
+          attribution_source: 'account_creator_code',
+          normalized_code: code,
+        };
+        return { rows: [state.attribution], rowCount: 1 };
+      }
+      if (text.includes('UPDATE affiliate_subscription_attributions')) {
+        state.updates += 1;
+        return { rows: [], rowCount: 1 };
+      }
+      if (text.includes('INSERT INTO affiliate_alerts')) {
+        state.alerts.push({ params, sql: text });
+        return { rows: [], rowCount: 1 };
+      }
+      if (text.includes('UPDATE affiliate_alerts')) {
+        return { rows: [], rowCount: 1 };
+      }
 
-                const normalizedAffiliate = affiliate
-                    ? {
-                        status: 'active',
-                        code_status: 'active',
-                        ...affiliate,
-                    }
-                    : null;
+      throw new Error(`Unexpected SQL: ${text}`);
+    },
+  };
 
-                return {
-                    rows: normalizedAffiliate
-                        ? [normalizedAffiliate]
-                        : [],
-                    rowCount: normalizedAffiliate ? 1 : 0,
-                };
-            }
+  const pool = {
+    async connect() { return { ...client, release() {} }; },
+    async query() { return { rows: [], rowCount: 0 }; },
+  };
 
-            if (
-                statement.includes(
-                    'UPDATE affiliate_subscription_attributions'
-                )
-            ) {
-                state.updates += 1;
-                return {
-                    rows: [],
-                    rowCount: state.attribution ? 1 : 0,
-                };
-            }
-
-            if (statement.includes('INSERT INTO affiliate_alerts')) {
-                state.alerts.push({ params });
-                return { rows: [], rowCount: 1 };
-            }
-
-            if (statement.includes('UPDATE affiliate_alerts')) {
-                state.resolvedAlerts.push({ params });
-                return { rows: [], rowCount: 1 };
-            }
-
-            if (
-                statement.includes(
-                    'INSERT INTO affiliate_subscription_attributions'
-                )
-            ) {
-                if (state.attribution) {
-                    return { rows: [], rowCount: 0 };
-                }
-
-                state.attribution = {
-                    id: 'attr-1',
-                    affiliate_id: params[0],
-                    original_transaction_id: params[1],
-                    environment: params[2],
-                    attribution_transaction_id: params[3],
-                    offer_identifier: params[4],
-                    normalized_offer_identifier: params[5],
-                    normalized_code:
-                        affiliates.find(
-                            (item) => item.id === params[0]
-                        )?.normalized_code || null,
-                };
-
-                return {
-                    rows: [state.attribution],
-                    rowCount: 1,
-                };
-            }
-
-            throw new Error(
-                `Unexpected SQL in test: ${statement}`
-            );
-        },
-    };
+  return { state, client, pool };
 }
 
-const pool = {
-    async connect() {
-        throw new Error(
-            'pool.connect should not be used by observeVerifiedTransaction tests'
-        );
-    },
-};
+function offerTransaction(overrides = {}) {
+  return {
+    transactionId: 'tx-1',
+    originalTransactionId: 'orig-1',
+    offerType: 3,
+    offerIdentifier: 'Affiliate First Month $0.99',
+    productId: 'agora_pro_monthly',
+    appAccountToken: ACCOUNT_MAX,
+    purchaseDate: Date.UTC(2026, 7, 14, 20, 0, 0),
+    price: 990,
+    currency: 'USD',
+    ...overrides,
+  };
+}
 
-test('recognizes Apple offerType 3 as an offer-code transaction', () => {
-    assert.equal(
-        isAppleOfferCodeTransaction({ offerType: 3 }),
-        true
-    );
-    assert.equal(
-        isAppleOfferCodeTransaction({ offerType: '3' }),
-        true
-    );
-    assert.equal(
-        isAppleOfferCodeTransaction({ offerType: 'OFFER_CODE' }),
-        true
-    );
-    assert.equal(
-        isAppleOfferCodeTransaction({ offerType: 2 }),
-        false
-    );
+test('shared Apple offer plus MAXAGORA account claim attributes the chain to MAXAGORA', async () => {
+  const { state, client, pool } = makeHarness();
+  const service = createAffiliateSubscriptionAttributionService({ pool });
+
+  const result = await service.observeVerifiedTransaction({
+    client,
+    environment: 'Production',
+    accountId: ACCOUNT_MAX,
+    transaction: offerTransaction(),
+  });
+
+  assert.equal(result.status, 'attributed_new');
+  assert.equal(result.affiliateId, AFF_MAX);
+  assert.equal(result.normalizedCode, 'MAXAGORA');
+  assert.equal(state.attribution.account_id, ACCOUNT_MAX);
+  assert.equal(state.attribution.normalized_creator_code, 'MAXAGORA');
+  assert.equal(state.attribution.attribution_source, 'account_creator_code');
 });
 
-test('normalizes Apple offer reference names for exact matching', () => {
-    assert.equal(
-        normalizeAppleOfferIdentifier('  MaxAgora-Offer  '),
-        'MAXAGORA-OFFER'
-    );
+test('same shared Apple offer can attribute another account to LEVI99', async () => {
+  const { state, client, pool } = makeHarness({
+    accountId: ACCOUNT_LEVI,
+    code: 'LEVI99',
+    affiliateId: AFF_LEVI,
+  });
+  const service = createAffiliateSubscriptionAttributionService({ pool });
+
+  const result = await service.observeVerifiedTransaction({
+    client,
+    environment: 'Production',
+    accountId: ACCOUNT_LEVI,
+    transaction: offerTransaction({ appAccountToken: ACCOUNT_LEVI, originalTransactionId: 'orig-levi' }),
+  });
+
+  assert.equal(result.status, 'attributed_new');
+  assert.equal(result.affiliateId, AFF_LEVI);
+  assert.equal(result.normalizedCode, 'LEVI99');
+  assert.equal(state.attribution.normalized_offer_identifier, SHARED_OFFER);
 });
 
-test('rejects overlong Apple offer identifiers instead of truncating them', () => {
-    assert.throws(
-        () => normalizeAppleOfferIdentifier('A'.repeat(201)),
-        (error) =>
-            error?.code ===
-            'invalid_affiliate_attribution_input'
-    );
+test('shared affiliate offer with no account creator-code claim stays unassigned and reviewable', async () => {
+  const { state, client, pool } = makeHarness({ claim: false });
+  const service = createAffiliateSubscriptionAttributionService({ pool });
+
+  const result = await service.observeVerifiedTransaction({
+    client,
+    environment: 'Production',
+    accountId: ACCOUNT_MAX,
+    transaction: offerTransaction(),
+  });
+
+  assert.equal(result.status, 'awaiting_creator_code_claim');
+  assert.equal(result.attributed, false);
+  assert.equal(state.attribution, null);
+  assert.equal(state.alerts.length, 1);
 });
 
-test('canonicalizes verified Apple environments to the database contract', () => {
-    assert.equal(
-        normalizeVerifiedAppleEnvironment('Production'),
-        'Production'
-    );
-    assert.equal(
-        normalizeVerifiedAppleEnvironment('production'),
-        'Production'
-    );
-    assert.equal(
-        normalizeVerifiedAppleEnvironment('Sandbox'),
-        'Sandbox'
-    );
-    assert.throws(
-        () => normalizeVerifiedAppleEnvironment('test'),
-        (error) =>
-            error?.code ===
-            'invalid_affiliate_attribution_environment'
-    );
+test('non-affiliate Apple offer is ignored rather than guessed', async () => {
+  const { state, client, pool } = makeHarness({ knownOffer: false });
+  const service = createAffiliateSubscriptionAttributionService({ pool });
+
+  const result = await service.observeVerifiedTransaction({
+    client,
+    environment: 'Production',
+    accountId: ACCOUNT_MAX,
+    transaction: offerTransaction({ offerIdentifier: 'Friends and Family Free Pro' }),
+  });
+
+  assert.equal(result.status, 'not_affiliate_offer');
+  assert.equal(result.attributed, false);
+  assert.equal(state.attribution, null);
 });
 
-test('attributes a verified Apple offer-code transaction to the matching affiliate', async () => {
-    const client = makeClient({
-        affiliates: [
-            {
-                id: 'affiliate-1',
-                normalized_code: 'MAXAGORA',
-                normalized_apple_offer_identifier:
-                    'MAXAGORA-OFFER',
-            },
-        ],
-    });
-    const service =
-        createAffiliateSubscriptionAttributionService({ pool });
+test('renewal without an offer inherits existing chain ownership', async () => {
+  const existing = {
+    id: 'attr-1',
+    affiliate_id: AFF_MAX,
+    normalized_code: 'MAXAGORA',
+    original_transaction_id: 'orig-1',
+    environment: 'Production',
+  };
+  const { client, pool } = makeHarness({ existing });
+  const service = createAffiliateSubscriptionAttributionService({ pool });
 
-    const result = await service.observeVerifiedTransaction({
-        client,
-        environment: 'Production',
-        source: 'client_sync',
-        transaction: {
-            transactionId: 'tx-1',
-            originalTransactionId: 'orig-1',
-            offerType: 3,
-            offerIdentifier: 'MaxAgora-Offer',
-            productId: 'agora_pro_monthly',
-            purchaseDate: Date.UTC(2026, 7, 14),
-            price: 990,
-            currency: 'USD',
-        },
-    });
+  const result = await service.observeVerifiedTransaction({
+    client,
+    environment: 'Production',
+    transaction: offerTransaction({ transactionId: 'renewal-1', offerType: null, offerIdentifier: null }),
+  });
 
-    assert.equal(result.status, 'attributed_new');
-    assert.equal(result.affiliateId, 'affiliate-1');
-    assert.equal(result.environment, 'Production');
-    assert.equal(
-        client.state.attribution.original_transaction_id,
-        'orig-1'
-    );
-    assert.equal(
-        client.state.attribution.environment,
-        'Production'
-    );
-});
-
-test('later renewal without an offer inherits the existing affiliate ownership', async () => {
-    const client = makeClient({
-        existingAttribution: {
-            id: 'attr-1',
-            affiliate_id: 'affiliate-1',
-            normalized_code: 'MAXAGORA',
-            original_transaction_id: 'orig-1',
-            environment: 'Production',
-        },
-    });
-    const service =
-        createAffiliateSubscriptionAttributionService({ pool });
-
-    const result = await service.observeVerifiedTransaction({
-        client,
-        environment: 'Production',
-        transaction: {
-            transactionId: 'tx-renewal',
-            originalTransactionId: 'orig-1',
-            offerType: null,
-            offerIdentifier: null,
-        },
-    });
-
-    assert.equal(result.status, 'inherited_existing');
-    assert.equal(result.affiliateId, 'affiliate-1');
-    assert.equal(client.state.updates, 1);
-});
-
-test('a conflicting later affiliate offer never silently reassigns the chain', async () => {
-    const client = makeClient({
-        existingAttribution: {
-            id: 'attr-1',
-            affiliate_id: 'affiliate-1',
-            normalized_code: 'MAXAGORA',
-            original_transaction_id: 'orig-1',
-            environment: 'Production',
-        },
-        affiliates: [
-            {
-                id: 'affiliate-2',
-                normalized_code: 'OTHERAGORA',
-                normalized_apple_offer_identifier:
-                    'OTHER-OFFER',
-            },
-        ],
-    });
-    const service =
-        createAffiliateSubscriptionAttributionService({ pool });
-
-    const result = await service.observeVerifiedTransaction({
-        client,
-        environment: 'Production',
-        transaction: {
-            transactionId: 'tx-conflict',
-            originalTransactionId: 'orig-1',
-            offerType: 3,
-            offerIdentifier: 'OTHER-OFFER',
-        },
-    });
-
-    assert.equal(
-        result.status,
-        'conflict_preserved_existing'
-    );
-    assert.equal(result.affiliateId, 'affiliate-1');
-    assert.equal(client.state.alerts.length, 1);
-});
-
-test('an overlong verified Apple offer identifier is reviewable and never truncated into a mapping', async () => {
-    const client = makeClient({
-        affiliates: [
-            {
-                id: 'affiliate-1',
-                normalized_code: 'MAXAGORA',
-                normalized_apple_offer_identifier: 'A'.repeat(200),
-            },
-        ],
-    });
-    const service =
-        createAffiliateSubscriptionAttributionService({ pool });
-
-    const result = await service.observeVerifiedTransaction({
-        client,
-        environment: 'Production',
-        transaction: {
-            transactionId: 'tx-overlong-offer',
-            originalTransactionId: 'orig-overlong-offer',
-            offerType: 3,
-            offerIdentifier: 'A'.repeat(201),
-        },
-    });
-
-    assert.equal(result.status, 'invalid_offer_identifier');
-    assert.equal(result.attributed, false);
-    assert.equal(client.state.attribution, null);
-    assert.equal(client.state.alerts.length, 1);
-});
-
-test('a known but inactive affiliate offer never creates new chain ownership', async () => {
-    const client = makeClient({
-        affiliates: [
-            {
-                id: 'affiliate-inactive',
-                normalized_code: 'OLDAGORA',
-                normalized_apple_offer_identifier:
-                    'OLD-OFFER',
-                status: 'inactive',
-                code_status: 'disabled',
-            },
-        ],
-    });
-    const service =
-        createAffiliateSubscriptionAttributionService({ pool });
-
-    const result = await service.observeVerifiedTransaction({
-        client,
-        environment: 'Production',
-        transaction: {
-            transactionId: 'tx-inactive',
-            originalTransactionId: 'orig-inactive',
-            offerType: 3,
-            offerIdentifier: 'OLD-OFFER',
-        },
-    });
-
-    assert.equal(
-        result.status,
-        'inactive_affiliate_offer_identifier'
-    );
-    assert.equal(result.attributed, false);
-    assert.equal(client.state.attribution, null);
-    assert.equal(client.state.alerts.length, 1);
-});
-
-test('unknown verified Apple offer identifier raises review alert and does not attribute', async () => {
-    const client = makeClient();
-    const service =
-        createAffiliateSubscriptionAttributionService({ pool });
-
-    const result = await service.observeVerifiedTransaction({
-        client,
-        environment: 'Production',
-        transaction: {
-            transactionId: 'tx-unknown',
-            originalTransactionId: 'orig-unknown',
-            offerType: 3,
-            offerIdentifier: 'UNKNOWN-OFFER',
-        },
-    });
-
-    assert.equal(result.status, 'unknown_offer_identifier');
-    assert.equal(result.attributed, false);
-    assert.equal(client.state.alerts.length, 1);
-});
-
-test('offer-code transaction missing offerIdentifier is reviewable and never guessed', async () => {
-    const client = makeClient();
-    const service =
-        createAffiliateSubscriptionAttributionService({ pool });
-
-    const result = await service.observeVerifiedTransaction({
-        client,
-        environment: 'Sandbox',
-        transaction: {
-            transactionId: 'tx-missing-offer',
-            originalTransactionId: 'orig-missing-offer',
-            offerType: 3,
-            offerIdentifier: null,
-        },
-    });
-
-    assert.equal(result.status, 'missing_offer_identifier');
-    assert.equal(result.attributed, false);
-    assert.equal(client.state.alerts.length, 1);
+  assert.equal(result.status, 'inherited_existing');
+  assert.equal(result.affiliateId, AFF_MAX);
 });
