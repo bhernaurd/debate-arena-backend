@@ -13,14 +13,14 @@ const source = fs.readFileSync(
   'utf8'
 );
 
-test('admin affiliate creation distinguishes duplicate creator codes from duplicate Apple offer references', () => {
-  assert.match(
-    source,
-    /affiliates_offer_identifier_unique_idx[\s\S]*?affiliate_offer_identifier_already_exists/
-  );
+test('admin affiliate creation keeps creator codes unique while allowing a shared Apple offer reference', () => {
   assert.match(
     source,
     /affiliates_normalized_code_unique[\s\S]*?affiliate_code_already_exists/
+  );
+  assert.doesNotMatch(
+    source,
+    /affiliate_offer_identifier_already_exists/
   );
 });
 
@@ -122,9 +122,20 @@ test('App Store Connect imports collapse duplicate creator-code resources and pe
   assert.match(source, /Show Ignored/);
 });
 
-test('shared Apple offers are blocked from exact affiliate activation', () => {
-  assert.match(source, /Exact Attribution Blocked/);
-  assert.match(source, /each affiliate must have its own Apple offer reference/);
-  assert.match(source, /data-apple-import-blocked/);
-  assert.match(source, /exactAttributionReady/);
+test('shared Apple offers are explicitly supported and never shown as attribution blockers', () => {
+  assert.match(source, /Shared affiliate offer/);
+  assert.match(source, /historical configuration/);
+  assert.doesNotMatch(source, /Exact Attribution Blocked/);
+  assert.doesNotMatch(source, /Fix Apple Setup/);
+  assert.doesNotMatch(source, /each affiliate must have its own Apple offer reference/);
+  assert.doesNotMatch(source, /data-apple-import-blocked/);
+});
+
+test('authenticated account creator-code claim routes exist and reconcile safely', () => {
+  assert.match(source, /\/api\/account\/affiliate\/claim/);
+  assert.match(source, /readBearerToken\(req\)/);
+  assert.match(source, /readAccountInstallationId\(req\)/);
+  assert.match(source, /claimCreatorCode/);
+  assert.match(source, /reconcileAccount/);
+  assert.match(source, /creator-code claim saved; reconciliation deferred/);
 });
