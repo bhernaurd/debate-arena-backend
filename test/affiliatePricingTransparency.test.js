@@ -81,6 +81,62 @@ function applePricingPayload() {
   };
 }
 
+
+function applePreservedCurrentOnlyPayload() {
+  return {
+    data: [
+      {
+        type: 'subscriptionPrices',
+        id: 'price-current-preserved',
+        attributes: {
+          startDate: null,
+          preserved: true,
+          planType: 'UPFRONT',
+        },
+        relationships: {
+          territory: { data: { type: 'territories', id: 'USA' } },
+          subscriptionPricePoint: {
+            data: { type: 'subscriptionPricePoints', id: 'point-499' },
+          },
+        },
+      },
+      {
+        type: 'subscriptionPrices',
+        id: 'price-next',
+        attributes: {
+          startDate: '2026-09-01',
+          preserved: false,
+          planType: 'UPFRONT',
+        },
+        relationships: {
+          territory: { data: { type: 'territories', id: 'USA' } },
+          subscriptionPricePoint: {
+            data: { type: 'subscriptionPricePoints', id: 'point-799' },
+          },
+        },
+      },
+    ],
+    included: [
+      {
+        type: 'territories',
+        id: 'USA',
+        attributes: { currency: 'USD' },
+      },
+      {
+        type: 'subscriptionPricePoints',
+        id: 'point-499',
+        attributes: { customerPrice: '4.99' },
+      },
+      {
+        type: 'subscriptionPricePoints',
+        id: 'point-799',
+        attributes: { customerPrice: '7.99' },
+      },
+    ],
+    links: { next: null },
+  };
+}
+
 test('App Store Connect pricing identifies current, scheduled, and preserved U.S. prices', async () => {
   const { privateKey } = crypto.generateKeyPairSync('ec', {
     namedCurve: 'P-256',
@@ -126,6 +182,49 @@ test('App Store Connect pricing identifies current, scheduled, and preserved U.S
   assert.equal(calls, 1, 'partner dashboard pricing should use the short in-memory cache');
 });
 
+
+test('preserved current Apple price remains current until the scheduled increase starts', async () => {
+  const { privateKey } = crypto.generateKeyPairSync('ec', {
+    namedCurve: 'P-256',
+  });
+  const privateKeyPem = privateKey.export({
+    type: 'pkcs8',
+    format: 'pem',
+  });
+
+  const service = createAppStoreConnectAffiliateService({
+    issuerId: 'test-issuer',
+    keyId: 'test-key',
+    privateKey: privateKeyPem,
+    subscriptionId: 'subscription-123',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(applePreservedCurrentOnlyPayload()),
+    }),
+  });
+
+  const augustPricing = await service.getSubscriptionPricingSummary({
+    territory: 'USA',
+    now: new Date('2026-08-14T12:00:00Z'),
+  });
+
+  assert.equal(augustPricing.current.customerPrice, '4.99');
+  assert.equal(augustPricing.current.preserved, true);
+  assert.equal(augustPricing.next.customerPrice, '7.99');
+  assert.equal(augustPricing.next.startDate, '2026-09-01');
+
+  const septemberPricing = await service.getSubscriptionPricingSummary({
+    territory: 'USA',
+    now: new Date('2026-09-01T12:00:00Z'),
+    forceRefresh: true,
+  });
+
+  assert.equal(septemberPricing.current.customerPrice, '7.99');
+  assert.equal(septemberPricing.next, null);
+  assert.equal(septemberPricing.preservedPrices[0].customerPrice, '4.99');
+});
+
 test('partner dashboard includes current pricing and active price-tier transparency', () => {
   const html = renderPartnerDashboardPage(
     'abcdefghijklmnopqrstuvwxyz0123456789ABCDE'
@@ -134,6 +233,7 @@ test('partner dashboard includes current pricing and active price-tier transpare
   assert.match(html, /Current Monthly Price/);
   assert.match(html, /Scheduled Monthly Price/);
   assert.match(html, /activePriceTierRows/);
+  assert.match(html, /apple\.preservedPrices/);
   assert.match(html, /Active .* Subscribers/);
   assert.match(html, /latest verified Apple paid transaction/);
   assert.match(html, /\$0\.99 Promo/);
