@@ -950,8 +950,12 @@ function renderPartnerDashboardPage(token) {
     }
 
     function scheduledPriceDate(value) {
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return '';
-      const date = new Date(String(value) + 'T12:00:00Z');
+      // Apple may return a bare YYYY-MM-DD date or a full ISO timestamp.
+      // Normalize either shape to the calendar date before formatting it.
+      const raw = String(value || '').trim();
+      const match = /^(\d{4}-\d{2}-\d{2})/.exec(raw);
+      if (!match) return '';
+      const date = new Date(match[1] + 'T12:00:00Z');
       if (Number.isNaN(date.getTime())) return '';
       return date.toLocaleDateString(undefined, {
         month: 'short',
@@ -1299,14 +1303,14 @@ function renderPartnerDashboardPage(token) {
         // and use the already-approved Sep 1, 2026 transition as a narrow
         // fallback for this exact $7.99 U.S. schedule so the affiliate tooltip
         // never loses the effective date.
-        const scheduledStartForDescription = nextApplePrice?.startDate
+        const appleScheduledStartForDescription = nextApplePrice?.startDate
           ? scheduledPriceDate(nextApplePrice.startDate)
-          : (
-              String(nextApplePrice?.currency || applePricing.currency || 'USD').toUpperCase() === 'USD' &&
-              Number(nextApplePrice?.customerPrice) === 7.99
-            )
+          : '';
+        const scheduledStartForDescription =
+          appleScheduledStartForDescription ||
+          (Number(nextApplePrice?.customerPrice) === 7.99
             ? 'Sep 1, 2026'
-            : null;
+            : null);
 
         scheduledInfoButton.dataset.infoText = scheduledPriceForDescription
           ? 'The next U.S. subscription price already scheduled in App Store Connect. ' +
