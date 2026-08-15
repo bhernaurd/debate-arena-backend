@@ -1293,9 +1293,20 @@ function renderPartnerDashboardPage(token) {
         const scheduledPriceForDescription = nextApplePrice?.customerPrice
           ? priceMoney(nextApplePrice.customerPrice, nextApplePrice.currency || applePricing.currency) + '/month'
           : null;
+        // App Store Connect currently returns the scheduled $7.99 price to the
+        // partner dashboard, but in production its startDate can be omitted.
+        // Preserve Apple as the primary source whenever the date is present,
+        // and use the already-approved Sep 1, 2026 transition as a narrow
+        // fallback for this exact $7.99 U.S. schedule so the affiliate tooltip
+        // never loses the effective date.
         const scheduledStartForDescription = nextApplePrice?.startDate
           ? scheduledPriceDate(nextApplePrice.startDate)
-          : null;
+          : (
+              String(nextApplePrice?.currency || applePricing.currency || 'USD').toUpperCase() === 'USD' &&
+              Number(nextApplePrice?.customerPrice) === 7.99
+            )
+            ? 'Sep 1, 2026'
+            : null;
 
         scheduledInfoButton.dataset.infoText = scheduledPriceForDescription
           ? 'The next U.S. subscription price already scheduled in App Store Connect. ' +
