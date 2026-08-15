@@ -337,21 +337,6 @@ function renderPartnerDashboardPage(token) {
     .row:last-child { border-bottom: 0; }
     .row .name { color: #d7d1df; }
     .row .number { font-variant-numeric: tabular-nums; font-weight: 650; text-align: right; }
-    .scheduled-price-number {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-end;
-      justify-content: center;
-      min-width: 132px;
-      line-height: 1.3;
-    }
-    .scheduled-price-date {
-      margin-top: 3px;
-      color: var(--muted);
-      font-size: 11px;
-      font-weight: 560;
-      white-space: nowrap;
-    }
     .period-controls {
       display: flex;
       align-items: center;
@@ -715,8 +700,8 @@ function renderPartnerDashboardPage(token) {
             )}</span><span class="number" id="currentMonthlyPrice">—</span></div>
             <div class="row hidden" id="scheduledMonthlyPriceRow"><span class="name name-with-info">Scheduled Monthly Price ${renderInfoButton(
               'Scheduled Monthly Price',
-              'The next U.S. subscription price already scheduled in App Store Connect. This row disappears when no future price change is scheduled.'
-            )}</span><span class="number scheduled-price-number"><span id="scheduledMonthlyPrice">—</span><span class="scheduled-price-date" id="scheduledMonthlyPriceDate"></span></span></div>
+              'The next U.S. subscription price already scheduled in App Store Connect. The effective date appears here when Apple has a future price change scheduled.'
+            )}</span><span class="number" id="scheduledMonthlyPrice">—</span></div>
             <div id="activePriceTierRows"></div>
             <div class="row"><span class="name name-with-info">$0.99 Promo ${renderInfoButton(
               '$0.99 Promo',
@@ -1301,11 +1286,30 @@ function renderPartnerDashboardPage(token) {
       const scheduledText = nextApplePrice?.customerPrice
         ? priceMoney(nextApplePrice.customerPrice, nextApplePrice.currency || applePricing.currency) + ' / month'
         : '—';
-      const scheduledDateText = nextApplePrice?.startDate
-        ? 'Starts ' + scheduledPriceDate(nextApplePrice.startDate)
-        : '';
       text('scheduledMonthlyPrice', scheduledText);
-      text('scheduledMonthlyPriceDate', scheduledDateText);
+
+      const scheduledInfoButton = scheduledRow?.querySelector('.info-button');
+      if (scheduledInfoButton) {
+        const scheduledPriceForDescription = nextApplePrice?.customerPrice
+          ? priceMoney(nextApplePrice.customerPrice, nextApplePrice.currency || applePricing.currency) + '/month'
+          : null;
+        const scheduledStartForDescription = nextApplePrice?.startDate
+          ? scheduledPriceDate(nextApplePrice.startDate)
+          : null;
+
+        scheduledInfoButton.dataset.infoText = scheduledPriceForDescription
+          ? 'The next U.S. subscription price already scheduled in App Store Connect. ' +
+            scheduledPriceForDescription +
+            (scheduledStartForDescription ? ' begins ' + scheduledStartForDescription + '.' : ' is scheduled as the next price.') +
+            ' This automatically updates when the Apple pricing schedule changes.'
+          : 'The next U.S. subscription price already scheduled in App Store Connect. This row disappears when no future price change is scheduled.';
+
+        if (activeInfoButton === scheduledInfoButton && infoTooltip.classList.contains('open')) {
+          infoTooltipText.textContent = scheduledInfoButton.dataset.infoText;
+          positionInfoTooltip(scheduledInfoButton);
+        }
+      }
+
       scheduledRow.classList.toggle('hidden', !nextApplePrice?.customerPrice);
       renderActivePriceTierRows(data);
 
