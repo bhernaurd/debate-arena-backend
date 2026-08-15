@@ -18,26 +18,58 @@ const scriptSource = fs.readFileSync(
   'utf8'
 );
 
-test('reconciliation only backfills stored verified offer-code transactions that map to active affiliates', () => {
+test('reconciliation scans verified offer-code transactions for known shared affiliate campaigns without assuming one affiliate per Apple offer', () => {
   assert.match(
+    scriptSource,
+    /FROM app_store_transactions tx/
+  );
+
+  // Shared-offer architecture: do not require a direct JOIN from the Apple
+  // offer identifier to exactly one affiliate. Multiple affiliates may share
+  // the same Apple offer reference.
+  assert.doesNotMatch(
     scriptSource,
     /FROM app_store_transactions tx[\s\S]*?JOIN affiliates affiliate/
   );
+
   assert.match(
     scriptSource,
     /tx\.offer_type[\s\S]*?OFFER_CODE/
   );
+
+  // The Apple offer still has to be recognized as one of our affiliate
+  // campaigns, but that check is intentionally EXISTS-based so many creator
+  // codes/affiliates can share the same offer reference.
   assert.match(
     scriptSource,
-    /affiliate\.status = 'active'/
+    /EXISTS\s*\([\s\S]*?FROM affiliates affiliate[\s\S]*?normalized_apple_offer_identifier[\s\S]*?tx\.offer_identifier/
   );
+
   assert.match(
     scriptSource,
-    /affiliate\.code_status = 'active'/
+    /affiliate\.status IN \('active', 'inactive'\)/
   );
+
   assert.match(
     scriptSource,
     /NOT EXISTS[\s\S]*?affiliate_subscription_attributions/
+  );
+});
+
+test('reconciliation carries appAccountToken evidence forward so creator-code claims can resolve shared-offer attribution', () => {
+  assert.match(
+    scriptSource,
+    /tx\.app_account_token/
+  );
+
+  assert.match(
+    scriptSource,
+    /appAccountToken:\s*row\.app_account_token/
+  );
+
+  assert.match(
+    scriptSource,
+    /createAffiliateSubscriptionAttributionService/
   );
 });
 
@@ -56,7 +88,7 @@ test('reconciliation canonicalizes legacy environment casing and remains idempot
   );
 });
 
-test('reconciliation uses the same attribution service and wraps each candidate atomically', () => {
+test('reconciliation uses the shared attribution service and wraps each candidate atomically', () => {
   assert.match(
     scriptSource,
     /createAffiliateSubscriptionAttributionService/
@@ -68,5 +100,12 @@ test('reconciliation uses the same attribution service and wraps each candidate 
   assert.match(
     scriptSource,
     /await client\.query\('ROLLBACK'\)/
+  );
+});
+
+test('reconciliation avoids infinite retries when shared-offer rows are still waiting for creator-code evidence', () => {
+  assert.match(
+    scriptSource,
+    /batchProgress === 0/
   );
 });
