@@ -337,6 +337,21 @@ function renderPartnerDashboardPage(token) {
     .row:last-child { border-bottom: 0; }
     .row .name { color: #d7d1df; }
     .row .number { font-variant-numeric: tabular-nums; font-weight: 650; text-align: right; }
+    .scheduled-price-number {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      justify-content: center;
+      min-width: 132px;
+      line-height: 1.3;
+    }
+    .scheduled-price-date {
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 560;
+      white-space: nowrap;
+    }
     .period-controls {
       display: flex;
       align-items: center;
@@ -701,7 +716,7 @@ function renderPartnerDashboardPage(token) {
             <div class="row hidden" id="scheduledMonthlyPriceRow"><span class="name name-with-info">Scheduled Monthly Price ${renderInfoButton(
               'Scheduled Monthly Price',
               'The next U.S. subscription price already scheduled in App Store Connect. This row disappears when no future price change is scheduled.'
-            )}</span><span class="number" id="scheduledMonthlyPrice">—</span></div>
+            )}</span><span class="number scheduled-price-number"><span id="scheduledMonthlyPrice">—</span><span class="scheduled-price-date" id="scheduledMonthlyPriceDate"></span></span></div>
             <div id="activePriceTierRows"></div>
             <div class="row"><span class="name name-with-info">$0.99 Promo ${renderInfoButton(
               '$0.99 Promo',
@@ -1284,11 +1299,13 @@ function renderPartnerDashboardPage(token) {
       );
       const scheduledRow = document.getElementById('scheduledMonthlyPriceRow');
       const scheduledText = nextApplePrice?.customerPrice
-        ? priceMoney(nextApplePrice.customerPrice, nextApplePrice.currency || applePricing.currency) +
-          ' / month' +
-          (nextApplePrice.startDate ? ' · ' + scheduledPriceDate(nextApplePrice.startDate) : '')
+        ? priceMoney(nextApplePrice.customerPrice, nextApplePrice.currency || applePricing.currency) + ' / month'
         : '—';
+      const scheduledDateText = nextApplePrice?.startDate
+        ? 'Starts ' + scheduledPriceDate(nextApplePrice.startDate)
+        : '';
       text('scheduledMonthlyPrice', scheduledText);
+      text('scheduledMonthlyPriceDate', scheduledDateText);
       scheduledRow.classList.toggle('hidden', !nextApplePrice?.customerPrice);
       renderActivePriceTierRows(data);
 
