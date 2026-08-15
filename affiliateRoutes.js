@@ -5,6 +5,9 @@ import rateLimit from 'express-rate-limit';
 import {
   createAffiliateProgramService,
 } from './lib/affiliateProgramService.js';
+import {
+  createAppStoreConnectAffiliateService,
+} from './lib/appStoreConnectAffiliateService.js';
 
 function jsonError(res, error) {
   const statusCode = Number(error?.statusCode) || 500;
@@ -1467,6 +1470,27 @@ function renderAffiliateAdminDashboardPage() {
 
       <div class="section">
         <div class="section-head">
+          <div><h2>App Store Connect Imports</h2><div class="muted tiny">Offers created in App Store Connect appear here automatically after sync. Complete setup to turn them into Agora affiliates.</div></div>
+          <div class="toolbar">
+            <div id="appleSyncStatus" class="muted tiny">Not synced yet</div>
+            <button id="syncAppleOffers" class="button" type="button">Sync App Store Connect</button>
+          </div>
+        </div>
+        <div class="card table-card">
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>Apple Offer</th><th>Creator Code</th><th>Apple Status</th><th>Eligibility</th><th>Linked</th><th>Action</th>
+              </tr></thead>
+              <tbody id="appleImportRows"><tr><td colspan="6" class="empty">Unlock the admin dashboard to load App Store Connect imports.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+        <div id="appleImportWarnings" class="muted tiny" style="margin-top:10px"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
           <div><h2>Affiliates</h2><div class="muted tiny">Production and Sandbox partners. Money summary above excludes test affiliates.</div></div>
           <div class="toolbar">
             <input id="affiliateSearch" class="field" type="search" placeholder="Search partner or code" />
@@ -1543,6 +1567,9 @@ function renderAffiliateAdminDashboardPage() {
   <script>
     let adminKey = sessionStorage.getItem('agoraAffiliateAdminKey') || '';
     let affiliates = [];
+    let appleImports = [];
+    let appleLinked = [];
+    let appleSync = null;
     let payouts = [];
     let alerts = [];
     let activeTab = 'overview';
@@ -1669,7 +1696,7 @@ function renderAffiliateAdminDashboardPage() {
         affiliates = Array.isArray(payload.affiliates) ? payload.affiliates : [];
         unlockUi();
         renderOverview();
-        await Promise.all([loadAlerts(false), loadPayouts(false)]);
+        await Promise.all([loadAppleImports(false), loadAlerts(false), loadPayouts(false)]);
       } catch (error) {
         $('loginError').textContent = error.message;
         if (error.status !== 401) toast(error.message, true);
@@ -1685,9 +1712,33 @@ function renderAffiliateAdminDashboardPage() {
       } catch (error) { toast(error.message, true); }
     }
 
+    async function loadAppleImports(showToast) {
+      if (!adminKey) return;
+      try {
+        const payload = await adminFetch('/api/admin/app-store-connect/imports');
+        appleImports = Array.isArray(payload.imports) ? payload.imports : [];
+        appleLinked = Array.isArray(payload.linked) ? payload.linked : [];
+        appleSync = {
+          configured: payload.configured !== false,
+          syncedAt: payload.syncedAt || null,
+          warnings: Array.isArray(payload.warnings) ? payload.warnings : [],
+          errorMessage: payload.errorMessage || null,
+        };
+        renderAppleImports();
+        if (showToast) toast(payload.configured === false ? 'App Store Connect sync is not configured yet.' : 'App Store Connect sync complete.');
+      } catch (error) {
+        appleImports = [];
+        appleLinked = [];
+        appleSync = { configured: false, syncedAt: null, warnings: [], errorMessage: error.message };
+        renderAppleImports();
+        toast(error.message, true);
+      }
+    }
+
     function productionAffiliates() { return affiliates.filter(a => !a.is_test); }
 
     function renderOverview() {
+      renderAppleImports();
       const prod = productionAffiliates();
       $('sumAffiliates').textContent = number(prod.filter(a => a.status === 'active').length);
       $('sumReferrals').textContent = number(prod.reduce((sum,a) => sum + numeric(a.total_referrals),0));
@@ -1748,6 +1799,57 @@ function renderAffiliateAdminDashboardPage() {
       }).join('');
     }
 
+    function renderAppleImports() {
+      const rowsEl = $('appleImportRows');
+      const statusEl = $('appleSyncStatus');
+      const warningsEl = $('appleImportWarnings');
+      if (!rowsEl || !statusEl || !warningsEl) return;
+
+      if (!appleSync) {
+        statusEl.textContent = 'Not synced yet';
+        rowsEl.innerHTML = '<tr><td colspan="6" class="empty">Use “Sync App Store Connect” to discover Apple offers and custom codes.</td></tr>';
+        warningsEl.textContent = '';
+        return;
+      }
+
+      if (appleSync.configured === false && !appleSync.syncedAt) {
+        statusEl.textContent = appleSync.errorMessage || 'App Store Connect is not configured.';
+        rowsEl.innerHTML = '<tr><td colspan="6" class="empty">Add APP_STORE_CONNECT_ISSUER_ID, APP_STORE_CONNECT_KEY_ID, APP_STORE_CONNECT_PRIVATE_KEY, and AFFILIATE_APPLE_SUBSCRIPTION_ID to Railway, then redeploy.</td></tr>';
+        warningsEl.textContent = '';
+        return;
+      }
+
+      statusEl.textContent = appleSync.syncedAt ? ('Synced ' + dateTime(appleSync.syncedAt)) : 'Ready to sync';
+      warningsEl.textContent = (appleSync.warnings || []).map(x => x.offerName + ': ' + x.message).join(' · ');
+
+      const linkedRows = appleLinked.map(item => '<tr>' +
+        '<td><div class="partner-name">' + html(item.offerName || '—') + '</div><div class="muted tiny">Offer ID ' + html(item.offerId || '—') + '</div></td>' +
+        '<td><span class="code">' + html(item.customCode || '—') + '</span></td>' +
+        '<td>' + badge((item.offerState || 'unknown').replaceAll('_',' '), 'info') + '<div style="margin-top:5px">' + badge((item.customCodeState || 'unknown').replaceAll('_',' '), '') + '</div></td>' +
+        '<td>' + html((item.customerEligibilities || []).join(', ') || '—') + '</td>' +
+        '<td>' + badge(item.linkedAffiliate?.displayName || 'Linked', 'positive') + '</td>' +
+        '<td><span class="muted tiny">Already linked</span></td>' +
+      '</tr>');
+
+      const importRows = appleImports.map(item => '<tr>' +
+        '<td><div class="partner-name">' + html(item.offerName || '—') + '</div><div class="muted tiny">Offer ID ' + html(item.offerId || '—') + '</div></td>' +
+        '<td><span class="code">' + html(item.customCode || '—') + '</span></td>' +
+        '<td>' + badge((item.offerState || 'unknown').replaceAll('_',' '), 'info') + '<div style="margin-top:5px">' + badge((item.customCodeState || 'unknown').replaceAll('_',' '), '') + '</div></td>' +
+        '<td>' + html((item.customerEligibilities || []).join(', ') || '—') + '</td>' +
+        '<td>' + badge('Needs Setup', 'warning') + '</td>' +
+        '<td><button class="button small gold" data-apple-import-setup="' + html(item.externalKey) + '">Complete Setup</button></td>' +
+      '</tr>');
+
+      const combined = importRows.concat(linkedRows);
+      rowsEl.innerHTML = combined.length
+        ? combined.join('')
+        : '<tr><td colspan="6" class="empty">No unlinked Apple offers found right now.</td></tr>';
+    }
+
+    function appleImportByKey(key) {
+      return appleImports.find(item => item.externalKey === key) || null;
+    }
+
     function affiliateById(id) { return affiliates.find(a => a.id === id); }
 
     function openDetails(id) {
@@ -1802,26 +1904,40 @@ function renderAffiliateAdminDashboardPage() {
       } catch (error) { toast(error.message, true); }
     }
 
-    function openCreateAffiliate() {
+    function openCreateAffiliate(prefill = null) {
       const today = new Date();
       const localDate = today.getFullYear() + '-' + String(today.getMonth()+1).padStart(2,'0') + '-' + String(today.getDate()).padStart(2,'0');
+      const isImport = !!prefill;
       openModal(
-        '<h2>Create Affiliate</h2><div class="modal-sub">Creates the partner record, compensation term, private dashboard token, and referral link. The Apple Offer Code campaign itself must already exist in App Store Connect.</div>' +
+        '<h2>' + (isImport ? 'Complete Apple Import' : 'Create Affiliate') + '</h2><div class="modal-sub">' +
+        (isImport
+          ? 'This Apple offer already exists in App Store Connect. Complete the Agora-only fields below to activate the affiliate dashboard, compensation term, and attribution mapping.'
+          : 'This creates the Agora affiliate record only. The Apple Offer Code campaign itself must already exist in App Store Connect. Once an offer exists in Apple, it will automatically appear above under App Store Connect Imports after sync.') +
+        '</div>' +
         '<div class="form-grid">' +
-          '<div class="form-group"><label>Display Name</label><input id="newDisplayName" class="field" placeholder="Max Agora" /></div>' +
-          '<div class="form-group"><label>Creator Code</label><input id="newCode" class="field" placeholder="MAXAGORA" /></div>' +
-          '<div class="form-group full"><label>Apple Offer Reference Name</label><input id="newOfferRef" class="field" placeholder="AGORA_AFFILIATE_MAX" /><div class="muted tiny" style="margin-top:5px">Required for Production attribution. Sandbox-only test records may omit it.</div></div>' +
+          '<div class="form-group"><label>Display Name</label><input id="newDisplayName" class="field" placeholder="Max Agora" value="' + html(prefill?.offerName || '') + '" /></div>' +
+          '<div class="form-group"><label>Creator Code</label><input id="newCode" class="field" placeholder="MAXAGORA" value="' + html(prefill?.customCode || '') + '" /></div>' +
+          '<div class="form-group full"><label>Apple Offer Reference Name</label><input id="newOfferRef" class="field" placeholder="AGORA_AFFILIATE_MAX" value="' + html(prefill?.offerName || '') + '" /><div class="muted tiny" style="margin-top:5px">Required for Production attribution. Sandbox-only test records may omit it.</div></div>' +
           '<div class="form-group"><label>Affiliate Since</label><input id="newSince" class="field" type="date" value="' + localDate + '" /></div>' +
           '<div class="form-group"><label>Commission</label><input id="newRate" class="field" type="number" min="0" max="100" step="0.1" value="50" /></div>' +
           '<div class="form-group"><label>Commission Basis</label><select id="newBasis" class="select"><option value="base_price">Base Price</option><option value="net_proceeds">Apple Net Proceeds</option></select></div>' +
           '<div class="form-group"><label>Payout Currency</label><input id="newCurrency" class="field" value="USD" maxlength="3" /></div>' +
           '<div class="form-group full"><label>Contact Email (optional)</label><input id="newEmail" class="field" type="email" /></div>' +
-          '<div class="form-group full"><label>Internal Notes (optional)</label><textarea id="newNotes" rows="3"></textarea></div>' +
-          '<div class="form-group full"><label class="check-row"><input id="newIsTest" type="checkbox" /> Sandbox / test affiliate. Excluded from production summary and payouts.</label></div>' +
+          '<div class="form-group full"><label>Internal Notes (optional)</label><textarea id="newNotes" rows="3">' + html(prefill ? ('Imported from App Store Connect offer ' + (prefill.offerName || '') + ' · creator code ' + (prefill.customCode || '') + '.') : '') + '</textarea></div>' +
+          '<div class="form-group full"><label class="check-row"><input id="newIsTest" type="checkbox" ' + (prefill ? '' : '') + '/> Sandbox / test affiliate. Excluded from production summary and payouts.</label></div>' +
         '</div>' +
         '<div id="createAffiliateError" class="login-error"></div>' +
         '<div class="modal-actions"><button class="button" data-modal-action="close">Cancel</button><button class="button gold" data-modal-action="create-affiliate">Create Affiliate</button></div>'
       );
+    }
+
+    function openAppleImportSetup(key) {
+      const item = appleImportByKey(key);
+      if (!item) {
+        toast('Apple import could not be found. Please sync again.', true);
+        return;
+      }
+      openCreateAffiliate(item);
     }
 
     async function createAffiliateFromModal() {
@@ -1851,7 +1967,7 @@ function renderAffiliateAdminDashboardPage() {
         $('modal').innerHTML = '<h2>Affiliate Created</h2><div class="modal-sub">Copy these links now. The private dashboard link can also be recovered later from this admin dashboard when encrypted token storage is configured.</div>' +
           '<div class="result-box">' + resultLine('Referral Link', payload.referralUrl) + resultLine('Private Dashboard', payload.dashboardUrl) + resultLine('Apple Redemption', payload.appleRedemptionUrl) + '</div>' +
           '<div class="modal-actions"><button class="button gold" data-modal-action="close-refresh">Done</button></div>';
-        await loadAffiliates(false);
+        await Promise.all([loadAffiliates(false), loadAppleImports(false)]);
       } catch (error) { $('createAffiliateError').textContent = error.message; }
     }
 
@@ -2051,7 +2167,8 @@ function renderAffiliateAdminDashboardPage() {
     });
     $('adminKey').addEventListener('keydown', event => { if (event.key === 'Enter') $('unlockAdmin').click(); });
     $('signOut').addEventListener('click', lockAdmin);
-    $('refreshAll').addEventListener('click', () => Promise.all([loadAffiliates(true), loadAlerts(false), loadPayouts(false)]));
+    $('refreshAll').addEventListener('click', () => Promise.all([loadAffiliates(true), loadAppleImports(false), loadAlerts(false), loadPayouts(false)]));
+    $('syncAppleOffers').addEventListener('click', () => loadAppleImports(true));
     $('createAffiliate').addEventListener('click', openCreateAffiliate);
     $('affiliateSearch').addEventListener('input', renderAffiliateRows);
     $('affiliateFilter').addEventListener('change', renderAffiliateRows);
@@ -2070,6 +2187,12 @@ function renderAffiliateAdminDashboardPage() {
       if (button.dataset.action === 'details') openDetails(id);
       if (button.dataset.action === 'dashboard') openPartnerDashboard(id);
       if (button.dataset.action === 'toggle') toggleAffiliate(id, button.dataset.active === 'true');
+    });
+
+    $('appleImportRows').addEventListener('click', event => {
+      const button = event.target.closest('button[data-apple-import-setup]');
+      if (!button) return;
+      openAppleImportSetup(button.dataset.appleImportSetup);
     });
 
     $('alertList').addEventListener('click', event => {
@@ -2123,6 +2246,13 @@ export function createAffiliateRouter(pool, options = {}) {
     tokenEncryptionKey,
     partnerBaseUrl: options.partnerBaseUrl || process.env.AFFILIATE_PARTNER_BASE_URL,
     referralBaseUrl: options.referralBaseUrl || process.env.AFFILIATE_REFERRAL_BASE_URL,
+  });
+
+  const appStoreConnectService = options.appStoreConnectService || createAppStoreConnectAffiliateService({
+    issuerId: options.appStoreConnectIssuerId || process.env.APP_STORE_CONNECT_ISSUER_ID,
+    keyId: options.appStoreConnectKeyId || process.env.APP_STORE_CONNECT_KEY_ID,
+    privateKey: options.appStoreConnectPrivateKey || process.env.APP_STORE_CONNECT_PRIVATE_KEY,
+    subscriptionId: options.appleSubscriptionId || process.env.AFFILIATE_APPLE_SUBSCRIPTION_ID,
   });
 
   const adminOnly = requireAdminKey(adminKey);
@@ -2225,6 +2355,27 @@ export function createAffiliateRouter(pool, options = {}) {
     try {
       const affiliates = await service.listAffiliates();
       return res.json({ success: true, affiliates });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.get('/api/admin/app-store-connect/imports', adminOnly, async (_req, res) => {
+    try {
+      if (!appStoreConnectService.isConfigured()) {
+        return res.json({
+          success: true,
+          configured: false,
+          syncedAt: null,
+          imports: [],
+          linked: [],
+          warnings: [],
+          errorMessage: 'App Store Connect sync is not configured yet.',
+        });
+      }
+      const affiliates = await service.listAffiliates();
+      const payload = await appStoreConnectService.listImports({ existingAffiliates: affiliates });
+      return res.json({ success: true, ...payload });
     } catch (error) {
       return jsonError(res, error);
     }
