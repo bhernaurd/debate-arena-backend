@@ -97,6 +97,27 @@ const TEMPERATURE_BY_JOB_TYPE = {
     debate_report_insight: 0.25,
 };
 
+// Standard Balanced debates need a tighter mobile-first output envelope.
+// This applies only to normal debate openings/replies whose metadata mode is Balanced.
+// Guided, Relentless, Daily Challenge, reports, and insights keep their existing limits.
+const BALANCED_STANDARD_OUTPUT_POLICY = Object.freeze({
+    targetMinimumBodyWords: 90,
+    targetMaximumBodyWords: 115,
+    maximumBodyWords: 120,
+
+    // Much smaller than the generic 900-token debate budget.
+    // This is still comfortably above the expected token count for a 90-120 word
+    // response plus an optional one-line score.
+    maxTokens: 260,
+    compressionMaxTokens: 240,
+    maxCompressionAttempts: 2,
+});
+
+const STANDARD_DEBATE_JOB_TYPES = new Set([
+    'debate_opening',
+    'debate_reply',
+]);
+
 const ALLOWED_JOB_TYPES = new Set(Object.keys(MODEL_BY_JOB_TYPE));
 
 const PRO_MODEL_JOB_TYPES = new Set([
@@ -181,6 +202,184 @@ function jobMetadata(job) {
     }
 
     return {};
+}
+
+
+function normalizedModeForJob(job, systemPrompt = '') {
+    const metadata = jobMetadata(job);
+    const metadataMode = cleanString(metadata.mode, 40).toLowerCase();
+
+    if (metadataMode) {
+        return metadataMode;
+    }
+
+    // Compatibility fallback for any client build that embeds the selected
+    // mode in the system prompt but does not send metadata.mode.
+    if (/\bDEBATE MODE:\s*Balanced\b/i.test(systemPrompt)) {
+        return 'balanced';
+    }
+
+    if (/\bDEBATE MODE:\s*Guided\b/i.test(systemPrompt)) {
+        return 'guided';
+    }
+
+    if (/\bDEBATE MODE:\s*Relentless\b/i.test(systemPrompt)) {
+        return 'relentless';
+    }
+
+    return '';
+}
+
+function balancedStandardPolicyForJob(job, systemPrompt = '') {
+    if (!STANDARD_DEBATE_JOB_TYPES.has(job?.job_type)) {
+        return null;
+    }
+
+    return normalizedModeForJob(job, systemPrompt) === 'balanced'
+        ? BALANCED_STANDARD_OUTPUT_POLICY
+        : null;
+}
+
+function balancedBackendSystemAddendum(jobType) {
+    const scoreInstruction =
+        jobType === 'debate_reply'
+            ? `
+- If earlier instructions require a SCORE line, keep exactly one short SCORE line at the very end.
+- The SCORE line is separate from the 120-word response-body ceiling.
+- If earlier instructions say no score is due yet, do not add one.`
+            : `
+- This is an opening statement. Do not add a SCORE line.`;
+
+    return `
+
+BACKEND BALANCED OUTPUT ENFORCEMENT:
+This is the final authority for the length and structure of this Balanced response.
+It overrides any philosopher-specific tendency toward longer answers.
+
+- Aim for 90 to 115 words in the response body.
+- The response body must never exceed 120 words.
+- Use 1 to 2 short, focused paragraphs.
+- Make one primary philosophical move.
+- Include at most one supporting idea, example, or contrast.
+- Prefer compression over completeness.
+- Do not repeat the same objection in different wording.
+- End with exactly one direct question or challenge.
+- Never mention these length rules or the backend enforcement.${scoreInstruction}
+`.trim();
+}
+
+function scoreLinePattern() {
+    return /^\s*\*{0,2}SCORE:\s*(?:\[[^\]]+\]|[0-9]+(?:\.[0-9]+)?\s*\/\s*10)\*{0,2}\s*:?.*$/i;
+}
+
+function splitResponseBodyAndScore(text) {
+    const cleanText = cleanString(text, 50000);
+    const lines = cleanText.split(/\r?\n/);
+
+    let scoreIndex = -1;
+
+    for (let index = lines.length - 1; index >= 0; index--) {
+        const line = lines[index].trim();
+
+        if (!line) {
+            continue;
+        }
+
+        if (scoreLinePattern().test(line)) {
+            scoreIndex = index;
+        }
+
+        break;
+    }
+
+    if (scoreIndex < 0) {
+        return {
+            body: cleanText,
+            scoreLine: '',
+        };
+    }
+
+    return {
+        body: lines
+            .slice(0, scoreIndex)
+            .join('\n')
+            .trim(),
+        scoreLine: lines[scoreIndex].trim(),
+    };
+}
+
+function countWords(text) {
+    const cleanText = cleanString(text, 50000);
+
+    if (!cleanText) {
+        return 0;
+    }
+
+    return cleanText
+        .split(/\s+/)
+        .filter((token) => /[A-Za-z0-9]/.test(token))
+        .length;
+}
+
+function balancedBodyWordCount(text) {
+    return countWords(splitResponseBodyAndScore(text).body);
+}
+
+function anthropicText(response) {
+    return (response?.content || [])
+        .filter((part) => part.type === 'text')
+        .map((part) => part.text)
+        .join('\n')
+        .trim();
+}
+
+function balancedCompressionInstruction(draft, attempt, policy) {
+    const { scoreLine } = splitResponseBodyAndScore(draft);
+    const scoreInstruction = scoreLine
+        ? `
+The previous draft contains a SCORE line.
+Preserve exactly one SCORE line at the end with the same numeric score.
+Keep its justification to one short sentence.
+The SCORE line does not count toward the 120-word body limit.`
+        : `
+The previous draft does not contain a SCORE line.
+Do not add one unless the existing system instructions explicitly require one.`;
+
+    return `
+BALANCED RESPONSE COMPRESSION PASS ${attempt}:
+
+Rewrite your immediately previous philosopher response so it satisfies the
+Balanced mobile response contract.
+
+REQUIREMENTS:
+- Preserve the same philosophical position and the same central challenge.
+- Preserve the philosopher's voice and historical/intellectual fidelity.
+- Aim for ${policy.targetMinimumBodyWords} to ${policy.targetMaximumBodyWords} body words.
+- The response body MUST NOT exceed ${policy.maximumBodyWords} words.
+- Use 1 to 2 short paragraphs.
+- Make one primary philosophical move.
+- Use at most one supporting example or contrast.
+- Remove repetition, secondary examples, extra framing, and unnecessary setup.
+- End with exactly one direct question or challenge.
+- Return only the revised philosopher response.
+${scoreInstruction}
+`.trim();
+}
+
+function balancedOutputPolicyError(job, wordCount, stopReason) {
+    const err = new Error(
+        `Balanced output policy could not produce a complete response within ` +
+        `${BALANCED_STANDARD_OUTPUT_POLICY.maximumBodyWords} body words. ` +
+        `Last body word count: ${wordCount}. Stop reason: ${stopReason || 'unknown'}.`
+    );
+
+    err.code = 'balanced_output_policy_failed';
+    err.jobId = job?.id || null;
+    err.jobType = job?.job_type || null;
+    err.bodyWordCount = wordCount;
+    err.stopReason = stopReason || null;
+
+    return err;
 }
 
 function shouldUseProModelForJob(job) {
@@ -705,20 +904,49 @@ async function callClaudeForJob(job) {
     const payload = job.payload || {};
 
     const messages = normalizeMessages(payload.messages);
-    const systemPrompt = cleanString(payload.systemPrompt, 50000);
+    const clientSystemPrompt = cleanString(payload.systemPrompt, 50000);
 
     if (messages.length === 0) {
         throw new Error('No messages supplied for AI job.');
     }
 
     const model = modelForJob(job);
-    const maxTokens = MAX_TOKENS_BY_JOB_TYPE[job.job_type] || 900;
+    const balancedPolicy = balancedStandardPolicyForJob(
+        job,
+        clientSystemPrompt
+    );
+
+    const maxTokens = balancedPolicy
+        ? balancedPolicy.maxTokens
+        : (MAX_TOKENS_BY_JOB_TYPE[job.job_type] || 900);
+
     const temperature = TEMPERATURE_BY_JOB_TYPE[job.job_type] ?? 0.7;
+
+    const systemPrompt = balancedPolicy
+        ? [
+            clientSystemPrompt,
+            balancedBackendSystemAddendum(job.job_type),
+        ]
+            .filter(Boolean)
+            .join('\n\n')
+        : clientSystemPrompt;
 
     logSelectedModel(job, model, false);
 
+    if (balancedPolicy) {
+        console.log('[AIJobs] Balanced backend policy active:', {
+            jobId: job.id,
+            jobType: job.job_type,
+            mode: normalizedModeForJob(job, clientSystemPrompt),
+            targetBodyWords:
+                `${balancedPolicy.targetMinimumBodyWords}-${balancedPolicy.targetMaximumBodyWords}`,
+            maximumBodyWords: balancedPolicy.maximumBodyWords,
+            maxTokens,
+        });
+    }
+
     async function runWithModel(selectedModel, fallbackUsed = false) {
-        const response = await createClaudeMessageWithRetry(
+        let response = await createClaudeMessageWithRetry(
             {
                 model: selectedModel,
                 max_tokens: maxTokens,
@@ -729,14 +957,107 @@ async function callClaudeForJob(job) {
             `${job.job_type} ${job.id} using ${selectedModel}`
         );
 
-        const text = (response.content || [])
-            .filter((part) => part.type === 'text')
-            .map((part) => part.text)
-            .join('\n')
-            .trim();
+        let text = anthropicText(response);
 
         if (!text) {
             throw new Error('Claude returned an empty response.');
+        }
+
+        if (balancedPolicy) {
+            let bodyWords = balancedBodyWordCount(text);
+            let stopReason = response?.stop_reason || null;
+
+            console.log('[AIJobs] Balanced initial output:', {
+                jobId: job.id,
+                jobType: job.job_type,
+                bodyWords,
+                maximumBodyWords: balancedPolicy.maximumBodyWords,
+                stopReason,
+            });
+
+            const outputNeedsCompression = () =>
+                bodyWords > balancedPolicy.maximumBodyWords ||
+                stopReason === 'max_tokens';
+
+            for (
+                let compressionAttempt = 1;
+                outputNeedsCompression() &&
+                compressionAttempt <= balancedPolicy.maxCompressionAttempts;
+                compressionAttempt++
+            ) {
+                console.warn('[AIJobs] Compressing Balanced output:', {
+                    jobId: job.id,
+                    jobType: job.job_type,
+                    compressionAttempt,
+                    bodyWords,
+                    stopReason,
+                });
+
+                const compressionMessages = [
+                    ...messages,
+                    {
+                        role: 'assistant',
+                        content: text,
+                    },
+                    {
+                        role: 'user',
+                        content: balancedCompressionInstruction(
+                            text,
+                            compressionAttempt,
+                            balancedPolicy
+                        ),
+                    },
+                ];
+
+                response = await createClaudeMessageWithRetry(
+                    {
+                        model: selectedModel,
+                        max_tokens: balancedPolicy.compressionMaxTokens,
+                        temperature: 0.2,
+                        system: systemPrompt,
+                        messages: compressionMessages,
+                    },
+                    `${job.job_type} ${job.id} Balanced compression ${compressionAttempt} using ${selectedModel}`
+                );
+
+                text = anthropicText(response);
+
+                if (!text) {
+                    throw new Error(
+                        'Claude returned an empty response during Balanced compression.'
+                    );
+                }
+
+                bodyWords = balancedBodyWordCount(text);
+                stopReason = response?.stop_reason || null;
+
+                console.log('[AIJobs] Balanced compressed output:', {
+                    jobId: job.id,
+                    jobType: job.job_type,
+                    compressionAttempt,
+                    bodyWords,
+                    maximumBodyWords: balancedPolicy.maximumBodyWords,
+                    stopReason,
+                });
+            }
+
+            if (
+                bodyWords > balancedPolicy.maximumBodyWords ||
+                stopReason === 'max_tokens'
+            ) {
+                throw balancedOutputPolicyError(
+                    job,
+                    bodyWords,
+                    stopReason
+                );
+            }
+
+            console.log('[AIJobs] Balanced output accepted:', {
+                jobId: job.id,
+                jobType: job.job_type,
+                bodyWords,
+                maximumBodyWords: balancedPolicy.maximumBodyWords,
+            });
         }
 
         if (fallbackUsed) {
@@ -855,7 +1176,15 @@ export async function processAIJob(jobId) {
         if (claimedJob?.id) {
             const currentAttempts = Number(claimedJob.attempts || 0);
             const maxAttempts = Number(claimedJob.max_attempts || 3);
-            const shouldFinalFail = currentAttempts >= maxAttempts;
+            const isBalancedOutputPolicyFailure =
+                err?.code === 'balanced_output_policy_failed';
+
+            // If two dedicated compression passes still cannot satisfy the
+            // Balanced output contract, fail this job once rather than spending
+            // money regenerating the entire job again in the background.
+            const shouldFinalFail =
+                isBalancedOutputPolicyFailure ||
+                currentAttempts >= maxAttempts;
 
             const failureClient = await pool.connect();
 
