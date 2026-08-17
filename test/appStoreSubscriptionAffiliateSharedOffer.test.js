@@ -15,9 +15,18 @@ test('App Store subscription route no longer uses the legacy one-offer-per-affil
   assert.match(routes, /observeVerifiedTransaction/);
 });
 
-test('authenticated client sync passes account identity into shared-offer attribution', () => {
+test('client sync passes installation identity and optional account identity into shared-offer attribution', () => {
   assert.match(routes, /affiliateAccountId:\s*accountAuthorization\?\.accountId \|\| null/);
+  assert.match(routes, /affiliateInstallationId:\s*requestedUserId/);
   assert.match(routes, /accountId: affiliateAccountId/);
+  assert.match(routes, /installationId: affiliateInstallationId/);
+});
+
+test('persistVerifiedSnapshot explicitly receives affiliate attribution dependencies instead of relying on undeclared variables', () => {
+  assert.match(
+    routes,
+    /async function persistVerifiedSnapshot\(client, \{[\s\S]*?affiliateAccountId = null,[\s\S]*?affiliateInstallationId = null,[\s\S]*?affiliateSubscriptionAttributionService = null,/
+  );
 });
 
 test('affiliate attribution is isolated by a savepoint and cannot deny Apple subscription access', () => {
