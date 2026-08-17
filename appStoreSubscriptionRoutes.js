@@ -570,8 +570,6 @@ async function upsertEntitlement(client, {
     snapshotSignedDate,
     pricingCohortHint = 'unknown',
     paywallSessionId = null,
-    affiliateAccountId = null,
-    affiliateSubscriptionAttributionService = null,
 }) {
     const originalTransactionId = cleanString(
         transaction?.originalTransactionId ||
@@ -995,6 +993,7 @@ async function observeAffiliateAttributionSafely(
         environment,
         source,
         accountId = null,
+        installationId = null,
     }
 ) {
     if (!affiliateSubscriptionAttributionService) {
@@ -1017,6 +1016,7 @@ async function observeAffiliateAttributionSafely(
                     environment,
                     source,
                     accountId,
+                    installationId,
                 });
 
         await client.query(`RELEASE SAVEPOINT ${savepoint}`);
@@ -1062,6 +1062,9 @@ async function persistVerifiedSnapshot(client, {
     metadata = null,
     pricingCohortHint = 'unknown',
     paywallSessionId = null,
+    affiliateAccountId = null,
+    affiliateInstallationId = null,
+    affiliateSubscriptionAttributionService = null,
 }) {
     const userId = await resolveUserId({
         client,
@@ -1128,6 +1131,7 @@ async function persistVerifiedSnapshot(client, {
                 environment,
                 source,
                 accountId: affiliateAccountId,
+                installationId: affiliateInstallationId,
             }
         );
 
@@ -1169,7 +1173,9 @@ export function createAppStoreSubscriptionRouter(
             typeof affiliateSubscriptionAttributionService
                 .observeVerifiedTransaction !== 'function' ||
             typeof affiliateSubscriptionAttributionService
-                .reconcileAccount !== 'function'
+                .reconcileAccount !== 'function' ||
+            typeof affiliateSubscriptionAttributionService
+                .reconcileInstallation !== 'function'
         )
     ) {
         throw new Error(
@@ -1283,6 +1289,7 @@ export function createAppStoreSubscriptionRouter(
                 paywallSessionId,
                 affiliateAccountId:
                     accountAuthorization?.accountId || null,
+                affiliateInstallationId: requestedUserId,
                 affiliateSubscriptionAttributionService,
             });
 
