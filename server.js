@@ -323,9 +323,19 @@ const affiliateSubscriptionAttributionEnabled =
     { defaultValue: true }
   );
 
+const affiliateAppClipHandoffEnabled =
+  readBooleanEnvironmentVariable(
+    'AFFILIATE_APP_CLIP_HANDOFF_ENABLED',
+    { defaultValue: false }
+  );
+
 const affiliateSubscriptionAttributionService =
   affiliateSubscriptionAttributionEnabled
-    ? createAffiliateSubscriptionAttributionService({ pool })
+    ? createAffiliateSubscriptionAttributionService({
+        pool,
+        requireReferralHandoffForNewAttribution:
+          affiliateAppClipHandoffEnabled,
+      })
     : null;
 
 if (!affiliateSubscriptionAttributionEnabled) {
@@ -525,6 +535,7 @@ app.use('/affiliate', affiliatePortalLimiter);
 app.use(createAffiliateRouter(pool, {
   accountAuthService,
   affiliateSubscriptionAttributionService,
+  appClipHandoffEnabled: affiliateAppClipHandoffEnabled,
 }));
 app.use(createPaywallConfigurationRouter());
 app.use(createDailyChallengeRouter(pool));
