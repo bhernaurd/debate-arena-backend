@@ -16,6 +16,9 @@ import {
 import {
   createAffiliateAccountReferralService,
 } from './lib/affiliateAccountReferralService.js';
+import {
+  createAffiliateReferralHandoffService,
+} from './lib/affiliateReferralHandoffService.js';
 
 function jsonError(res, error) {
   const statusCode = Number(error?.statusCode) || 500;
@@ -117,6 +120,32 @@ function readBearerToken(req) {
   }
   return match[1].trim();
 }
+
+function readOptionalBearerToken(req) {
+  const authorization = String(req.get('authorization') || '').trim();
+  if (!authorization) return null;
+
+  const match = /^Bearer\s+(.+)$/i.exec(authorization);
+  if (!match || !match[1]?.trim()) {
+    const error = new Error('Authorization must use a Bearer token.');
+    error.statusCode = 401;
+    error.code = 'invalid_account_session';
+    throw error;
+  }
+
+  return match[1].trim();
+}
+
+function environmentFlag(value, fallback = false) {
+  if (value == null || String(value).trim() === '') {
+    return fallback;
+  }
+
+  return ['1', 'true', 'yes', 'on'].includes(
+    String(value).trim().toLowerCase()
+  );
+}
+
 
 function privateApiHeaders(_req, res, next) {
   res.removeHeader('Access-Control-Allow-Origin');
@@ -2627,15 +2656,29 @@ function renderAffiliateAdminDashboardPage() {
 export function createAffiliateRouter(pool, options = {}) {
   const router = express.Router();
   const adminKey = options.adminKey || process.env.AFFILIATE_ADMIN_KEY;
-  const appAppleId = options.appAppleId || process.env.AFFILIATE_APPLE_APP_ID;
+  const appAppleId = options.appAppleId || process.env.AFFILIATE_APPLE_APP_ID || '6762416967';
   const tokenEncryptionKey = options.tokenEncryptionKey || process.env.AFFILIATE_TOKEN_ENCRYPTION_KEY;
+  const appClipHandoffEnabled =
+    options.appClipHandoffEnabled ??
+    environmentFlag(
+      process.env.AFFILIATE_APP_CLIP_HANDOFF_ENABLED,
+      false
+    );
 
   const service = options.service || createAffiliateProgramService({
     pool,
     appAppleId,
     tokenEncryptionKey,
     partnerBaseUrl: options.partnerBaseUrl || process.env.AFFILIATE_PARTNER_BASE_URL,
-    referralBaseUrl: options.referralBaseUrl || process.env.AFFILIATE_REFERRAL_BASE_URL,
+    referralBaseUrl:
+      options.referralBaseUrl ||
+      process.env.AFFILIATE_REFERRAL_BASE_URL ||
+      'https://debate-arena-backend-production.up.railway.app',
+    appClipReferralEnabled: appClipHandoffEnabled,
+    appClipBundleId:
+      options.appClipBundleId ||
+      process.env.AFFILIATE_APP_CLIP_BUNDLE_ID ||
+      'com.bhernaurd.TheAgora.Clip',
   });
 
   const appStoreConnectService = options.appStoreConnectService || createAppStoreConnectAffiliateService({
@@ -2658,6 +2701,18 @@ export function createAffiliateRouter(pool, options = {}) {
 
   const affiliateSubscriptionAttributionService =
     options.affiliateSubscriptionAttributionService || null;
+
+  const affiliateReferralHandoffService =
+    options.affiliateReferralHandoffService ||
+    createAffiliateReferralHandoffService({
+      pool,
+      accountAuthService: options.accountAuthService || null,
+      appAppleId,
+      appClipBundleId:
+        options.appClipBundleId ||
+        process.env.AFFILIATE_APP_CLIP_BUNDLE_ID ||
+        'com.bhernaurd.TheAgora.Clip',
+    });
 
   const adminOnly = requireAdminKey(adminKey);
   const referralLimiter = rateLimit({
@@ -2688,9 +2743,23 @@ export function createAffiliateRouter(pool, options = {}) {
     legacyHeaders: false,
     message: { success: false, error: { code: 'affiliate_account_rate_limited', message: 'Too many creator-code requests.' } },
   });
+  const handoffLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 120,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      success: false,
+      error: {
+        code: 'affiliate_handoff_rate_limited',
+        message: 'Too many creator-offer requests. Please try again shortly.',
+      },
+    },
+  });
 
   router.use('/api/partner', partnerLimiter, privateApiHeaders);
   router.use('/api/account/affiliate', accountAffiliateLimiter, privateApiHeaders);
+  router.use('/api/affiliate/referral-handoffs', handoffLimiter, privateApiHeaders);
   router.use('/api/admin', adminLimiter, privateApiHeaders);
 
   router.get('/r/:code', referralLimiter, async (req, res) => {
@@ -2702,6 +2771,45 @@ export function createAffiliateRouter(pool, options = {}) {
           return null;
         }
       })();
+
+      if (appClipHandoffEnabled) {
+        // Do not rely on an HTTP redirect itself to invoke the App Clip. Apple
+        // requires redirecting/custom URLs to be configured as App Clip
+        // invocation URLs too. This legacy /r/CODE route is therefore a safe
+        // fallback page with an explicit user tap on Apple's default App Clip
+        // link. Newly generated partner referral URLs use the Apple link
+        // directly and skip this extra page.
+        const result = await affiliateReferralHandoffService
+          .createForReferral({
+            code: req.params.code,
+            referrerHost,
+          });
+        const appClipUrl = escapeHtml(result.redirectUrl);
+        const creatorCode = escapeHtml(result.handoff.creatorCode || '');
+
+        res.setHeader('Cache-Control', 'no-store');
+        return res.status(200).type('html').send(`<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>The Agora Creator Offer</title>
+  <style>
+    body{margin:0;background:#0b0b0c;color:#f5f1e8;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;min-height:100vh;place-items:center;padding:24px;box-sizing:border-box}
+    main{width:min(420px,100%);text-align:center}
+    h1{font-size:25px;margin:0 0 10px}p{color:#b8b2a7;line-height:1.5;margin:0 0 22px}
+    a{display:block;background:#d7a53f;color:#12100b;text-decoration:none;font-weight:800;padding:16px 18px;border-radius:14px}
+    small{display:block;color:#827b70;margin-top:14px}
+  </style>
+</head>
+<body><main>
+  <h1>Creator offer ready</h1>
+  <p>${creatorCode} has been applied. Open The Agora to continue with Apple.</p>
+  <a href="${appClipUrl}">Open The Agora</a>
+  <small>Subscription managed by Apple</small>
+</main></body></html>`);
+      }
 
       const result = await service.recordReferralClick({
         code: req.params.code,
@@ -2716,6 +2824,151 @@ export function createAffiliateRouter(pool, options = {}) {
       }
       console.error('[affiliate] referral redirect:', error);
       return res.status(500).type('text/plain').send('Unable to open this referral link.');
+    }
+  });
+
+  // Creates a real handoff URL for TestFlight/App Clip verification without
+  // switching public /r/:code traffic over to the App Clip before approval.
+  // This route is owner-admin only and does not record a referral click.
+  router.post(
+    '/api/admin/affiliate-referral-handoffs/test',
+    adminOnly,
+    async (req, res) => {
+      try {
+        const result = await affiliateReferralHandoffService
+          .createForTesting({
+            code: req.body?.code,
+          });
+
+        return res.status(201).json({
+          success: true,
+          handoff: result.handoff,
+          invocationUrl: result.redirectUrl,
+        });
+      } catch (error) {
+        return jsonError(res, error);
+      }
+    }
+  );
+
+  // Primary production entry for Apple's direct default App Clip links.
+  // The public creator code identifies the affiliate; the backend creates a
+  // fresh opaque token only after the App Clip/full app is actually invoked.
+  router.post('/api/affiliate/referral-handoffs', async (req, res) => {
+    try {
+      const referrerHost = (() => {
+        try {
+          return req.get('referer')
+            ? new URL(req.get('referer')).hostname
+            : null;
+        } catch {
+          return null;
+        }
+      })();
+
+      const result = await affiliateReferralHandoffService
+        .createForReferral({
+          code: req.body?.creatorCode,
+          referrerHost,
+        });
+
+      return res.status(201).json({
+        success: true,
+        handoff: result.handoff,
+        handoffToken: result.handoffToken,
+      });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.post('/api/affiliate/referral-handoffs/:token/open', async (req, res) => {
+    try {
+      const handoff = await affiliateReferralHandoffService
+        .openHandoff(req.params.token);
+
+      return res.json({
+        success: true,
+        handoff,
+      });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.post('/api/affiliate/referral-handoffs/:token/redeem-start', async (req, res) => {
+    try {
+      const result = await affiliateReferralHandoffService
+        .beginRedemption(req.params.token);
+
+      return res.json({
+        success: true,
+        handoff: result.handoff,
+        redemptionUrl: result.redemptionUrl,
+      });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  // A generic/manual Apple code-redemption sheet does not expose the exact
+  // creator code to StoreKit. Before opening that path, the full app abandons
+  // any still-pending automatic creator handoff so a later shared-offer
+  // transaction cannot be misattributed to stale evidence.
+  router.post('/api/affiliate/referral-handoffs/:token/abandon', async (req, res) => {
+    try {
+      const installationId = readAccountInstallationId(req);
+      const handoff = await affiliateReferralHandoffService
+        .abandonHandoff({
+          rawToken: req.params.token,
+          installationId,
+        });
+
+      return res.json({
+        success: true,
+        handoff,
+      });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.post('/api/affiliate/referral-handoffs/:token/claim', async (req, res) => {
+    try {
+      const installationId = readAccountInstallationId(req);
+      const accessToken = readOptionalBearerToken(req);
+
+      const handoff = await affiliateReferralHandoffService
+        .claimHandoff({
+          rawToken: req.params.token,
+          installationId,
+          accessToken,
+        });
+
+      let reconciliation = null;
+      if (
+        affiliateSubscriptionAttributionService &&
+        typeof affiliateSubscriptionAttributionService
+          .reconcileInstallation === 'function'
+      ) {
+        try {
+          reconciliation = await affiliateSubscriptionAttributionService
+            .reconcileInstallation(installationId);
+        } catch (reconciliationError) {
+          console.error(
+            '[affiliate] handoff reconciliation deferred:',
+            reconciliationError
+          );
+        }
+      }
+
+      return res.json({
+        success: true,
+        handoff,
+        reconciliation,
+      });
+    } catch (error) {
+      return jsonError(res, error);
     }
   });
 
