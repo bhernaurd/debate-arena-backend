@@ -139,3 +139,23 @@ test('authenticated account creator-code claim routes exist and reconcile safely
   assert.match(source, /reconcileAccount/);
   assert.match(source, /creator-code claim saved; reconciliation deferred/);
 });
+
+test('App Clip referral handoffs have a safe rollout gate plus an owner-only TestFlight generator', () => {
+  assert.match(source, /createAffiliateReferralHandoffService/);
+  assert.match(source, /AFFILIATE_APP_CLIP_HANDOFF_ENABLED/);
+  assert.match(source, /appClipHandoffEnabled[\s\S]*?createForReferral/);
+  assert.match(source, /appClipHandoffEnabled[\s\S]*?service\.recordReferralClick/);
+  assert.match(source, /\/api\/admin\/affiliate-referral-handoffs\/test'[\s\S]*?adminOnly/);
+  assert.match(source, /createForTesting/);
+  assert.match(source, /router\.post\('\/api\/affiliate\/referral-handoffs',/);
+  assert.match(source, /handoffToken: result\.handoffToken/);
+  assert.match(source, /Newly generated partner referral URLs use the Apple link/);
+  assert.ok(source.includes('<a href="${appClipUrl}">Open The Agora</a>'));
+  assert.match(source, /\/api\/affiliate\/referral-handoffs\/:token\/open/);
+  assert.match(source, /\/api\/affiliate\/referral-handoffs\/:token\/redeem-start/);
+  assert.match(source, /\/api\/affiliate\/referral-handoffs\/:token\/claim/);
+  assert.match(source, /\/api\/affiliate\/referral-handoffs\/:token\/abandon/);
+  assert.match(source, /abandonHandoff/);
+  assert.match(source, /readOptionalBearerToken\(req\)/);
+  assert.match(source, /reconcileInstallation/);
+});
