@@ -109,3 +109,18 @@ test('reconciliation avoids infinite retries when shared-offer rows are still wa
     /batchProgress === 0/
   );
 });
+
+test('reconciliation honors the public App Clip rollout gate and requires exact handoff evidence for new shared-offer ownership', () => {
+  assert.match(
+    scriptSource,
+    /AFFILIATE_APP_CLIP_HANDOFF_ENABLED/
+  );
+  assert.match(
+    scriptSource,
+    /requireReferralHandoffForNewAttribution\s*=\s*parseBoolean/
+  );
+  assert.match(
+    scriptSource,
+    /createAffiliateSubscriptionAttributionService\(\{[\s\S]*?requireReferralHandoffForNewAttribution[\s\S]*?\}\)/
+  );
+});
