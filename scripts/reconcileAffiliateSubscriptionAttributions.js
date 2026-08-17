@@ -11,6 +11,12 @@ const { Pool } = pg;
 const DEFAULT_BATCH_SIZE = 250;
 const DEFAULT_MAX_BATCHES = 20;
 
+function parseBoolean(value) {
+  return ['1', 'true', 'yes', 'on'].includes(
+    String(value ?? '').trim().toLowerCase()
+  );
+}
+
 function parsePositiveInt(value, fallback, max) {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
@@ -147,7 +153,14 @@ async function main() {
     max: 4,
   });
 
-  const service = createAffiliateSubscriptionAttributionService({ pool });
+  const requireReferralHandoffForNewAttribution = parseBoolean(
+    process.env.AFFILIATE_APP_CLIP_HANDOFF_ENABLED
+  );
+
+  const service = createAffiliateSubscriptionAttributionService({
+    pool,
+    requireReferralHandoffForNewAttribution,
+  });
 
   let attributed = 0;
   let alreadyOwned = 0;
@@ -201,9 +214,11 @@ async function main() {
         }
       }
 
-      // Unresolved shared-offer rows can remain intentionally unassigned until
-      // an authenticated account supplies a creator-code claim. Avoid cycling
-      // over the same full batch repeatedly in one run when nothing changed.
+      // Unresolved shared-offer rows can remain intentionally unassigned.
+      // Before the App Clip rollout they may still resolve through the legacy
+      // account creator-code claim. After rollout, exact referral-handoff
+      // evidence is required for new shared-offer ownership. Avoid cycling over
+      // the same full batch repeatedly in one run when nothing changed.
       if (candidates.length < batchSize || batchProgress === 0) {
         break;
       }
