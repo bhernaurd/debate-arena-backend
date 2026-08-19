@@ -25,7 +25,7 @@ import { createAccountRankedPlacementRouter } from './accountRankedPlacementRout
 import { createAccountRankedDebateRouter } from './accountRankedDebateRoutes.js';
 import { createAccountRankedLadderRouter } from './accountRankedLadderRoutes.js';
 import { createRankedPhilosopherEligibilityRouter } from './rankedPhilosopherEligibilityRoutes.js';
-import { createAccountAuthService } from './lib/accountAuthService.js';
+import { createAccountAuthRuntime } from './lib/accountAuthRuntime.js';
 import { createAccountDebateHistoryService } from './lib/accountDebateHistoryService.js';
 import { createAccountAchievementService } from './lib/accountAchievementService.js';
 import { createAccountDailyChallengeProgressService } from './lib/accountDailyChallengeProgressService.js';
@@ -306,10 +306,18 @@ const accountRankedLadderStartLimiter = rateLimit({
 app.use('/debate', limiter);
 app.use('/api/app-store/sync-transaction', subscriptionSyncLimiter);
 
-// Construct one shared account service. This validates all required Apple and
-// Agora authentication configuration during startup and ensures account routes
-// and authenticated subscription ownership use the same authorization rules.
-const accountAuthService = createAccountAuthService({ pool });
+// Construct one shared account runtime. Native iOS remains the default. The
+// Android browser Sign in with Apple bridge is enabled only when its dedicated
+// Services ID configuration is present.
+const accountAuthRuntime = createAccountAuthRuntime({ pool });
+const accountAuthService = accountAuthRuntime.service;
+
+if (!accountAuthRuntime.appleWebAuthEnabled) {
+  console.warn(
+    '[AccountAuth] Android Sign in with Apple web bridge is disabled. Missing: ' +
+    accountAuthRuntime.appleWebAuthMissingConfiguration.join(', ')
+  );
+}
 
 const accountSubscriptionOwnershipService =
   createAccountSubscriptionOwnershipService({
@@ -525,6 +533,11 @@ app.use(
   })
 );
 
+app.use(
+  '/api/account/apple/web',
+  accountSignInLimiter,
+  accountAuthRuntime.appleWebAuthRouter
+);
 app.use('/api/account/apple/challenge', accountChallengeLimiter);
 app.use('/api/account/apple/sign-in', accountSignInLimiter);
 app.use('/api/account/session', accountSessionLimiter);
