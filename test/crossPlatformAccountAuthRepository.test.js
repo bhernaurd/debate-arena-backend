@@ -26,6 +26,10 @@ function isExactAudienceLookup(text) {
         text.includes('AND ai.subject = $3');
 }
 
+function isAdvisoryLock(text) {
+    return text.includes('pg_advisory_xact_lock');
+}
+
 test('a new Apple audience links to the existing team-scoped Agora account', async () => {
     const pool = { query: async () => ({ rows: [], rowCount: 0 }) };
     const repository = createCrossPlatformAccountAuthRepository(pool);
@@ -33,6 +37,9 @@ test('a new Apple audience links to the existing team-scoped Agora account', asy
 
     const tx = {
         async query(text) {
+            if (isAdvisoryLock(text)) {
+                return { rows: [], rowCount: 1 };
+            }
             if (isExactAudienceLookup(text)) {
                 exactCalls += 1;
                 return exactCalls === 1
@@ -65,6 +72,9 @@ test('conflicting accounts for one team-scoped Apple subject are rejected', asyn
     const repository = createCrossPlatformAccountAuthRepository(pool);
     const tx = {
         async query(text) {
+            if (isAdvisoryLock(text)) {
+                return { rows: [], rowCount: 1 };
+            }
             if (isExactAudienceLookup(text)) {
                 return { rows: [], rowCount: 0 };
             }
