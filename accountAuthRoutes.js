@@ -4,6 +4,7 @@ import {
     AccountAuthError,
     createAccountAuthService,
 } from './lib/accountAuthService.js';
+import { createGoogleAccountAuthService } from './lib/googleAccountAuthService.js';
 
 const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
 const SIGN_OUT_REASON = 'signed_out';
@@ -311,6 +312,7 @@ export function createAccountAuthRouter(
     pool,
     {
         service = null,
+        googleService = null,
         revokeSession = null,
         logger = console,
         now = () => Date.now(),
@@ -318,6 +320,8 @@ export function createAccountAuthRouter(
 ) {
     const accountAuthService =
         service ?? createAccountAuthService({ pool });
+    const googleAccountAuthService =
+        googleService ?? createGoogleAccountAuthService({ pool });
 
     const revokeAccountSession =
         revokeSession ?? createPostgresAccountSessionRevoker(pool);
@@ -338,6 +342,12 @@ export function createAccountAuthRouter(
         }
     }
 
+    if (typeof googleAccountAuthService?.signInWithGoogle !== 'function') {
+        throw new Error(
+            'Google account authentication service is missing signInWithGoogle().'
+        );
+    }
+
     if (typeof revokeAccountSession !== 'function') {
         throw new Error('revokeSession must be a function.');
     }
@@ -355,6 +365,7 @@ export function createAccountAuthRouter(
         next();
     });
 
+    // iOS remains unchanged and continues using Sign in with Apple.
     router.post(
         '/apple/challenge',
         asyncRoute(async (req, res) => {
@@ -397,6 +408,26 @@ export function createAccountAuthRouter(
         })
     );
 
+    // Android intentionally has a single provider: Google. This route never
+    // queries Apple identities and never performs email-based account linking.
+    router.post(
+        '/google/sign-in',
+        asyncRoute(async (req, res) => {
+            const body = requireJsonObject(req);
+            const metadata = requestMetadata(req);
+
+            const result = await googleAccountAuthService.signInWithGoogle({
+                ...metadata,
+                idToken: body.idToken,
+                nonce: body.nonce,
+            });
+
+            return res
+                .status(result.account.isNewAccount ? 201 : 200)
+                .json(signInResponse(result));
+        })
+    );
+
     router.post(
         '/session/refresh',
         asyncRoute(async (req, res) => {
@@ -430,6 +461,9 @@ export function createAccountAuthRouter(
         })
     );
 
+    // Account deletion is still the established iOS/Apple reauthentication
+    // path. Android does not call these endpoints until a Google reauth deletion
+    // path is added; this prevents an Android account from invoking Apple auth.
     router.post(
         '/deletion/challenge',
         asyncRoute(async (req, res) => {
