@@ -20,6 +20,12 @@ const linked = {
     audience: 'com.bhernaurd.theagora.web',
 };
 
+function isExactAudienceLookup(text) {
+    return text.includes('WHERE ai.issuer = $1') &&
+        text.includes('AND ai.audience = $2') &&
+        text.includes('AND ai.subject = $3');
+}
+
 test('a new Apple audience links to the existing team-scoped Agora account', async () => {
     const pool = { query: async () => ({ rows: [], rowCount: 0 }) };
     const repository = createCrossPlatformAccountAuthRepository(pool);
@@ -27,7 +33,7 @@ test('a new Apple audience links to the existing team-scoped Agora account', asy
 
     const tx = {
         async query(text) {
-            if (text.includes('account-auth:find-apple-identity-for-update')) {
+            if (isExactAudienceLookup(text)) {
                 exactCalls += 1;
                 return exactCalls === 1
                     ? { rows: [], rowCount: 0 }
@@ -59,7 +65,7 @@ test('conflicting accounts for one team-scoped Apple subject are rejected', asyn
     const repository = createCrossPlatformAccountAuthRepository(pool);
     const tx = {
         async query(text) {
-            if (text.includes('account-auth:find-apple-identity-for-update')) {
+            if (isExactAudienceLookup(text)) {
                 return { rows: [], rowCount: 0 };
             }
             if (text.includes('account-auth:find-team-scoped-apple-identity')) {
