@@ -5,6 +5,7 @@ import test from 'node:test';
 
 import {
   buildDefaultAppClipCreatorUrl,
+  createAffiliateProgramService,
 } from '../lib/affiliateProgramService.js';
 import { fileURLToPath } from 'node:url';
 
@@ -41,15 +42,48 @@ test('handoff rollout has a dedicated migration runner that applies only 023', (
   assert.doesNotMatch(runner, /runMigrations\.js/);
 });
 
-test('generated referral links default to the production Railway host until a branded domain is routed there', () => {
+test('public creator links use the branded theagoraphilosophy.app host during App Clip rollout', () => {
   assert.match(
     routes,
-    /AFFILIATE_REFERRAL_BASE_URL[\s\S]*?https:\/\/debate-arena-backend-production\.up\.railway\.app/
+    /AFFILIATE_PUBLIC_REFERRAL_BASE_URL[\s\S]*?https:\/\/theagoraphilosophy\.app/
+  );
+  assert.match(
+    programService,
+    /appClipReferralEnabled[\s\S]*?publicReferralBaseUrl[\s\S]*?\/r\//
   );
 });
 
 
-test('live creator referral URL is a direct Apple default App Clip link with only the public creator code', () => {
+test('referral URL builder returns the branded URL only when App Clip rollout is enabled', () => {
+  const common = {
+    pool: {},
+    appAppleId: '6762416967',
+    tokenEncryptionKey: 'test-only',
+    referralBaseUrl: 'https://railway.example',
+    publicReferralBaseUrl: 'https://theagoraphilosophy.app/',
+  };
+
+  const enabled = createAffiliateProgramService({
+    ...common,
+    appClipReferralEnabled: true,
+  });
+  assert.equal(
+    enabled.buildReferralUrl(' maxagora '),
+    'https://theagoraphilosophy.app/r/MAXAGORA'
+  );
+
+  const disabled = createAffiliateProgramService({
+    ...common,
+    appClipReferralEnabled: false,
+  });
+  assert.equal(
+    disabled.buildReferralUrl(' maxagora '),
+    'https://railway.example/r/MAXAGORA'
+  );
+});
+
+
+test('Apple default App Clip creator URL builder remains available for direct/fallback invocation', () => {
   const url = new URL(buildDefaultAppClipCreatorUrl({
     appClipBundleId: 'com.bhernaurd.TheAgora.Clip',
     creatorCode: 'maxagora',
