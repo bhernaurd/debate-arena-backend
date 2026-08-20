@@ -2674,6 +2674,10 @@ export function createAffiliateRouter(pool, options = {}) {
       options.referralBaseUrl ||
       process.env.AFFILIATE_REFERRAL_BASE_URL ||
       'https://debate-arena-backend-production.up.railway.app',
+    publicReferralBaseUrl:
+      options.publicReferralBaseUrl ||
+      process.env.AFFILIATE_PUBLIC_REFERRAL_BASE_URL ||
+      'https://theagoraphilosophy.app',
     appClipReferralEnabled: appClipHandoffEnabled,
     appClipBundleId:
       options.appClipBundleId ||
@@ -2773,42 +2777,20 @@ export function createAffiliateRouter(pool, options = {}) {
       })();
 
       if (appClipHandoffEnabled) {
-        // Do not rely on an HTTP redirect itself to invoke the App Clip. Apple
-        // requires redirecting/custom URLs to be configured as App Clip
-        // invocation URLs too. This legacy /r/CODE route is therefore a safe
-        // fallback page with an explicit user tap on Apple's default App Clip
-        // link. Newly generated partner referral URLs use the Apple link
-        // directly and skip this extra page.
+        // The branded domain is the primary App Clip invocation URL. When iOS
+        // recognizes the associated-domain experience, this HTTP route is never
+        // shown. If a browser does reach Railway, preserve click analytics,
+        // create the same cryptographic handoff, and immediately redirect to
+        // Apple's default App Clip URL. No intermediate "creator offer ready"
+        // page is shown.
         const result = await affiliateReferralHandoffService
           .createForReferral({
             code: req.params.code,
             referrerHost,
           });
-        const appClipUrl = escapeHtml(result.redirectUrl);
-        const creatorCode = escapeHtml(result.handoff.creatorCode || '');
 
         res.setHeader('Cache-Control', 'no-store');
-        return res.status(200).type('html').send(`<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="robots" content="noindex,nofollow">
-  <title>The Agora Creator Offer</title>
-  <style>
-    body{margin:0;background:#0b0b0c;color:#f5f1e8;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;min-height:100vh;place-items:center;padding:24px;box-sizing:border-box}
-    main{width:min(420px,100%);text-align:center}
-    h1{font-size:25px;margin:0 0 10px}p{color:#b8b2a7;line-height:1.5;margin:0 0 22px}
-    a{display:block;background:#d7a53f;color:#12100b;text-decoration:none;font-weight:800;padding:16px 18px;border-radius:14px}
-    small{display:block;color:#827b70;margin-top:14px}
-  </style>
-</head>
-<body><main>
-  <h1>Creator offer ready</h1>
-  <p>${creatorCode} has been applied. Open The Agora to continue with Apple.</p>
-  <a href="${appClipUrl}">Open The Agora</a>
-  <small>Subscription managed by Apple</small>
-</main></body></html>`);
+        return res.redirect(302, result.redirectUrl);
       }
 
       const result = await service.recordReferralClick({
