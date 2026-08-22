@@ -5,6 +5,12 @@ import {
     createAccountAuthService,
 } from './lib/accountAuthService.js';
 import { createGoogleAccountAuthService } from './lib/googleAccountAuthService.js';
+import {
+    createGooglePlaySubscriptionService,
+} from './lib/googlePlaySubscriptionService.js';
+import {
+    createGooglePlaySubscriptionRouter,
+} from './googlePlaySubscriptionRoutes.js';
 
 const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
 const SIGN_OUT_REASON = 'signed_out';
@@ -313,6 +319,7 @@ export function createAccountAuthRouter(
     {
         service = null,
         googleService = null,
+        googlePlayService = null,
         revokeSession = null,
         logger = console,
         now = () => Date.now(),
@@ -322,6 +329,8 @@ export function createAccountAuthRouter(
         service ?? createAccountAuthService({ pool });
     const googleAccountAuthService =
         googleService ?? createGoogleAccountAuthService({ pool });
+    const googlePlaySubscriptionService =
+        googlePlayService ?? createGooglePlaySubscriptionService({ pool });
 
     const revokeAccountSession =
         revokeSession ?? createPostgresAccountSessionRevoker(pool);
@@ -342,9 +351,26 @@ export function createAccountAuthRouter(
         }
     }
 
-    if (typeof googleAccountAuthService?.signInWithGoogle !== 'function') {
+    const requiredGoogleServiceMethods = [
+        'signInWithGoogle',
+        'createDeletionChallenge',
+        'deleteAccount',
+    ];
+
+    for (const method of requiredGoogleServiceMethods) {
+        if (typeof googleAccountAuthService?.[method] !== 'function') {
+            throw new Error(
+                `Google account authentication service is missing ${method}().`
+            );
+        }
+    }
+
+    if (
+        !googlePlaySubscriptionService ||
+        typeof googlePlaySubscriptionService.syncPurchase !== 'function'
+    ) {
         throw new Error(
-            'Google account authentication service is missing signInWithGoogle().'
+            'Google Play subscription service is missing syncPurchase().'
         );
     }
 
@@ -364,6 +390,14 @@ export function createAccountAuthRouter(
         res.setHeader('X-Content-Type-Options', 'nosniff');
         next();
     });
+
+    router.use(
+        createGooglePlaySubscriptionRouter({
+            service: googlePlaySubscriptionService,
+            accountAuthService,
+            logger,
+        })
+    );
 
     // iOS remains unchanged and continues using Sign in with Apple.
     router.post(
@@ -408,8 +442,8 @@ export function createAccountAuthRouter(
         })
     );
 
-    // Android intentionally has a single provider: Google. This route never
-    // queries Apple identities and never performs email-based account linking.
+    // Android intentionally has a single provider: Google. These routes never
+    // query Apple identities and never perform email-based account linking.
     router.post(
         '/google/sign-in',
         asyncRoute(async (req, res) => {
@@ -425,6 +459,59 @@ export function createAccountAuthRouter(
             return res
                 .status(result.account.isNewAccount ? 201 : 200)
                 .json(signInResponse(result));
+        })
+    );
+
+    router.post(
+        '/google/deletion/challenge',
+        asyncRoute(async (req, res) => {
+            const installationId = requireInstallationId(req);
+            const accessToken = requireBearerToken(req);
+            const authorization =
+                await accountAuthService.authorizeAccessToken({
+                    installationId,
+                    accessToken,
+                });
+
+            const challenge =
+                await googleAccountAuthService.createDeletionChallenge({
+                    installationId,
+                    accountId: authorization.accountId,
+                });
+
+            return res.status(201).json({
+                challengeId: challenge.challengeId,
+                purpose: challenge.purpose,
+                rawNonce: challenge.rawNonce,
+                nonceSha256: challenge.nonceSha256,
+                expiresAt: serializeDate(challenge.expiresAt),
+            });
+        })
+    );
+
+    router.post(
+        '/google/deletion/confirm',
+        asyncRoute(async (req, res) => {
+            const installationId = requireInstallationId(req);
+            const accessToken = requireBearerToken(req);
+            const authorization =
+                await accountAuthService.authorizeAccessToken({
+                    installationId,
+                    accessToken,
+                });
+            const body = requireJsonObject(req);
+
+            const result = await googleAccountAuthService.deleteAccount({
+                accountId: authorization.accountId,
+                installationId,
+                challengeId: body.challengeId,
+                rawNonce: body.rawNonce,
+                idToken: body.idToken,
+            });
+
+            return res.status(200).json(
+                deletionResponse(result)
+            );
         })
     );
 
@@ -461,9 +548,7 @@ export function createAccountAuthRouter(
         })
     );
 
-    // Account deletion is still the established iOS/Apple reauthentication
-    // path. Android does not call these endpoints until a Google reauth deletion
-    // path is added; this prevents an Android account from invoking Apple auth.
+    // Existing iOS account deletion remains on its Apple reauthentication path.
     router.post(
         '/deletion/challenge',
         asyncRoute(async (req, res) => {
