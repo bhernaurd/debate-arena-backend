@@ -4,6 +4,9 @@ import { AccountAuthError } from './lib/accountAuthService.js';
 import {
     GooglePlaySubscriptionError,
 } from './lib/googlePlaySubscriptionService.js';
+import {
+    createAccountAIJobRouter,
+} from './accountAIJobRoutes.js';
 
 const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
 
@@ -148,6 +151,16 @@ export function createGooglePlaySubscriptionRouter({
     }
 
     const router = express.Router();
+
+    // Android account-authenticated AI creation reuses the existing persistent
+    // ai_generation_jobs table and processor. The legacy /api/ai-jobs iOS path
+    // remains unchanged.
+    router.use(
+        createAccountAIJobRouter({
+            accountAuthService,
+            logger,
+        })
+    );
 
     // Mounted inside /api/account by server.js through createAccountAuthRouter().
     router.post(
