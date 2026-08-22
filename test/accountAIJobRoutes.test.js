@@ -121,12 +121,19 @@ async function startServer({
 }
 
 function headers(overrides = {}) {
-    return {
+    const result = {
         'Content-Type': 'application/json',
         'X-Installation-ID': INSTALLATION_ID,
         Authorization: `Bearer ${ACCESS_TOKEN}`,
-        ...overrides,
     };
+    for (const [key, value] of Object.entries(overrides)) {
+        if (value === '') {
+            delete result[key];
+        } else {
+            result[key] = value;
+        }
+    }
+    return result;
 }
 
 function body(overrides = {}) {
