@@ -149,8 +149,9 @@ export function createGooglePlaySubscriptionRouter({
 
     const router = express.Router();
 
+    // Mounted inside /api/account by server.js through createAccountAuthRouter().
     router.post(
-        '/api/google-play/sync-purchase',
+        '/google-play/sync-purchase',
         async (req, res) => {
             try {
                 const body = requireBody(req);
