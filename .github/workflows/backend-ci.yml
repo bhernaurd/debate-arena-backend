@@ -39,5 +39,20 @@ jobs:
       - name: Run syntax checks
         run: npm run check
 
+      - name: Test Google Play verifier
+        run: node --test test/googlePlaySubscriptionService.test.js
+
+      - name: Test Google Play account route
+        run: node --test test/googlePlaySubscriptionRoutes.test.js
+
+      - name: Test unified account Pro access
+        run: node --test test/accountProAccessService.test.js test/accountProAccessGooglePlay.test.js
+
+      - name: Test account authentication integration
+        run: node --test test/accountAuthRoutes.test.js test/accountAuthServer.test.js
+
+      - name: Test authenticated Android AI jobs
+        run: node --test test/accountAIJobRoutes.test.js
+
       - name: Run automated tests
         run: npm test
