@@ -1,10 +1,12 @@
 import express from 'express';
+import pg from 'pg';
 
 import {
     AccountAuthError,
 } from './lib/accountAuthService.js';
 import {
     AccountProAccessError,
+    createAccountProAccessService,
 } from './lib/accountProAccessService.js';
 import {
     ExpandedAgoraAccessError,
@@ -13,6 +15,22 @@ import {
 import {
     processAIJob,
 } from './aiJobs.js';
+
+const { Pool } = pg;
+
+const sharedAccountAIPool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_URL?.includes('railway')
+        ? { rejectUnauthorized: false }
+        : false,
+});
+
+sharedAccountAIPool.on('error', (error) => {
+    console.error(
+        '[AccountAIJobs] Postgres pool error:',
+        error.message
+    );
+});
 
 const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
 const USER_ID_RE = /^[A-Za-z0-9-]{8,128}$/;
@@ -270,9 +288,9 @@ function publicError(error) {
 }
 
 export function createAccountAIJobRouter({
-    pool,
+    pool = sharedAccountAIPool,
     accountAuthService,
-    proAccessService,
+    proAccessService = null,
     processJob = processAIJob,
     logger = console,
 } = {}) {
@@ -292,9 +310,12 @@ export function createAccountAIJobRouter({
             'accountAuthService.authorizeAccessToken() is required.'
         );
     }
+    const resolvedProAccessService =
+        proAccessService ??
+        createAccountProAccessService({ pool });
     if (
-        !proAccessService ||
-        typeof proAccessService.getCurrentAccess !== 'function'
+        !resolvedProAccessService ||
+        typeof resolvedProAccessService.getCurrentAccess !== 'function'
     ) {
         throw new Error(
             'proAccessService.getCurrentAccess() is required.'
@@ -386,7 +407,7 @@ export function createAccountAIJobRouter({
             let verification;
             try {
                 const access =
-                    await proAccessService.getCurrentAccess({
+                    await resolvedProAccessService.getCurrentAccess({
                         accountId:
                             authorization.accountId,
                     });
