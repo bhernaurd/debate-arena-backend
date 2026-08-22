@@ -101,3 +101,28 @@ CREATE INDEX google_play_subscription_entitlements_product_idx
 
 COMMENT ON TABLE google_play_subscription_entitlements IS
 'Server-verified Android subscription entitlements. Raw Google Play purchase tokens are AES-GCM encrypted at rest and are never returned to clients.';
+
+-- Account deletion keeps an accounts tombstone instead of deleting the parent
+-- row, so ON DELETE CASCADE cannot clean these encrypted purchase tokens. This
+-- trigger erases every stored Google Play entitlement in the same transaction
+-- that transitions the account to its final deleted state. It covers both the
+-- Apple and Google deletion paths without coupling either service to migration 026.
+CREATE OR REPLACE FUNCTION purge_google_play_entitlements_for_deleted_account()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.status = 'deleted' AND OLD.status IS DISTINCT FROM 'deleted' THEN
+        DELETE FROM google_play_subscription_entitlements
+        WHERE account_id = NEW.id;
+    END IF;
+
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER accounts_purge_google_play_entitlements_after_delete_state
+AFTER UPDATE OF status ON accounts
+FOR EACH ROW
+WHEN (NEW.status = 'deleted')
+EXECUTE FUNCTION purge_google_play_entitlements_for_deleted_account();
