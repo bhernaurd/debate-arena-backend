@@ -293,14 +293,11 @@ test('stale stored entitlement is reverified with Google before account Pro acce
 });
 
 test('same Google Play token cannot be reassigned to a second Agora account', async () => {
-    const fixture = createService();
-    await sync(fixture.service);
-    const stored = [...fixture.repository.rows.values()][0];
-    stored.account_id = OTHER_ACCOUNT_ID;
-    fixture.repository.rows.set(
-        stored.purchase_token_hash,
-        stored
-    );
+    const repository = createMemoryRepository();
+    repository.findByTokenHashForUpdate = async () => ({
+        account_id: OTHER_ACCOUNT_ID,
+    });
+    const fixture = createService({ repository });
 
     await assert.rejects(
         () => sync(fixture.service),
@@ -314,4 +311,5 @@ test('same Google Play token cannot be reassigned to a second Agora account', as
             return true;
         }
     );
+    assert.equal(repository.rows.size, 0);
 });
