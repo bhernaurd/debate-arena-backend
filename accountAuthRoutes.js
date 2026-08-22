@@ -5,6 +5,12 @@ import {
     createAccountAuthService,
 } from './lib/accountAuthService.js';
 import { createGoogleAccountAuthService } from './lib/googleAccountAuthService.js';
+import {
+    createGooglePlaySubscriptionService,
+} from './lib/googlePlaySubscriptionService.js';
+import {
+    createGooglePlaySubscriptionRouter,
+} from './googlePlaySubscriptionRoutes.js';
 
 const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
 const SIGN_OUT_REASON = 'signed_out';
@@ -313,6 +319,7 @@ export function createAccountAuthRouter(
     {
         service = null,
         googleService = null,
+        googlePlayService = null,
         revokeSession = null,
         logger = console,
         now = () => Date.now(),
@@ -322,6 +329,8 @@ export function createAccountAuthRouter(
         service ?? createAccountAuthService({ pool });
     const googleAccountAuthService =
         googleService ?? createGoogleAccountAuthService({ pool });
+    const googlePlaySubscriptionService =
+        googlePlayService ?? createGooglePlaySubscriptionService({ pool });
 
     const revokeAccountSession =
         revokeSession ?? createPostgresAccountSessionRevoker(pool);
@@ -356,6 +365,15 @@ export function createAccountAuthRouter(
         }
     }
 
+    if (
+        !googlePlaySubscriptionService ||
+        typeof googlePlaySubscriptionService.syncPurchase !== 'function'
+    ) {
+        throw new Error(
+            'Google Play subscription service is missing syncPurchase().'
+        );
+    }
+
     if (typeof revokeAccountSession !== 'function') {
         throw new Error('revokeSession must be a function.');
     }
@@ -372,6 +390,14 @@ export function createAccountAuthRouter(
         res.setHeader('X-Content-Type-Options', 'nosniff');
         next();
     });
+
+    router.use(
+        createGooglePlaySubscriptionRouter({
+            service: googlePlaySubscriptionService,
+            accountAuthService,
+            logger,
+        })
+    );
 
     // iOS remains unchanged and continues using Sign in with Apple.
     router.post(
