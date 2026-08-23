@@ -344,6 +344,18 @@ async function upsertPushToken(pool, {
                 platform = EXCLUDED.platform,
                 timezone = EXCLUDED.timezone,
                 notifications_enabled = EXCLUDED.notifications_enabled,
+                last_completed_challenge_id = CASE
+                    WHEN EXCLUDED.platform = 'android'
+                         AND push_tokens.user_id IS DISTINCT FROM EXCLUDED.user_id
+                    THEN NULL
+                    ELSE push_tokens.last_completed_challenge_id
+                END,
+                last_completed_challenge_date = CASE
+                    WHEN EXCLUDED.platform = 'android'
+                         AND push_tokens.user_id IS DISTINCT FROM EXCLUDED.user_id
+                    THEN NULL
+                    ELSE push_tokens.last_completed_challenge_date
+                END,
                 user_id = CASE
                     WHEN EXCLUDED.platform = 'android' THEN EXCLUDED.user_id
                     ELSE COALESCE(EXCLUDED.user_id, push_tokens.user_id)
@@ -746,7 +758,7 @@ export function createPushRouter(pool, { accountAuthService = null } = {}) {
             return res.json({ count: list.length, tokens: list });
         } catch (err) {
             console.error('[Push] Token list error:', err.message);
-            return res.status(500).json({ error: 'Failed to list tokens.' });
+            return res.status(500).json({ error: 'Failed to list push tokens.' });
         }
     });
 
