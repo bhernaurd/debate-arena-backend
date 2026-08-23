@@ -3,9 +3,44 @@
 --
 -- The existing App Store persistence path intentionally remains unchanged.
 -- Apple ONE_TIME_CHARGE transactions flow through the same verified transaction
--- tables as subscriptions. This BEFORE trigger normalizes the canonical
--- entitlement row so the rest of the backend sees one clean Agora Pro model:
--- monthly, annual, or lifetime.
+-- tables as subscriptions. This migration gives the dashboard/reporting layer
+-- explicit source/recurrence fields and normalizes Lifetime into the same
+-- canonical Agora Pro entitlement table used by monthly and annual access.
+
+ALTER TABLE subscription_entitlements
+ADD COLUMN IF NOT EXISTS pro_access_source TEXT
+GENERATED ALWAYS AS (
+    CASE product_id
+        WHEN 'agora_pro_monthly' THEN 'monthly'
+        WHEN 'agora_pro_yearly' THEN 'annual'
+        WHEN 'agora_pro_lifetime' THEN 'lifetime'
+        ELSE 'unknown'
+    END
+) STORED;
+
+ALTER TABLE subscription_entitlements
+ADD COLUMN IF NOT EXISTS is_recurring_pro BOOLEAN
+GENERATED ALWAYS AS (
+    product_id IN (
+        'agora_pro_monthly',
+        'agora_pro_yearly'
+    )
+) STORED;
+
+ALTER TABLE subscription_entitlements
+ADD COLUMN IF NOT EXISTS is_lifetime_pro BOOLEAN
+GENERATED ALWAYS AS (
+    product_id = 'agora_pro_lifetime'
+) STORED;
+
+CREATE INDEX IF NOT EXISTS
+    subscription_entitlements_pro_source_idx
+ON subscription_entitlements (
+    environment,
+    pro_access_source,
+    status,
+    updated_at DESC
+);
 
 CREATE OR REPLACE FUNCTION normalize_agora_lifetime_pro_entitlement()
 RETURNS TRIGGER
@@ -86,6 +121,15 @@ BEGIN
     END IF;
 END
 $$;
+
+COMMENT ON COLUMN subscription_entitlements.pro_access_source IS
+    'Canonical Agora Pro source: monthly, annual, lifetime, or unknown.';
+
+COMMENT ON COLUMN subscription_entitlements.is_recurring_pro IS
+    'True only for monthly/annual auto-renewable Agora Pro products.';
+
+COMMENT ON COLUMN subscription_entitlements.is_lifetime_pro IS
+    'True only for the private permanent agora_pro_lifetime non-consumable.';
 
 COMMENT ON FUNCTION normalize_agora_lifetime_pro_entitlement() IS
     'Normalizes agora_pro_lifetime as permanent non-recurring Pro access while preserving Apple refund/revocation authority.';
