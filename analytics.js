@@ -95,7 +95,7 @@ function isEntitlementUsable(row) {
     : null;
   const graceExpiresAt = row.grace_period_expires_date
     ? new Date(row.grace_period_expires_date).getTime()
-    : null;
+    : expiresAt;
 
   if (status === 'trial' || status === 'active') {
     return expiresAt !== null && expiresAt > now;
@@ -126,36 +126,69 @@ export function createAnalyticsRouter(pool, options = {}) {
   async function subscriptionContext(userId) {
     const result = await pool.query(
       `
-      SELECT
-        se.status,
-        se.is_trial,
-        se.product_id,
-        se.environment,
-        se.expires_date,
-        se.grace_period_expires_date,
-        se.auto_renew_enabled,
-        COALESCE(se.pricing_cohort, 'unknown') AS pricing_cohort
-      FROM subscription_entitlements se
-      WHERE se.user_id = $1
-         OR EXISTS (
-           SELECT 1
-           FROM subscription_installation_links link
-           WHERE link.original_transaction_id = se.original_transaction_id
-             AND link.environment = se.environment
-             AND link.user_id = $1
-         )
+      WITH candidates AS (
+        SELECT
+          se.status,
+          se.is_trial,
+          se.product_id,
+          se.environment,
+          se.expires_date,
+          se.grace_period_expires_date,
+          se.auto_renew_enabled,
+          COALESCE(se.pricing_cohort, 'unknown') AS pricing_cohort,
+          'app_store'::text AS store_source,
+          (se.environment = 'Production') AS is_production,
+          se.updated_at
+        FROM subscription_entitlements se
+        WHERE se.user_id = $1
+           OR EXISTS (
+             SELECT 1
+             FROM subscription_installation_links link
+             WHERE link.original_transaction_id = se.original_transaction_id
+               AND link.environment = se.environment
+               AND link.user_id = $1
+           )
+
+        UNION ALL
+
+        SELECT
+          gp.status,
+          gp.is_trial,
+          gp.product_id,
+          'GooglePlay'::text AS environment,
+          gp.expiry_time AS expires_date,
+          CASE
+            WHEN gp.status = 'grace_period' THEN gp.expiry_time
+            ELSE NULL
+          END AS grace_period_expires_date,
+          gp.auto_renew_enabled,
+          COALESCE(gp.pricing_cohort, 'unknown') AS pricing_cohort,
+          'google_play'::text AS store_source,
+          (NOT gp.test_purchase) AS is_production,
+          gp.updated_at
+        FROM google_play_subscription_entitlements gp
+        WHERE EXISTS (
+          SELECT 1
+          FROM account_installations ai
+          WHERE ai.account_id = gp.account_id
+            AND ai.installation_id = $1
+            AND ai.unlinked_at IS NULL
+        )
+      )
+      SELECT *
+      FROM candidates
       ORDER BY
         CASE
-          WHEN se.status IN ('trial', 'active')
-            AND se.expires_date > NOW()
+          WHEN status IN ('trial', 'active')
+            AND expires_date > NOW()
             THEN 0
-          WHEN se.status = 'grace_period'
-            AND se.grace_period_expires_date > NOW()
+          WHEN status = 'grace_period'
+            AND COALESCE(grace_period_expires_date, expires_date) > NOW()
             THEN 0
           ELSE 1
         END,
-        CASE WHEN se.environment = 'Production' THEN 0 ELSE 1 END,
-        se.updated_at DESC
+        CASE WHEN is_production THEN 0 ELSE 1 END,
+        updated_at DESC
       LIMIT 1
       `,
       [userId]
@@ -177,12 +210,13 @@ export function createAnalyticsRouter(pool, options = {}) {
       subscriptionStatus: entitlement?.status || 'none',
       subscriptionProductId: entitlement?.product_id || null,
       subscriptionEnvironment: entitlement?.environment || null,
+      subscriptionStoreSource: entitlement?.store_source || null,
       subscriptionPricingCohort:
         entitlement?.pricing_cohort || 'unknown',
       subscriptionAutoRenewEnabled:
         entitlement?.auto_renew_enabled ?? null,
       revenueEligible:
-        entitlement?.environment === 'Production' &&
+        entitlement?.is_production === true &&
         analyticsAccessTier === 'paid_pro',
       analyticsVersion: 'july31_analytics_v1',
       pricingCohortAnalyticsVersion: 'founding_pricing_v1',
@@ -357,14 +391,66 @@ export function createAnalyticsRouter(pool, options = {}) {
       );
 
       const subscriptionsQ = pool.query(
-        `SELECT
+        `WITH normalized_entitlements AS (
+           SELECT
+             se.status,
+             se.is_trial,
+             se.product_id,
+             se.environment,
+             se.expires_date,
+             se.grace_period_expires_date,
+             se.auto_renew_enabled,
+             COALESCE(se.pricing_cohort, 'unknown') AS pricing_cohort,
+             'app_store'::text AS store_source
+           FROM subscription_entitlements se
+           WHERE NOT EXISTS (
+             SELECT 1
+             FROM excluded_analytics_users x
+             WHERE x.user_id = se.user_id
+                OR EXISTS (
+                  SELECT 1
+                  FROM subscription_installation_links link
+                  WHERE link.original_transaction_id = se.original_transaction_id
+                    AND link.environment = se.environment
+                    AND link.user_id = x.user_id
+                )
+           )
+
+           UNION ALL
+
+           SELECT
+             gp.status,
+             gp.is_trial,
+             gp.product_id,
+             CASE
+               WHEN gp.test_purchase THEN 'Sandbox'
+               ELSE 'Production'
+             END AS environment,
+             gp.expiry_time AS expires_date,
+             CASE
+               WHEN gp.status = 'grace_period' THEN gp.expiry_time
+               ELSE NULL
+             END AS grace_period_expires_date,
+             gp.auto_renew_enabled,
+             COALESCE(gp.pricing_cohort, 'unknown') AS pricing_cohort,
+             'google_play'::text AS store_source
+           FROM google_play_subscription_entitlements gp
+           WHERE NOT EXISTS (
+             SELECT 1
+             FROM account_installations ai
+             JOIN excluded_analytics_users x
+               ON x.user_id = ai.installation_id
+             WHERE ai.account_id = gp.account_id
+           )
+         )
+         SELECT
            COUNT(*) FILTER (
              WHERE environment = 'Production'
                AND status IN ('trial', 'grace_period')
                AND is_trial = true
                AND (
                  (status = 'trial' AND expires_date > NOW()) OR
-                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
                )
            ) AS active_trials,
            COUNT(*) FILTER (
@@ -373,7 +459,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND is_trial = false
                AND (
                  (status = 'active' AND expires_date > NOW()) OR
-                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
                )
            ) AS active_paid_subscribers,
            COUNT(*) FILTER (
@@ -383,7 +469,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND is_trial = false
                AND (
                  (status = 'active' AND expires_date > NOW()) OR
-                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
                )
            ) AS paid_monthly,
            COUNT(*) FILTER (
@@ -393,7 +479,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND is_trial = false
                AND (
                  (status = 'active' AND expires_date > NOW()) OR
-                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
                )
            ) AS paid_yearly,
            COUNT(*) FILTER (
@@ -403,7 +489,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND is_trial = true
                AND (
                  (status = 'trial' AND expires_date > NOW()) OR
-                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
                )
            ) AS active_founding_trials,
            COUNT(*) FILTER (
@@ -413,7 +499,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND is_trial = false
                AND (
                  (status = 'active' AND expires_date > NOW()) OR
-                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
                )
            ) AS active_founding_paid_subscribers,
            COUNT(*) FILTER (
@@ -424,7 +510,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND is_trial = false
                AND (
                  (status = 'active' AND expires_date > NOW()) OR
-                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
                )
            ) AS founding_paid_monthly,
            COUNT(*) FILTER (
@@ -435,7 +521,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND is_trial = false
                AND (
                  (status = 'active' AND expires_date > NOW()) OR
-                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
                )
            ) AS founding_paid_yearly,
            COUNT(*) FILTER (
@@ -445,7 +531,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND is_trial = true
                AND (
                  (status = 'trial' AND expires_date > NOW()) OR
-                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
                )
            ) AS active_standard_trials,
            COUNT(*) FILTER (
@@ -455,7 +541,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND is_trial = false
                AND (
                  (status = 'active' AND expires_date > NOW()) OR
-                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
                )
            ) AS active_standard_paid_subscribers,
            COUNT(*) FILTER (
@@ -466,7 +552,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND is_trial = false
                AND (
                  (status = 'active' AND expires_date > NOW()) OR
-                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
                )
            ) AS standard_paid_monthly,
            COUNT(*) FILTER (
@@ -477,7 +563,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND is_trial = false
                AND (
                  (status = 'active' AND expires_date > NOW()) OR
-                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
                )
            ) AS standard_paid_yearly,
            COUNT(*) FILTER (
@@ -486,7 +572,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND status IN ('active', 'trial', 'grace_period')
                AND (
                  (status IN ('trial', 'active') AND expires_date > NOW()) OR
-                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
                )
            ) AS active_unknown_cohort,
            COUNT(*) FILTER (
@@ -495,26 +581,44 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND auto_renew_enabled = false
                AND (
                  (status IN ('trial', 'active') AND expires_date > NOW()) OR
-                 (status = 'grace_period' AND grace_period_expires_date > NOW())
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
                )
            ) AS active_auto_renew_off,
            COUNT(*) FILTER (
              WHERE environment = 'Production'
                AND status = 'billing_retry'
-           ) AS billing_retry_subscriptions
-         FROM subscription_entitlements se
-         WHERE NOT EXISTS (
-           SELECT 1
-           FROM excluded_analytics_users x
-           WHERE x.user_id = se.user_id
-              OR EXISTS (
-                SELECT 1
-                FROM subscription_installation_links link
-                WHERE link.original_transaction_id = se.original_transaction_id
-                  AND link.environment = se.environment
-                  AND link.user_id = x.user_id
-              )
-         )`
+           ) AS billing_retry_subscriptions,
+           COUNT(*) FILTER (
+             WHERE store_source = 'google_play'
+               AND environment = 'Production'
+               AND status IN ('trial', 'grace_period')
+               AND is_trial = true
+               AND (
+                 (status = 'trial' AND expires_date > NOW()) OR
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
+               )
+           ) AS google_play_active_trials,
+           COUNT(*) FILTER (
+             WHERE store_source = 'google_play'
+               AND environment = 'Production'
+               AND status IN ('active', 'grace_period')
+               AND is_trial = false
+               AND (
+                 (status = 'active' AND expires_date > NOW()) OR
+                 (status = 'grace_period' AND COALESCE(grace_period_expires_date, expires_date) > NOW())
+               )
+           ) AS google_play_active_paid_subscribers,
+           COUNT(*) FILTER (
+             WHERE store_source = 'google_play'
+               AND environment = 'Production'
+               AND status = 'on_hold'
+           ) AS google_play_on_hold_subscriptions,
+           COUNT(*) FILTER (
+             WHERE store_source = 'google_play'
+               AND environment = 'Production'
+               AND status = 'paused'
+           ) AS google_play_paused_subscriptions
+         FROM normalized_entitlements`
       );
 
       const retentionQ = pool.query(
