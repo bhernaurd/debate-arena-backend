@@ -10,6 +10,10 @@ CREATE TABLE google_play_subscription_entitlements (
         REFERENCES accounts(id)
         ON DELETE CASCADE,
 
+    ownership_status TEXT NOT NULL DEFAULT 'active'
+        CHECK (ownership_status IN ('active', 'released')),
+    released_at TIMESTAMPTZ,
+
     package_name TEXT NOT NULL,
     product_id TEXT NOT NULL,
     base_plan_id TEXT,
@@ -61,6 +65,10 @@ CREATE TABLE google_play_subscription_entitlements (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
+    CHECK (
+        (ownership_status = 'active' AND released_at IS NULL)
+        OR ownership_status = 'released'
+    ),
     CHECK (CHAR_LENGTH(BTRIM(package_name)) BETWEEN 1 AND 255),
     CHECK (CHAR_LENGTH(BTRIM(product_id)) BETWEEN 1 AND 200),
     CHECK (base_plan_id IS NULL OR CHAR_LENGTH(BTRIM(base_plan_id)) BETWEEN 1 AND 200),
@@ -75,6 +83,7 @@ CREATE TABLE google_play_subscription_entitlements (
 CREATE INDEX google_play_subscription_entitlements_account_idx
     ON google_play_subscription_entitlements (
         account_id,
+        ownership_status,
         status,
         expiry_time DESC
     );
@@ -84,14 +93,16 @@ CREATE INDEX google_play_subscription_entitlements_active_idx
         account_id,
         expiry_time DESC
     )
-    WHERE status IN ('trial', 'active', 'grace_period');
+    WHERE ownership_status = 'active'
+      AND status IN ('trial', 'active', 'grace_period');
 
 CREATE INDEX google_play_subscription_entitlements_product_idx
     ON google_play_subscription_entitlements (
         product_id,
+        ownership_status,
         status,
         updated_at DESC
     );
 
 COMMENT ON TABLE google_play_subscription_entitlements IS
-    'Verified Google Play subscription state mapped to an authenticated Agora account. Purchase tokens are represented only by SHA-256 hashes.';
+    'Verified Google Play subscription state mapped to an authenticated Agora account. Ownership can be released on account deletion so a valid Play subscription can later be reclaimed. Purchase tokens are represented only by SHA-256 hashes.';
