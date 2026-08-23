@@ -18,13 +18,14 @@ ALTER TABLE account_deletion_requests
 
 -- Google Play subscription rows intentionally contain account ownership as
 -- part of the verified record. Authenticated Android AI jobs also gain an
--- account_id once account-AI ownership support is installed. When an account is
--- permanently deleted, remove both kinds of account-bound rows so the deleted
--- account retains neither purchase ownership nor persistent AI transcript data.
+-- account_id once account-AI ownership support is installed. Push registrations
+-- may carry the Agora account in user_id while retaining installation/token
+-- state independently. When an account is permanently deleted, release each
+-- account-bound surface without deleting device-level push configuration.
 --
--- This trigger is safe to deploy before either Android migration: both tables
--- and the AI-job account_id column are resolved dynamically at deletion time.
--- Cleanup simply becomes a no-op until the corresponding support is installed.
+-- This trigger is migration-order safe: optional Android tables/columns are
+-- resolved dynamically at deletion time. Cleanup becomes a no-op until the
+-- corresponding support exists.
 CREATE OR REPLACE FUNCTION release_google_play_on_account_deletion()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -51,6 +52,46 @@ BEGIN
             USING NEW.id;
     END IF;
 
+    IF
+        to_regclass('public.push_tokens') IS NOT NULL
+        AND EXISTS (
+            SELECT 1
+            FROM pg_attribute
+            WHERE attrelid = to_regclass('public.push_tokens')
+              AND attname = 'user_id'
+              AND NOT attisdropped
+        )
+    THEN
+        IF
+            EXISTS (
+                SELECT 1
+                FROM pg_attribute
+                WHERE attrelid = to_regclass('public.push_tokens')
+                  AND attname = 'last_completed_challenge_id'
+                  AND NOT attisdropped
+            )
+            AND EXISTS (
+                SELECT 1
+                FROM pg_attribute
+                WHERE attrelid = to_regclass('public.push_tokens')
+                  AND attname = 'last_completed_challenge_date'
+                  AND NOT attisdropped
+            )
+        THEN
+            EXECUTE
+                'UPDATE public.push_tokens
+                 SET user_id = NULL,
+                     last_completed_challenge_id = NULL,
+                     last_completed_challenge_date = NULL
+                 WHERE user_id = $1'
+                USING NEW.id;
+        ELSE
+            EXECUTE
+                'UPDATE public.push_tokens SET user_id = NULL WHERE user_id = $1'
+                USING NEW.id;
+        END IF;
+    END IF;
+
     RETURN NEW;
 END;
 $$;
@@ -70,4 +111,4 @@ COMMENT ON TABLE account_deletion_requests IS
     'Account-deletion workflow for iOS, Android, support, and Apple notification initiated requests.';
 
 COMMENT ON FUNCTION release_google_play_on_account_deletion() IS
-    'Removes account-bound Google Play subscription rows and authenticated Android AI-job transcript rows when an Agora account is permanently deleted, when those Android support tables/columns are installed.';
+    'Removes account-bound Google Play subscription and authenticated Android AI-job rows, and detaches push ownership/completion state, when an Agora account is permanently deleted. Optional Android tables/columns are handled dynamically.';
