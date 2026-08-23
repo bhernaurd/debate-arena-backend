@@ -1,5 +1,6 @@
 import express from 'express';
 
+import { createGooglePlayNotificationRouter } from './googlePlayNotificationRoutes.js';
 import {
     AccountAuthError,
     createAccountAuthService,
@@ -460,6 +461,14 @@ export function createAccountAuthRouter(
         res.setHeader('X-Content-Type-Options', 'nosniff');
         next();
     });
+
+    // Pub/Sub uses its own Google OIDC service identity. Keeping RTDN under the
+    // Google Play namespace avoids coupling server-to-server lifecycle updates
+    // to an Agora user session while preserving one production route family.
+    router.use(
+        '/google-play',
+        createGooglePlayNotificationRouter(pool, { logger })
+    );
 
     // iOS remains unchanged and continues using Sign in with Apple.
     router.post(
