@@ -6,7 +6,7 @@
 // APNs alerts with Telegram fallback, so notification delivery can never make
 // Apple's webhook processing fail.
 
-import './env.js';
+import './subscriptionAdminEnv.js';
 
 import pg from 'pg';
 import {
