@@ -14,7 +14,7 @@ const PACKAGE_NAME = 'com.bhernaurd.theagora';
 const PURCHASE_TOKEN = 'purchase-token-sensitive-value';
 const PRODUCT_ID = 'agora_pro_yearly';
 const NOW_MS = Date.UTC(2026, 7, 23, 4, 0, 0);
-const EXPIRY = '2027-08-23T04:00:00Z';
+const EXPIRY = '2027-08-23T04:00:00.000Z';
 
 function sha256(value) {
     return crypto.createHash('sha256')
@@ -155,6 +155,31 @@ function syncInput(overrides = {}) {
     };
 }
 
+function lifecyclePublisher(subscriptionState) {
+    return makePublisherService({
+        async getSubscription() {
+            return {
+                subscriptionState,
+                acknowledgementState:
+                    'ACKNOWLEDGEMENT_STATE_PENDING',
+                externalAccountIdentifiers: {
+                    obfuscatedExternalAccountId: ACCOUNT_PLAY_ID,
+                },
+                lineItems: [
+                    {
+                        productId: PRODUCT_ID,
+                        expiryTime: EXPIRY,
+                        offerDetails: {
+                            basePlanId: 'yearly',
+                            offerId: 'founding',
+                        },
+                    },
+                ],
+            };
+        },
+    });
+}
+
 test('verifies, persists, then acknowledges an entitled Google Play purchase', async () => {
     const pool = makePool();
     const publisher = makePublisherService();
@@ -288,30 +313,43 @@ test('prevents a verified purchase token from moving to another Agora account', 
     assert.equal(publisher.calls.acknowledge.length, 0);
 });
 
+test('keeps canceled-but-unexpired Google Play access active through expiry', async () => {
+    const pool = makePool();
+    const publisher = lifecyclePublisher('SUBSCRIPTION_STATE_CANCELED');
+    const service = createGooglePlaySubscriptionService({
+        pool,
+        accountAuthService: makeAccountAuthService(),
+        publisherService: publisher.service,
+        now: () => NOW_MS,
+    });
+
+    const result = await service.syncPurchase(syncInput());
+
+    assert.equal(result.entitlement.isPro, true);
+    assert.equal(result.acknowledged, true);
+    assert.equal(publisher.calls.acknowledge.length, 1);
+});
+
+test('keeps Google Play billing grace-period access active through expiry', async () => {
+    const pool = makePool();
+    const publisher = lifecyclePublisher('SUBSCRIPTION_STATE_IN_GRACE_PERIOD');
+    const service = createGooglePlaySubscriptionService({
+        pool,
+        accountAuthService: makeAccountAuthService(),
+        publisherService: publisher.service,
+        now: () => NOW_MS,
+    });
+
+    const result = await service.syncPurchase(syncInput());
+
+    assert.equal(result.entitlement.isPro, true);
+    assert.equal(result.acknowledged, true);
+    assert.equal(publisher.calls.acknowledge.length, 1);
+});
+
 test('does not grant Pro or acknowledge an on-hold subscription', async () => {
     const pool = makePool();
-    const publisher = makePublisherService({
-        async getSubscription() {
-            return {
-                subscriptionState: 'SUBSCRIPTION_STATE_ON_HOLD',
-                acknowledgementState:
-                    'ACKNOWLEDGEMENT_STATE_PENDING',
-                externalAccountIdentifiers: {
-                    obfuscatedExternalAccountId: ACCOUNT_PLAY_ID,
-                },
-                lineItems: [
-                    {
-                        productId: PRODUCT_ID,
-                        expiryTime: EXPIRY,
-                        offerDetails: {
-                            basePlanId: 'yearly',
-                            offerId: 'founding',
-                        },
-                    },
-                ],
-            };
-        },
-    });
+    const publisher = lifecyclePublisher('SUBSCRIPTION_STATE_ON_HOLD');
     const service = createGooglePlaySubscriptionService({
         pool,
         accountAuthService: makeAccountAuthService(),
@@ -324,4 +362,27 @@ test('does not grant Pro or acknowledge an on-hold subscription', async () => {
     assert.equal(result.entitlement.isPro, false);
     assert.equal(result.acknowledged, false);
     assert.equal(publisher.calls.acknowledge.length, 0);
+});
+
+test('rejects overlong purchase tokens before calling Google Play', async () => {
+    const pool = makePool();
+    const publisher = makePublisherService();
+    const service = createGooglePlaySubscriptionService({
+        pool,
+        accountAuthService: makeAccountAuthService(),
+        publisherService: publisher.service,
+        now: () => NOW_MS,
+    });
+
+    await assert.rejects(
+        service.syncPurchase(syncInput({
+            purchaseToken: 'x'.repeat(4097),
+        })),
+        (error) => {
+            assert.equal(error.code, 'invalid_google_play_purchase');
+            assert.equal(error.status, 400);
+            return true;
+        }
+    );
+    assert.equal(publisher.calls.get.length, 0);
 });
