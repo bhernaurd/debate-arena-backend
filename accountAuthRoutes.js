@@ -1,10 +1,20 @@
 import express from 'express';
 
+import { createAccountAIJobRouter } from './accountAIJobRoutes.js';
+import { createGooglePlayNotificationRouter } from './googlePlayNotificationRoutes.js';
 import {
     AccountAuthError,
     createAccountAuthService,
 } from './lib/accountAuthService.js';
+import {
+    AccountProAccessError,
+    createAccountProAccessService,
+} from './lib/accountProAccessService.js';
 import { createGoogleAccountAuthService } from './lib/googleAccountAuthService.js';
+import {
+    GooglePlaySubscriptionError,
+    createGooglePlaySubscriptionService,
+} from './lib/googlePlaySubscriptionService.js';
 
 const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
 const SIGN_OUT_REASON = 'signed_out';
@@ -197,10 +207,62 @@ function deletionResponse(result) {
     };
 }
 
+function subscriptionEntitlementResponse(result) {
+    const entitlement = result.entitlement;
+
+    return {
+        success: true,
+        accountId: result.accountId,
+        isPro: Boolean(result.hasProAccess),
+        checkedAt: serializeDate(result.checkedAt),
+        entitlement: entitlement
+            ? {
+                productId: entitlement.productId,
+                status: entitlement.status,
+                isTrial: Boolean(entitlement.isTrial),
+                accessExpiresAt: serializeDate(
+                    entitlement.accessExpiresAt
+                ),
+                source:
+                    entitlement.environment === 'GooglePlay'
+                        ? 'google_play'
+                        : 'app_store',
+            }
+            : null,
+    };
+}
+
+function googlePlayErrorResponse(error) {
+    const status =
+        Number.isInteger(error?.status) &&
+        error.status >= 400 &&
+        error.status <= 599
+            ? error.status
+            : 503;
+
+    return {
+        status,
+        body: {
+            success: false,
+            error:
+                status >= 500
+                    ? 'Google Play subscription verification is temporarily unavailable.'
+                    : error.message,
+            errorCode:
+                error?.code ||
+                'google_play_subscription_unavailable',
+            retryable:
+                status >= 500 ||
+                Boolean(error?.retryable),
+        },
+    };
+}
+
 function publicError(error) {
     if (
         error instanceof AccountAuthError ||
-        error instanceof AccountAuthRouteError
+        error instanceof AccountAuthRouteError ||
+        error instanceof AccountProAccessError
     ) {
         const status = Number.isInteger(error.status)
             ? error.status
@@ -211,9 +273,14 @@ function publicError(error) {
                 status: 503,
                 body: {
                     error: {
-                        code: 'account_authentication_unavailable',
+                        code:
+                            error instanceof AccountProAccessError
+                                ? 'subscription_entitlement_unavailable'
+                                : 'account_authentication_unavailable',
                         message:
-                            'Account authentication is temporarily unavailable.',
+                            error instanceof AccountProAccessError
+                                ? 'Subscription entitlement is temporarily unavailable.'
+                                : 'Account authentication is temporarily unavailable.',
                         retryable: true,
                     },
                 },
@@ -313,6 +380,8 @@ export function createAccountAuthRouter(
     {
         service = null,
         googleService = null,
+        googlePlayService = null,
+        proAccessService = null,
         revokeSession = null,
         logger = console,
         now = () => Date.now(),
@@ -322,6 +391,20 @@ export function createAccountAuthRouter(
         service ?? createAccountAuthService({ pool });
     const googleAccountAuthService =
         googleService ?? createGoogleAccountAuthService({ pool });
+    let googlePlaySubscriptionService = googlePlayService;
+    const accountProAccessService =
+        proAccessService ?? createAccountProAccessService({ pool });
+
+    function resolvedGooglePlaySubscriptionService() {
+        if (!googlePlaySubscriptionService) {
+            googlePlaySubscriptionService =
+                createGooglePlaySubscriptionService({
+                    pool,
+                    accountAuthService,
+                });
+        }
+        return googlePlaySubscriptionService;
+    }
 
     const revokeAccountSession =
         revokeSession ?? createPostgresAccountSessionRevoker(pool);
@@ -348,6 +431,21 @@ export function createAccountAuthRouter(
         );
     }
 
+    if (
+        googlePlaySubscriptionService &&
+        typeof googlePlaySubscriptionService.syncPurchase !== 'function'
+    ) {
+        throw new Error(
+            'Google Play subscription service is missing syncPurchase().'
+        );
+    }
+
+    if (typeof accountProAccessService?.getCurrentAccess !== 'function') {
+        throw new Error(
+            'Account Pro access service is missing getCurrentAccess().'
+        );
+    }
+
     if (typeof revokeAccountSession !== 'function') {
         throw new Error('revokeSession must be a function.');
     }
@@ -364,6 +462,29 @@ export function createAccountAuthRouter(
         res.setHeader('X-Content-Type-Options', 'nosniff');
         next();
     });
+
+    // Pub/Sub uses its own Google OIDC service identity. Keeping RTDN under the
+    // Google Play namespace avoids coupling server-to-server lifecycle updates
+    // to an Agora user session while preserving one production route family.
+    router.use(
+        '/google-play',
+        createGooglePlayNotificationRouter(pool, { logger })
+    );
+
+    // Production PostgreSQL pools expose connect(); lightweight unit-test pools
+    // used by unrelated account-route tests do not. Mounting conditionally keeps
+    // those tests isolated while the account AI router itself has focused tests.
+    if (typeof pool?.connect === 'function') {
+        router.use(
+            '/ai-jobs',
+            createAccountAIJobRouter({
+                pool,
+                accountAuthService,
+                proAccessService: accountProAccessService,
+                logger,
+            })
+        );
+    }
 
     // iOS remains unchanged and continues using Sign in with Apple.
     router.post(
@@ -429,6 +550,39 @@ export function createAccountAuthRouter(
     );
 
     router.post(
+        '/google-play/sync-purchase',
+        asyncRoute(async (req, res) => {
+            const body = requireJsonObject(req);
+            const installationId = requireInstallationId(req);
+            const accessToken = requireBearerToken(req);
+
+            try {
+                const result =
+                    await resolvedGooglePlaySubscriptionService()
+                        .syncPurchase({
+                            installationId,
+                            accessToken,
+                            packageName: body.packageName,
+                            purchaseToken: body.purchaseToken,
+                            productId: body.productId,
+                            basePlanId: body.basePlanId,
+                            offerId: body.offerId,
+                            pricingCohortHint: body.pricingCohortHint,
+                            paywallSessionId: body.paywallSessionId,
+                        });
+
+                return res.status(200).json(result);
+            } catch (error) {
+                if (error instanceof GooglePlaySubscriptionError) {
+                    const response = googlePlayErrorResponse(error);
+                    return res.status(response.status).json(response.body);
+                }
+                throw error;
+            }
+        })
+    );
+
+    router.post(
         '/session/refresh',
         asyncRoute(async (req, res) => {
             const body = requireJsonObject(req);
@@ -457,6 +611,29 @@ export function createAccountAuthRouter(
 
             return res.status(200).json(
                 authorizationResponse(result)
+            );
+        })
+    );
+
+    router.get(
+        '/subscription/entitlement',
+        asyncRoute(async (req, res) => {
+            const installationId = requireInstallationId(req);
+            const accessToken = requireBearerToken(req);
+
+            const authorization =
+                await accountAuthService.authorizeAccessToken({
+                    installationId,
+                    accessToken,
+                });
+
+            const result =
+                await accountProAccessService.getCurrentAccess({
+                    accountId: authorization.accountId,
+                });
+
+            return res.status(200).json(
+                subscriptionEntitlementResponse(result)
             );
         })
     );
