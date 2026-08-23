@@ -4,6 +4,9 @@ import pg from 'pg';
 import {
     createSubscriptionAdminNotificationService,
 } from '../lib/subscriptionAdminNotificationService.js';
+import {
+    createSubscriptionAdminDatabaseAdapter,
+} from '../lib/subscriptionAdminDatabaseAdapter.js';
 
 const { Pool } = pg;
 
@@ -25,7 +28,12 @@ async function main() {
         );
     }
 
-    const service = createSubscriptionAdminNotificationService({ pool });
+    const notificationPool =
+        createSubscriptionAdminDatabaseAdapter(pool);
+
+    const service = createSubscriptionAdminNotificationService({
+        pool: notificationPool,
+    });
 
     const queued = await service.enqueueTestNotification({
         title: '🎉 Agora subscription alerts are connected',
