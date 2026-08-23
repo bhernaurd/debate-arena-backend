@@ -12,6 +12,9 @@ import pg from 'pg';
 import {
     createSubscriptionAdminNotificationService,
 } from './lib/subscriptionAdminNotificationService.js';
+import {
+    createSubscriptionAdminEventScanner,
+} from './subscriptionAdminEventScanner.js';
 
 const { Pool } = pg;
 
@@ -34,4 +37,12 @@ export const subscriptionAdminNotificationService =
         pool,
     });
 
+export const subscriptionAdminEventScanner =
+    createSubscriptionAdminEventScanner({
+        pool,
+        notificationService:
+            subscriptionAdminNotificationService,
+    });
+
 subscriptionAdminNotificationService.start();
+subscriptionAdminEventScanner.start();
