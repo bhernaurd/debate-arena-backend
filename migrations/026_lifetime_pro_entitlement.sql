@@ -62,5 +62,30 @@ UPDATE subscription_entitlements
 SET product_id = product_id
 WHERE product_id = 'agora_pro_lifetime';
 
+-- Lifetime codes are private access grants, never affiliate subscription
+-- sales. This database constraint is a final accounting safety net: even if a
+-- Lifetime Apple Offer reference name were accidentally configured to match an
+-- affiliate campaign, no recurring affiliate attribution/commission record can
+-- be created for the Lifetime product. The surrounding affiliate savepoint
+-- keeps this guard isolated from the verified Apple entitlement transaction.
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname =
+            'affiliate_subscription_attributions_no_lifetime_pro'
+    ) THEN
+        ALTER TABLE affiliate_subscription_attributions
+        ADD CONSTRAINT
+            affiliate_subscription_attributions_no_lifetime_pro
+        CHECK (
+            product_id IS NULL
+            OR product_id <> 'agora_pro_lifetime'
+        );
+    END IF;
+END
+$$;
+
 COMMENT ON FUNCTION normalize_agora_lifetime_pro_entitlement() IS
     'Normalizes agora_pro_lifetime as permanent non-recurring Pro access while preserving Apple refund/revocation authority.';
