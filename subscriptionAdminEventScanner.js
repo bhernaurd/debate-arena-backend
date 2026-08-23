@@ -5,6 +5,10 @@
 // examines events after they are safely persisted, so an APNs/Telegram outage
 // can never make Apple's webhook fail or duplicate subscription state changes.
 
+import {
+    AGORA_PRO_LIFETIME_PRODUCT_ID,
+} from './lib/agoraProProducts.js';
+
 const DEFAULT_SCAN_MS = 30_000;
 const DEFAULT_BATCH_SIZE = 100;
 const DEFAULT_MAX_BATCHES = 5;
@@ -13,6 +17,173 @@ function boundedInteger(value, defaultValue, minimum, maximum) {
     const parsed = Number.parseInt(String(value ?? ''), 10);
     if (!Number.isFinite(parsed)) return defaultValue;
     return Math.max(minimum, Math.min(maximum, parsed));
+}
+
+function cleanText(value, maxLength = 500) {
+    if (value == null) return null;
+    const text = String(value).trim();
+    if (!text) return null;
+    return text.slice(0, maxLength);
+}
+
+function shortId(value) {
+    const text = cleanText(value, 256);
+    if (!text) return null;
+    return text.length <= 12
+        ? text
+        : `${text.slice(0, 8)}…${text.slice(-4)}`;
+}
+
+function isLifetimeGrantEvent(row) {
+    return (
+        row?.product_id === AGORA_PRO_LIFETIME_PRODUCT_ID &&
+        String(row?.event_type || '').trim().toUpperCase() ===
+            'ONE_TIME_CHARGE' &&
+        String(row?.status_after || '').trim().toLowerCase() ===
+            'active'
+    );
+}
+
+async function enqueueLifetimeGrant({
+    pool,
+    row,
+    notifySandbox,
+}) {
+    const environment =
+        cleanText(row.environment, 32) || 'Production';
+
+    if (
+        environment.toLowerCase() === 'sandbox' &&
+        !notifySandbox
+    ) {
+        return {
+            queued: false,
+            reason: 'sandbox_disabled',
+        };
+    }
+
+    const notificationUUID =
+        cleanText(row.notification_uuid, 128);
+    const dedupeBase =
+        notificationUUID ||
+        cleanText(row.event_key, 256) ||
+        cleanText(row.transaction_id, 128) ||
+        'unknown';
+    const accountId = row.account_id || null;
+    const originalTransactionId =
+        cleanText(row.original_transaction_id, 128);
+    const transactionId =
+        cleanText(row.transaction_id, 128);
+    const offerIdentifier =
+        cleanText(row.offer_identifier, 200);
+    const offerType =
+        cleanText(row.offer_type, 64);
+
+    const method =
+        offerType === '3' ||
+        String(offerType || '').toUpperCase().includes('OFFER_CODE')
+            ? 'Apple Offer Code'
+            : 'Apple non-consumable purchase';
+
+    const detailLines = [
+        'Plan: Lifetime',
+        `Environment: ${environment}`,
+        'Access: Permanent',
+        `Method: ${method}`,
+    ];
+
+    if (offerIdentifier) {
+        detailLines.push(`Offer: ${offerIdentifier}`);
+    }
+
+    if (accountId) {
+        detailLines.push(`Account: ${shortId(accountId)}`);
+    }
+
+    if (originalTransactionId) {
+        detailLines.push(
+            `Original transaction: ${shortId(originalTransactionId)}`
+        );
+    }
+
+    const title = '🎁 Lifetime Agora Pro granted';
+    const body = detailLines.join(' • ').slice(0, 900);
+    const telegramText =
+        [title, '', ...detailLines].join('\n').slice(0, 3500);
+
+    const result = await pool.query(
+        `
+        INSERT INTO subscription_admin_notifications (
+            dedupe_key,
+            source,
+            notification_uuid,
+            notification_type,
+            subtype,
+            environment,
+            account_id,
+            original_transaction_id,
+            transaction_id,
+            product_id,
+            event_kind,
+            title,
+            body,
+            telegram_text,
+            payload
+        )
+        VALUES (
+            $1,
+            'app_store_notification',
+            $2,
+            $3,
+            $4,
+            $5,
+            $6::uuid,
+            $7,
+            $8,
+            $9,
+            'lifetime_granted',
+            $10,
+            $11,
+            $12,
+            $13::jsonb
+        )
+        ON CONFLICT (dedupe_key) DO NOTHING
+        RETURNING id
+        `,
+        [
+            `apple_admin:${environment}:${dedupeBase}:lifetime_granted`,
+            notificationUUID,
+            cleanText(row.event_type, 100) || 'ONE_TIME_CHARGE',
+            cleanText(row.subtype, 100),
+            environment,
+            accountId,
+            originalTransactionId,
+            transactionId,
+            AGORA_PRO_LIFETIME_PRODUCT_ID,
+            title,
+            body,
+            telegramText,
+            JSON.stringify({
+                eventKind: 'lifetime_granted',
+                productId: AGORA_PRO_LIFETIME_PRODUCT_ID,
+                entitlementSource: 'lifetime',
+                isRecurring: false,
+                isLifetime: true,
+                accountId,
+                originalTransactionId,
+                transactionId,
+                offerIdentifier,
+                method,
+            }),
+        ]
+    );
+
+    return {
+        queued: result.rowCount > 0,
+        duplicate: result.rowCount === 0,
+        id: result.rows[0]?.id || null,
+        eventKind: 'lifetime_granted',
+    };
 }
 
 export function createSubscriptionAdminEventScanner({
@@ -87,6 +258,9 @@ export function createSubscriptionAdminEventScanner({
                     transaction.app_account_token,
                     transaction.price_milliunits,
                     transaction.currency,
+                    transaction.offer_type,
+                    transaction.offer_identifier,
+                    ownership.account_id,
                     COALESCE(
                         attribution.normalized_creator_code,
                         affiliate.normalized_code
@@ -104,6 +278,11 @@ export function createSubscriptionAdminEventScanner({
                 LEFT JOIN app_store_transactions transaction
                   ON transaction.transaction_id = event.transaction_id
                  AND transaction.environment = event.environment
+                LEFT JOIN account_subscription_ownership ownership
+                  ON ownership.original_transaction_id =
+                        event.original_transaction_id
+                 AND ownership.environment = event.environment
+                 AND ownership.ownership_status = 'active'
                 LEFT JOIN affiliate_subscription_attributions attribution
                   ON attribution.original_transaction_id =
                         event.original_transaction_id
@@ -122,8 +301,14 @@ export function createSubscriptionAdminEventScanner({
             }
 
             for (const row of result.rows) {
-                const outcome =
-                    await notificationService.enqueueAppleNotification({
+                const outcome = isLifetimeGrantEvent(row)
+                    ? await enqueueLifetimeGrant({
+                        pool,
+                        row,
+                        notifySandbox:
+                            notificationService.config?.notifySandbox === true,
+                    })
+                    : await notificationService.enqueueAppleNotification({
                         notificationUUID: row.notification_uuid,
                         notificationType: row.event_type,
                         subtype: row.subtype,
