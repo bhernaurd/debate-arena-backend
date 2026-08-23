@@ -7,6 +7,7 @@ import express from 'express';
 import { createPushRouter } from '../pushRoutes.js';
 
 const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
+const ACCOUNT_ID_B = '33333333-3333-4333-8333-333333333333';
 const INSTALLATION_ID = 'android-installation-001';
 const ACCESS_TOKEN = 'aaa.bbb.ccc';
 const FCM_TOKEN = 'fcm_token_abcdefghijklmnopqrstuvwxyz_0123456789';
@@ -38,25 +39,33 @@ function createFakePool() {
                     buildNumber,
                     apnsEnvironment,
                 ] = values;
+                const existing = state.row &&
+                    state.row.install_id === installId &&
+                    state.row.apns_environment === apnsEnvironment
+                    ? state.row
+                    : null;
                 state.row = {
+                    ...(existing || {}),
                     device_token: deviceToken,
                     platform,
                     timezone,
                     notifications_enabled: notificationsEnabled,
                     install_id: installId,
-                    user_id: userId,
+                    user_id: platform === 'android'
+                        ? userId
+                        : userId ?? existing?.user_id ?? null,
                     app_version: appVersion,
                     build_number: buildNumber,
                     apns_environment: apnsEnvironment,
-                    registered_at: new Date('2026-08-22T23:00:00Z'),
+                    registered_at: existing?.registered_at || new Date('2026-08-22T23:00:00Z'),
                     updated_at: new Date('2026-08-22T23:00:00Z'),
-                    created_at: new Date('2026-08-22T23:00:00Z'),
+                    created_at: existing?.created_at || new Date('2026-08-22T23:00:00Z'),
                     last_registered_at: new Date('2026-08-22T23:00:00Z'),
-                    last_success_at: null,
+                    last_success_at: existing?.last_success_at || null,
                     last_failure_at: null,
                     failure_reason: null,
-                    last_completed_challenge_id: null,
-                    last_completed_challenge_date: null,
+                    last_completed_challenge_id: existing?.last_completed_challenge_id || null,
+                    last_completed_challenge_date: existing?.last_completed_challenge_date || null,
                 };
                 return { rowCount: 1, rows: [state.row] };
             }
@@ -92,6 +101,21 @@ function createFakePool() {
             }
             if (compact.startsWith('UPDATE push_tokens') && compact.includes('last_completed_challenge_id')) {
                 if (!state.row) return { rowCount: 0, rows: [] };
+
+                let matches = state.row.device_token === values[0];
+                if (compact.includes("AND platform = 'android'")) {
+                    matches = matches &&
+                        state.row.platform === 'android' &&
+                        state.row.install_id === values[3] &&
+                        state.row.apns_environment === values[4];
+                    if (compact.includes('AND user_id IS NULL')) {
+                        matches = matches && state.row.user_id == null;
+                    } else {
+                        matches = matches && state.row.user_id === values[5];
+                    }
+                }
+
+                if (!matches) return { rowCount: 0, rows: [] };
                 state.row = {
                     ...state.row,
                     last_completed_challenge_id: values[1],
@@ -154,6 +178,35 @@ function androidHeaders(extra = {}) {
     };
 }
 
+function anonymousAndroidHeaders(extra = {}) {
+    return {
+        'Content-Type': 'application/json',
+        'X-Installation-ID': INSTALLATION_ID,
+        ...extra,
+    };
+}
+
+function androidRegistrationBody() {
+    return {
+        platform: 'android',
+        installationId: INSTALLATION_ID,
+        pushToken: FCM_TOKEN,
+        timeZone: 'America/Chicago',
+        notificationPermissionGranted: true,
+        dailyChallengeRemindersEnabled: true,
+    };
+}
+
+function androidCompletionBody() {
+    return {
+        platform: 'android',
+        installationId: INSTALLATION_ID,
+        pushToken: FCM_TOKEN,
+        challengeId: 'daily-2026-08-22',
+        challengeDate: '2026-08-22',
+    };
+}
+
 async function readJson(response) {
     const text = await response.text();
     return text ? JSON.parse(text) : null;
@@ -211,6 +264,7 @@ test('authenticated Android registration accepts client aliases but stores serve
     assert.equal(insert.values[5], ACCOUNT_ID, 'client userId must never replace authenticated Agora account ownership');
     assert.equal(insert.values[6], '3.9-android-parity');
     assert.equal(insert.values[7], '42');
+    assert.match(insert.sql, /WHEN EXCLUDED\.platform = 'android' THEN EXCLUDED\.user_id/);
 
     const prune = fake.state.clientQueries.find(({ sql }) => sql.includes('device_token <> $1'));
     assert.ok(prune);
@@ -254,27 +308,14 @@ test('authenticated Android completion marks the challenge for server reminder s
     const registration = await fetch(`${server.baseUrl}/api/push/register`, {
         method: 'POST',
         headers: androidHeaders(),
-        body: JSON.stringify({
-            platform: 'android',
-            installationId: INSTALLATION_ID,
-            pushToken: FCM_TOKEN,
-            timeZone: 'America/Chicago',
-            notificationPermissionGranted: true,
-            dailyChallengeRemindersEnabled: true,
-        }),
+        body: JSON.stringify(androidRegistrationBody()),
     });
     assert.equal(registration.status, 200);
 
     const completion = await fetch(`${server.baseUrl}/api/push/complete-daily-challenge`, {
         method: 'POST',
         headers: androidHeaders(),
-        body: JSON.stringify({
-            platform: 'android',
-            installationId: INSTALLATION_ID,
-            pushToken: FCM_TOKEN,
-            challengeId: 'daily-2026-08-22',
-            challengeDate: '2026-08-22',
-        }),
+        body: JSON.stringify(androidCompletionBody()),
     });
     const payload = await readJson(completion);
 
@@ -283,6 +324,100 @@ test('authenticated Android completion marks the challenge for server reminder s
     assert.equal(payload.challengeId, 'daily-2026-08-22');
     assert.equal(payload.challengeDate, '2026-08-22');
     assert.equal(payload.userId, ACCOUNT_ID);
+
+    const update = server.fake.state.poolQueries.find(({ sql }) =>
+        sql.includes('last_completed_challenge_id') && sql.includes("platform = 'android'")
+    );
+    assert.ok(update);
+    assert.match(update.sql, /AND install_id = \$4/);
+    assert.match(update.sql, /AND user_id = \$6/);
+    assert.equal(update.values[3], INSTALLATION_ID);
+    assert.equal(update.values[5], ACCOUNT_ID);
+});
+
+test('anonymous Android re-registration clears the prior Agora account owner for that installation', async (t) => {
+    const server = await startServer();
+    t.after(server.close);
+
+    const authenticated = await fetch(`${server.baseUrl}/api/push/register`, {
+        method: 'POST',
+        headers: androidHeaders(),
+        body: JSON.stringify(androidRegistrationBody()),
+    });
+    assert.equal(authenticated.status, 200);
+    assert.equal(server.fake.state.row.user_id, ACCOUNT_ID);
+
+    const signedOut = await fetch(`${server.baseUrl}/api/push/register`, {
+        method: 'POST',
+        headers: anonymousAndroidHeaders(),
+        body: JSON.stringify(androidRegistrationBody()),
+    });
+    const payload = await readJson(signedOut);
+
+    assert.equal(signedOut.status, 200);
+    assert.equal(payload.userId, null);
+    assert.equal(server.fake.state.row.user_id, null);
+
+    const inserts = server.fake.state.clientQueries.filter(({ sql }) => sql.includes('INSERT INTO push_tokens'));
+    assert.equal(inserts.length, 2);
+    assert.match(inserts[1].sql, /WHEN EXCLUDED\.platform = 'android' THEN EXCLUDED\.user_id/);
+    assert.equal(inserts[1].values[5], null);
+});
+
+test('Android Daily completion cannot cross account ownership and succeeds after the new account re-registers', async (t) => {
+    let activeAccountID = ACCOUNT_ID;
+    const server = await startServer({
+        accountAuthService: makeAuthService({
+            async authorizeAccessToken() {
+                return { accountId: activeAccountID };
+            },
+        }),
+    });
+    t.after(server.close);
+
+    const registrationA = await fetch(`${server.baseUrl}/api/push/register`, {
+        method: 'POST',
+        headers: androidHeaders(),
+        body: JSON.stringify(androidRegistrationBody()),
+    });
+    assert.equal(registrationA.status, 200);
+    assert.equal(server.fake.state.row.user_id, ACCOUNT_ID);
+
+    activeAccountID = ACCOUNT_ID_B;
+    const staleCompletion = await fetch(`${server.baseUrl}/api/push/complete-daily-challenge`, {
+        method: 'POST',
+        headers: androidHeaders(),
+        body: JSON.stringify(androidCompletionBody()),
+    });
+    const stalePayload = await readJson(staleCompletion);
+
+    assert.equal(staleCompletion.status, 409);
+    assert.equal(stalePayload.success, false);
+    assert.equal(stalePayload.errorCode, 'push_registration_ownership_mismatch');
+    assert.equal(stalePayload.retryable, true);
+    assert.equal(server.fake.state.row.last_completed_challenge_id, null);
+
+    const registrationB = await fetch(`${server.baseUrl}/api/push/register`, {
+        method: 'POST',
+        headers: androidHeaders(),
+        body: JSON.stringify(androidRegistrationBody()),
+    });
+    const registrationBPayload = await readJson(registrationB);
+    assert.equal(registrationB.status, 200);
+    assert.equal(registrationBPayload.userId, ACCOUNT_ID_B);
+    assert.equal(server.fake.state.row.user_id, ACCOUNT_ID_B);
+
+    const completionB = await fetch(`${server.baseUrl}/api/push/complete-daily-challenge`, {
+        method: 'POST',
+        headers: androidHeaders(),
+        body: JSON.stringify(androidCompletionBody()),
+    });
+    const completionBPayload = await readJson(completionB);
+
+    assert.equal(completionB.status, 200);
+    assert.equal(completionBPayload.success, true);
+    assert.equal(completionBPayload.userId, ACCOUNT_ID_B);
+    assert.equal(server.fake.state.row.last_completed_challenge_id, 'daily-2026-08-22');
 });
 
 test('Android registration rejects a body installation ID that disagrees with X-Installation-ID', async (t) => {
