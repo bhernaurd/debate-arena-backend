@@ -110,3 +110,27 @@ CREATE INDEX subscription_admin_notifications_transaction_idx
 
 COMMENT ON TABLE subscription_admin_notifications IS
     'Durable APNs/Telegram delivery outbox for owner-facing subscription lifecycle alerts.';
+
+
+-- Cursor state starts at migration time so enabling the worker never replays
+-- historical App Store events as fresh owner alerts. The cursor advances after
+-- each persisted Apple event is examined, whether or not that event is alertable.
+CREATE TABLE subscription_admin_notification_state (
+    id SMALLINT PRIMARY KEY CHECK (id = 1),
+    started_at TIMESTAMPTZ NOT NULL,
+    last_scanned_event_at TIMESTAMPTZ NOT NULL,
+    last_scanned_event_key TEXT NOT NULL DEFAULT '',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO subscription_admin_notification_state (
+    id,
+    started_at,
+    last_scanned_event_at,
+    last_scanned_event_key
+)
+VALUES (1, NOW(), NOW(), '')
+ON CONFLICT (id) DO NOTHING;
+
+COMMENT ON TABLE subscription_admin_notification_state IS
+    'Singleton cursor for scanning newly persisted Apple subscription_events into the admin alert outbox without replaying historical events.';
