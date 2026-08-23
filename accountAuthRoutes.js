@@ -5,6 +5,10 @@ import {
     createAccountAuthService,
 } from './lib/accountAuthService.js';
 import { createGoogleAccountAuthService } from './lib/googleAccountAuthService.js';
+import {
+    GoogleAccountDeletionError,
+    createGoogleAccountDeletionService,
+} from './lib/googleAccountDeletionService.js';
 
 const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
 const SIGN_OUT_REASON = 'signed_out';
@@ -197,6 +201,18 @@ function deletionResponse(result) {
     };
 }
 
+function mapGoogleDeletionFailure(error) {
+    if (!(error instanceof GoogleAccountDeletionError)) return error;
+    return new AccountAuthRouteError(
+        error.code || 'account_deletion_failed',
+        error.message || 'Account deletion could not be completed.',
+        {
+            status: Number.isInteger(error.status) ? error.status : 500,
+            retryable: Boolean(error.retryable),
+        }
+    );
+}
+
 function publicError(error) {
     if (
         error instanceof AccountAuthError ||
@@ -313,6 +329,7 @@ export function createAccountAuthRouter(
     {
         service = null,
         googleService = null,
+        googleDeletionService = null,
         revokeSession = null,
         logger = console,
         now = () => Date.now(),
@@ -322,6 +339,14 @@ export function createAccountAuthRouter(
         service ?? createAccountAuthService({ pool });
     const googleAccountAuthService =
         googleService ?? createGoogleAccountAuthService({ pool });
+    let resolvedGoogleDeletion = googleDeletionService;
+
+    function googleDeletion() {
+        if (!resolvedGoogleDeletion) {
+            resolvedGoogleDeletion = createGoogleAccountDeletionService({ pool });
+        }
+        return resolvedGoogleDeletion;
+    }
 
     const revokeAccountSession =
         revokeSession ?? createPostgresAccountSessionRevoker(pool);
@@ -345,6 +370,18 @@ export function createAccountAuthRouter(
     if (typeof googleAccountAuthService?.signInWithGoogle !== 'function') {
         throw new Error(
             'Google account authentication service is missing signInWithGoogle().'
+        );
+    }
+
+    if (
+        resolvedGoogleDeletion &&
+        (
+            typeof resolvedGoogleDeletion.createChallenge !== 'function' ||
+            typeof resolvedGoogleDeletion.deleteAccount !== 'function'
+        )
+    ) {
+        throw new Error(
+            'Google account deletion service must provide createChallenge() and deleteAccount().'
         );
     }
 
@@ -429,6 +466,66 @@ export function createAccountAuthRouter(
     );
 
     router.post(
+        '/google/deletion/challenge',
+        asyncRoute(async (req, res) => {
+            const installationId = requireInstallationId(req);
+            const accessToken = requireBearerToken(req);
+            const authorization =
+                await accountAuthService.authorizeAccessToken({
+                    installationId,
+                    accessToken,
+                });
+
+            let challenge;
+            try {
+                challenge = await googleDeletion().createChallenge({
+                    accountId: authorization.accountId,
+                    installationId,
+                });
+            } catch (error) {
+                throw mapGoogleDeletionFailure(error);
+            }
+
+            return res.status(201).json({
+                challengeId: challenge.challengeId,
+                purpose: challenge.purpose,
+                rawNonce: challenge.rawNonce,
+                nonceSha256: challenge.nonceSha256,
+                expiresAt: serializeDate(challenge.expiresAt),
+            });
+        })
+    );
+
+    router.post(
+        '/google/deletion/confirm',
+        asyncRoute(async (req, res) => {
+            const installationId = requireInstallationId(req);
+            const accessToken = requireBearerToken(req);
+            const authorization =
+                await accountAuthService.authorizeAccessToken({
+                    installationId,
+                    accessToken,
+                });
+            const body = requireJsonObject(req);
+
+            let result;
+            try {
+                result = await googleDeletion().deleteAccount({
+                    accountId: authorization.accountId,
+                    installationId,
+                    challengeId: body.challengeId,
+                    rawNonce: body.rawNonce,
+                    idToken: body.idToken,
+                });
+            } catch (error) {
+                throw mapGoogleDeletionFailure(error);
+            }
+
+            return res.status(200).json(deletionResponse(result));
+        })
+    );
+
+    router.post(
         '/session/refresh',
         asyncRoute(async (req, res) => {
             const body = requireJsonObject(req);
@@ -461,9 +558,7 @@ export function createAccountAuthRouter(
         })
     );
 
-    // Account deletion is still the established iOS/Apple reauthentication
-    // path. Android does not call these endpoints until a Google reauth deletion
-    // path is added; this prevents an Android account from invoking Apple auth.
+    // Established iOS/Apple deletion path remains unchanged.
     router.post(
         '/deletion/challenge',
         asyncRoute(async (req, res) => {
