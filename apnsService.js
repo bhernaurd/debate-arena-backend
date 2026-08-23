@@ -71,8 +71,8 @@ export async function sendPush(deviceToken, title, body, data = {}) {
 
     note.topic = bundleId;
     note.payload = {
-        ...data,
         source: 'daily_challenge',
+        ...data,
     };
 
     try {
