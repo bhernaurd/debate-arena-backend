@@ -1,4 +1,4 @@
-import '../env.js';
+import '../subscriptionAdminEnv.js';
 
 import pg from 'pg';
 import {
@@ -37,7 +37,7 @@ async function main() {
 
     const queued = await service.enqueueTestNotification({
         title: '🎉 Agora subscription alerts are connected',
-        body: 'APNs is primary. Telegram is configured as fallback.',
+        body: 'Telegram subscription alerts are connected. APNs remains available as a backup.',
     });
 
     await service.kick();
