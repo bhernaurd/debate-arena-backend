@@ -38,6 +38,7 @@ function makePool() {
                 return { rows: [], rowCount: 0 };
             }
             if (
+                !text.includes('client_request_id = $1') &&
                 text.includes('id = $1') &&
                 params[0] !== storedJob.id
             ) {
