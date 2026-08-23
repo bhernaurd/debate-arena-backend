@@ -344,7 +344,10 @@ async function upsertPushToken(pool, {
                 platform = EXCLUDED.platform,
                 timezone = EXCLUDED.timezone,
                 notifications_enabled = EXCLUDED.notifications_enabled,
-                user_id = COALESCE(EXCLUDED.user_id, push_tokens.user_id),
+                user_id = CASE
+                    WHEN EXCLUDED.platform = 'android' THEN EXCLUDED.user_id
+                    ELSE COALESCE(EXCLUDED.user_id, push_tokens.user_id)
+                END,
                 app_version = EXCLUDED.app_version,
                 build_number = EXCLUDED.build_number,
                 apns_environment = EXCLUDED.apns_environment,
@@ -367,7 +370,9 @@ async function upsertPushToken(pool, {
         );
 
         const row = result.rows[0];
-        const effectiveUserId = finalUserId || row?.user_id || null;
+        const effectiveUserId = finalPlatform === 'android'
+            ? finalUserId
+            : finalUserId || row?.user_id || null;
         const effectiveInstallId = finalInstallId || row?.install_id || null;
         const prunedCount = finalNotificationsEnabled
             ? await pruneOlderTokensForSameTarget(client, {
@@ -397,15 +402,68 @@ async function upsertPushToken(pool, {
 
 async function markCompleted(pool, {
     deviceToken,
+    platform,
     challengeId,
     challengeDate,
     userId,
     installId,
     apnsEnvironment,
 }) {
+    const normalizedPlatform = normalizePlatform(platform);
     const normalizedUserId = normalizeText(userId);
     const normalizedInstallId = normalizeText(installId);
     const normalizedEnvironment = normalizeApnsEnvironment(apnsEnvironment);
+
+    if (normalizedPlatform === 'android') {
+        if (!normalizedInstallId) {
+            throw new PushRouteError(
+                'missing_installation_id',
+                'X-Installation-ID is required for Android Daily Challenge completion.',
+                { status: 400, retryable: false }
+            );
+        }
+
+        const values = [
+            deviceToken,
+            challengeId,
+            challengeDate,
+            normalizedInstallId,
+            normalizedEnvironment,
+        ];
+        let accountCondition = 'AND user_id IS NULL';
+        if (normalizedUserId) {
+            values.push(normalizedUserId);
+            accountCondition = `AND user_id = $${values.length}`;
+        }
+
+        const result = await pool.query(
+            `UPDATE push_tokens
+             SET
+                last_completed_challenge_id = $2,
+                last_completed_challenge_date = COALESCE($3::date, last_completed_challenge_date),
+                updated_at = now()
+             WHERE device_token = $1
+               AND platform = 'android'
+               AND install_id = $4
+               AND apns_environment = $5
+               ${accountCondition}
+             RETURNING *`,
+            values
+        );
+
+        const updated = rowToTokenRecord(result.rows[0]);
+        if (!updated) {
+            throw new PushRouteError(
+                'push_registration_ownership_mismatch',
+                'The Android push registration no longer belongs to this Agora account session. Re-register the device and retry.',
+                { status: 409, retryable: true }
+            );
+        }
+        return updated;
+    }
+
+    // Preserve the existing iOS/APNs compatibility behavior. Legacy iOS callers
+    // may identify the same push target by token, userId, or installation ID.
     const existing = await pool.query(
         `SELECT user_id, install_id, apns_environment
          FROM push_tokens
@@ -583,6 +641,7 @@ export function createPushRouter(pool, { accountAuthService = null } = {}) {
             });
             const updated = await markCompleted(pool, {
                 deviceToken: normalizedToken,
+                platform,
                 challengeId: normalizedChallengeId,
                 challengeDate: normalizedChallengeDate,
                 userId,
