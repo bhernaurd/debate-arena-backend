@@ -7,6 +7,13 @@ import {
     SignedDataVerifier,
 } from '@apple/app-store-server-library';
 
+import {
+    AGORA_PRO_LIFETIME_PRODUCT_ID,
+    AGORA_PRO_PRODUCT_IDS,
+    AGORA_RECURRING_PRO_PRODUCT_IDS,
+    classifyAgoraProProduct,
+} from './lib/agoraProProducts.js';
+
 const currentFilePath = fileURLToPath(import.meta.url);
 const currentDirectory = dirname(currentFilePath);
 
@@ -18,11 +25,6 @@ const APP_STORE_APP_APPLE_ID = Number(
     process.env.APP_STORE_APP_APPLE_ID?.trim() ||
     '6762416967'
 );
-
-const AGORA_PRO_PRODUCT_IDS = new Set([
-    'agora_pro_monthly',
-    'agora_pro_yearly',
-]);
 
 const appleRootCertificates = [
     'AppleIncRootCertificate.cer',
@@ -216,8 +218,10 @@ export async function verifyAgoraProTransactionJWS(
             typeof transaction.productId === 'string'
                 ? transaction.productId
                 : '';
+        const productClassification =
+            classifyAgoraProProduct(productId);
 
-        if (!AGORA_PRO_PRODUCT_IDS.has(productId)) {
+        if (!productClassification) {
             return {
                 isVerifiedPro: false,
                 reason: 'unrecognized_product',
@@ -232,7 +236,14 @@ export async function verifyAgoraProTransactionJWS(
                 reason: 'revoked_subscription',
                 environment,
                 productId,
-                revocationDate: Number(transaction.revocationDate) || null,
+                entitlementSource:
+                    productClassification.accessSource,
+                isRecurring:
+                    productClassification.isRecurring,
+                isLifetime:
+                    productClassification.isLifetime,
+                revocationDate:
+                    Number(transaction.revocationDate) || null,
             };
         }
 
@@ -242,9 +253,60 @@ export async function verifyAgoraProTransactionJWS(
                 reason: 'upgraded_transaction',
                 environment,
                 productId,
+                entitlementSource:
+                    productClassification.accessSource,
+                isRecurring:
+                    productClassification.isRecurring,
+                isLifetime:
+                    productClassification.isLifetime,
                 transactionId: transaction.transactionId ?? null,
                 originalTransactionId:
                     transaction.originalTransactionId ?? null,
+            };
+        }
+
+        // A non-consumable Lifetime Pro purchase is permanent by design and
+        // does not have a subscription expiration date. Apple remains the
+        // authority for revocation/refund state, handled above.
+        if (productClassification.isLifetime) {
+            return {
+                isVerifiedPro: true,
+                reason: 'verified_lifetime_non_consumable',
+
+                // Preserve the existing generic Pro analytics/model-routing
+                // contract. Recurring business metrics must use the explicit
+                // entitlement source/product fields instead of treating every
+                // Pro entitlement as subscription revenue.
+                analyticsAccessTier: 'paid_pro',
+
+                isTrial: false,
+                environment,
+                productId,
+                entitlementSource:
+                    productClassification.accessSource,
+                isRecurring: false,
+                isLifetime: true,
+                transactionId:
+                    transaction.transactionId ?? null,
+                originalTransactionId:
+                    transaction.originalTransactionId ?? null,
+                appAccountToken:
+                    transaction.appAccountToken ?? null,
+                purchaseDate:
+                    Number(transaction.purchaseDate) || null,
+                originalPurchaseDate:
+                    Number(transaction.originalPurchaseDate) || null,
+                expiresDate: null,
+                offerType:
+                    transaction.offerType ?? null,
+                offerIdentifier:
+                    transaction.offerIdentifier ?? null,
+                offerDiscountType:
+                    transaction.offerDiscountType ?? null,
+                transactionReason:
+                    transaction.transactionReason ?? null,
+                signedDate:
+                    Number(transaction.signedDate) || null,
             };
         }
 
@@ -259,6 +321,10 @@ export async function verifyAgoraProTransactionJWS(
                 reason: 'expired_subscription',
                 environment,
                 productId,
+                entitlementSource:
+                    productClassification.accessSource,
+                isRecurring: true,
+                isLifetime: false,
                 transactionId:
                     transaction.transactionId ?? null,
                 originalTransactionId:
@@ -280,6 +346,10 @@ export async function verifyAgoraProTransactionJWS(
             isTrial,
             environment,
             productId,
+            entitlementSource:
+                productClassification.accessSource,
+            isRecurring: true,
+            isLifetime: false,
             transactionId:
                 transaction.transactionId ?? null,
             originalTransactionId:
@@ -318,7 +388,9 @@ export async function verifyAgoraProTransactionJWS(
 }
 
 export {
+    AGORA_PRO_LIFETIME_PRODUCT_ID,
     AGORA_PRO_PRODUCT_IDS,
+    AGORA_RECURRING_PRO_PRODUCT_IDS,
     APP_STORE_APP_APPLE_ID,
     APP_STORE_BUNDLE_ID,
 };

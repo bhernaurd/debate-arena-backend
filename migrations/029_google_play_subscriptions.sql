@@ -1,4 +1,4 @@
--- 028_google_play_subscriptions.sql
+-- 029_google_play_subscriptions.sql
 -- Account-owned Google Play subscription verification state for Android.
 -- Raw Google Play purchase tokens are never persisted; only SHA-256 hashes are stored.
 
