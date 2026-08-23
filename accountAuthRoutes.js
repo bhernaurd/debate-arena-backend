@@ -5,6 +5,10 @@ import {
     createAccountAuthService,
 } from './lib/accountAuthService.js';
 import { createGoogleAccountAuthService } from './lib/googleAccountAuthService.js';
+import {
+    GooglePlaySubscriptionError,
+    createGooglePlaySubscriptionService,
+} from './lib/googlePlaySubscriptionService.js';
 
 const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
 const SIGN_OUT_REASON = 'signed_out';
@@ -197,6 +201,32 @@ function deletionResponse(result) {
     };
 }
 
+function googlePlayErrorResponse(error) {
+    const status =
+        Number.isInteger(error?.status) &&
+        error.status >= 400 &&
+        error.status <= 599
+            ? error.status
+            : 503;
+
+    return {
+        status,
+        body: {
+            success: false,
+            error:
+                status >= 500
+                    ? 'Google Play subscription verification is temporarily unavailable.'
+                    : error.message,
+            errorCode:
+                error?.code ||
+                'google_play_subscription_unavailable',
+            retryable:
+                status >= 500 ||
+                Boolean(error?.retryable),
+        },
+    };
+}
+
 function publicError(error) {
     if (
         error instanceof AccountAuthError ||
@@ -313,6 +343,7 @@ export function createAccountAuthRouter(
     {
         service = null,
         googleService = null,
+        googlePlayService = null,
         revokeSession = null,
         logger = console,
         now = () => Date.now(),
@@ -322,6 +353,11 @@ export function createAccountAuthRouter(
         service ?? createAccountAuthService({ pool });
     const googleAccountAuthService =
         googleService ?? createGoogleAccountAuthService({ pool });
+    const googlePlaySubscriptionService =
+        googlePlayService ?? createGooglePlaySubscriptionService({
+            pool,
+            accountAuthService,
+        });
 
     const revokeAccountSession =
         revokeSession ?? createPostgresAccountSessionRevoker(pool);
@@ -345,6 +381,12 @@ export function createAccountAuthRouter(
     if (typeof googleAccountAuthService?.signInWithGoogle !== 'function') {
         throw new Error(
             'Google account authentication service is missing signInWithGoogle().'
+        );
+    }
+
+    if (typeof googlePlaySubscriptionService?.syncPurchase !== 'function') {
+        throw new Error(
+            'Google Play subscription service is missing syncPurchase().'
         );
     }
 
@@ -425,6 +467,38 @@ export function createAccountAuthRouter(
             return res
                 .status(result.account.isNewAccount ? 201 : 200)
                 .json(signInResponse(result));
+        })
+    );
+
+    router.post(
+        '/google-play/sync-purchase',
+        asyncRoute(async (req, res) => {
+            const body = requireJsonObject(req);
+            const installationId = requireInstallationId(req);
+            const accessToken = requireBearerToken(req);
+
+            try {
+                const result =
+                    await googlePlaySubscriptionService.syncPurchase({
+                        installationId,
+                        accessToken,
+                        packageName: body.packageName,
+                        purchaseToken: body.purchaseToken,
+                        productId: body.productId,
+                        basePlanId: body.basePlanId,
+                        offerId: body.offerId,
+                        pricingCohortHint: body.pricingCohortHint,
+                        paywallSessionId: body.paywallSessionId,
+                    });
+
+                return res.status(200).json(result);
+            } catch (error) {
+                if (error instanceof GooglePlaySubscriptionError) {
+                    const response = googlePlayErrorResponse(error);
+                    return res.status(response.status).json(response.body);
+                }
+                throw error;
+            }
         })
     );
 
