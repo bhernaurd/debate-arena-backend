@@ -170,3 +170,92 @@ test('rejects a package mismatch before sending the purchase token', async () =>
     );
     assert.equal(calls, 0);
 });
+
+test('maps Google OAuth credential rejection to a server failure, not Agora user auth', async () => {
+    const service = createGooglePlayPublisherService({
+        config: testConfig(),
+        now: () => NOW_MS,
+        fetchImpl: async (url) => {
+            assert.equal(String(url), 'https://oauth.example.test/token');
+            return jsonResponse(401, {
+                error: 'invalid_client',
+            });
+        },
+    });
+
+    await assert.rejects(
+        service.getSubscription({
+            packageName: PACKAGE_NAME,
+            purchaseToken: PURCHASE_TOKEN,
+        }),
+        (error) => {
+            assert.equal(error.code, 'google_play_oauth_failed');
+            assert.equal(error.status, 503);
+            return true;
+        }
+    );
+});
+
+test('maps Android Publisher authorization failure to 503 instead of refreshing Agora auth', async () => {
+    let calls = 0;
+    const service = createGooglePlayPublisherService({
+        config: testConfig(),
+        now: () => NOW_MS,
+        fetchImpl: async (url) => {
+            calls += 1;
+            if (String(url) === 'https://oauth.example.test/token') {
+                return jsonResponse(200, {
+                    access_token: 'publisher-access-token',
+                    expires_in: 3600,
+                });
+            }
+            return jsonResponse(401, {
+                error: {
+                    message: 'Publisher account is not authorized.',
+                },
+            });
+        },
+    });
+
+    await assert.rejects(
+        service.getSubscription({
+            packageName: PACKAGE_NAME,
+            purchaseToken: PURCHASE_TOKEN,
+        }),
+        (error) => {
+            assert.equal(error.code, 'google_play_verification_failed');
+            assert.equal(error.status, 503);
+            return true;
+        }
+    );
+    assert.equal(calls, 2);
+});
+
+test('invalid service-account private key fails before any outbound request', async () => {
+    let calls = 0;
+    const config = testConfig();
+    const service = createGooglePlayPublisherService({
+        config: {
+            ...config,
+            privateKey: 'not-a-valid-private-key',
+        },
+        now: () => NOW_MS,
+        fetchImpl: async () => {
+            calls += 1;
+            throw new Error('must not be called');
+        },
+    });
+
+    await assert.rejects(
+        service.getSubscription({
+            packageName: PACKAGE_NAME,
+            purchaseToken: PURCHASE_TOKEN,
+        }),
+        (error) => {
+            assert.equal(error.code, 'invalid_google_play_private_key');
+            assert.equal(error.status, 503);
+            return true;
+        }
+    );
+    assert.equal(calls, 0);
+});
