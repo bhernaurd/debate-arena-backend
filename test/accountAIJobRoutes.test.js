@@ -15,53 +15,87 @@ const JOB_ID = '22222222-2222-4222-8222-222222222222';
 
 function makePool() {
     const queries = [];
-    const client = {
-        async query(sql, params = []) {
-            const text = String(sql);
-            queries.push({ text, params });
-            if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(text)) {
-                return { rows: [], rowCount: 0 };
-            }
+    let storedJob = null;
+
+    const execute = async (sql, params = []) => {
+        const text = String(sql);
+        queries.push({ text, params });
+
+        if (['BEGIN', 'COMMIT', 'ROLLBACK'].includes(text)) {
+            return { rows: [], rowCount: 0 };
+        }
+
+        if (
+            text.includes('SELECT *') &&
+            text.includes('FROM ai_generation_jobs')
+        ) {
+            if (!storedJob) return { rows: [], rowCount: 0 };
+
             if (
-                text.includes('SELECT *') &&
-                text.includes('FROM ai_generation_jobs')
+                text.includes('client_request_id = $1') &&
+                params[0] !== storedJob.client_request_id
             ) {
                 return { rows: [], rowCount: 0 };
             }
-            if (text.includes('INSERT INTO ai_generation_jobs')) {
-                return {
-                    rows: [{
-                        id: JOB_ID,
-                        client_request_id: params[0],
-                        job_type: params[1],
-                        debate_id: params[2],
-                        user_id: params[3],
-                        status: 'completed',
-                        result_text: 'Already completed in the test fixture.',
-                        error_message: null,
-                        attempts: 1,
-                        max_attempts: 3,
-                        created_at: new Date('2026-08-23T06:45:00.000Z'),
-                        updated_at: new Date('2026-08-23T06:45:00.000Z'),
-                        processing_started_at: null,
-                        completed_at: new Date('2026-08-23T06:45:01.000Z'),
-                        failed_at: null,
-                    }],
-                    rowCount: 1,
-                };
+            if (
+                text.includes('id = $1') &&
+                params[0] !== storedJob.id
+            ) {
+                return { rows: [], rowCount: 0 };
             }
-            throw new Error(`Unexpected test SQL: ${text}`);
-        },
+            if (
+                text.includes('account_id = $2') &&
+                params[1] !== storedJob.account_id
+            ) {
+                return { rows: [], rowCount: 0 };
+            }
+            if (
+                text.includes("status = 'failed'") &&
+                storedJob.status !== 'failed'
+            ) {
+                return { rows: [], rowCount: 0 };
+            }
+
+            return { rows: [storedJob], rowCount: 1 };
+        }
+
+        if (text.includes('INSERT INTO ai_generation_jobs')) {
+            storedJob = {
+                id: JOB_ID,
+                client_request_id: params[0],
+                job_type: params[1],
+                debate_id: params[2],
+                user_id: params[3],
+                account_id: params[4],
+                status: 'completed',
+                result_text: 'Already completed in the test fixture.',
+                error_message: null,
+                attempts: 1,
+                max_attempts: 3,
+                created_at: new Date('2026-08-23T06:45:00.000Z'),
+                updated_at: new Date('2026-08-23T06:45:00.000Z'),
+                processing_started_at: null,
+                completed_at: new Date('2026-08-23T06:45:01.000Z'),
+                failed_at: null,
+                metadata: JSON.parse(params[6]),
+            };
+            return { rows: [storedJob], rowCount: 1 };
+        }
+
+        throw new Error(`Unexpected test SQL: ${text}`);
+    };
+
+    const client = {
+        query: execute,
         release() {},
     };
+
     return {
         queries,
         async connect() {
             return client;
         },
-        async query() {
-            return { rows: [], rowCount: 0 };
-        },
+        query: execute,
     };
 }
 
@@ -178,25 +212,33 @@ function requestBody(overrides = {}) {
     };
 }
 
+function authHeaders(overrides = {}) {
+    return {
+        'Content-Type': 'application/json',
+        'X-Installation-ID': INSTALLATION_ID,
+        Authorization: `Bearer ${ACCESS_TOKEN}`,
+        ...overrides,
+    };
+}
+
 async function post(server, body, headers = {}) {
     return fetch(`${server.baseUrl}/api/account/ai-jobs`, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-Installation-ID': INSTALLATION_ID,
-            Authorization: `Bearer ${ACCESS_TOKEN}`,
-            ...headers,
-        },
+        headers: authHeaders(headers),
         body: JSON.stringify(body),
     });
 }
 
-function insertedMetadata(server) {
+function insertedQuery(server) {
     const insert = server.pool.queries.find((query) =>
         query.text.includes('INSERT INTO ai_generation_jobs')
     );
     assert.ok(insert, 'expected AI job insert');
-    return JSON.parse(insert.params[5]);
+    return insert;
+}
+
+function insertedMetadata(server) {
+    return JSON.parse(insertedQuery(server).params[6]);
 }
 
 test('exact /api/account/ai-jobs route overrides forged client Pro metadata for a Free account', async (t) => {
@@ -210,12 +252,16 @@ test('exact /api/account/ai-jobs route overrides forged client Pro metadata for 
     assert.equal(body.success, true);
     assert.equal(body.job.id, JOB_ID);
 
+    const insert = insertedQuery(server);
+    assert.equal(insert.params[4], ACCOUNT_ID);
+
     const metadata = insertedMetadata(server);
     assert.equal(metadata.serverVerifiedPro, false);
     assert.equal(metadata.analyticsAccessTier, 'free');
     assert.equal(metadata.analyticsTierSource, 'authenticated_account_entitlement');
     assert.equal(metadata.proVerificationReason, 'authenticated_account_free');
-    assert.equal(metadata.authenticatedAccountId, ACCOUNT_ID);
+    assert.equal(metadata.authenticatedAccountId, undefined);
+    assert.equal(JSON.stringify(metadata).includes(ACCOUNT_ID), false);
     assert.notEqual(metadata.serverVerifiedPro, 'true');
 });
 
@@ -232,11 +278,43 @@ test('verified account-level Google Play Pro becomes serverVerifiedPro for the s
     assert.equal(metadata.proVerificationSource, 'google_play');
     assert.equal(metadata.proVerificationProductId, 'agora_pro_yearly');
     assert.equal(metadata.proVerificationOriginalTransactionId, null);
-    assert.equal(metadata.authenticatedAccountId, ACCOUNT_ID);
     assert.equal(
         JSON.stringify(metadata).includes('client-value-must-not-be-trusted'),
         false
     );
+});
+
+test('account-authenticated recovery reads a created job by backend id and client request id', async (t) => {
+    const server = await startServer({ isPro: true });
+    t.after(server.close);
+
+    const created = await post(server, requestBody());
+    assert.equal(created.status, 202);
+
+    const byId = await fetch(
+        `${server.baseUrl}/api/account/ai-jobs/${JOB_ID}`,
+        { headers: authHeaders() }
+    );
+    const byIdBody = await byId.json();
+    assert.equal(byId.status, 200);
+    assert.equal(byIdBody.success, true);
+    assert.equal(byIdBody.job.id, JOB_ID);
+
+    const byClient = await fetch(
+        `${server.baseUrl}/api/account/ai-jobs/client/${CLIENT_REQUEST_ID}`,
+        { headers: authHeaders() }
+    );
+    const byClientBody = await byClient.json();
+    assert.equal(byClient.status, 200);
+    assert.equal(byClientBody.success, true);
+    assert.equal(byClientBody.job.clientRequestId, CLIENT_REQUEST_ID);
+
+    const accountReads = server.pool.queries.filter((query) =>
+        query.text.includes('FROM ai_generation_jobs') &&
+        query.text.includes('account_id = $2')
+    );
+    assert.ok(accountReads.length >= 2);
+    assert.ok(accountReads.every((query) => query.params[1] === ACCOUNT_ID));
 });
 
 test('rejects an installation mismatch before account authorization or persistence', async (t) => {
@@ -260,7 +338,7 @@ test('rejects an installation mismatch before account authorization or persisten
     );
 });
 
-test('requires a bearer account session and does not fall back to legacy client Pro metadata', async (t) => {
+test('requires a strict bearer account session and does not fall back to legacy client Pro metadata', async (t) => {
     const server = await startServer({ isPro: true });
     t.after(server.close);
 
