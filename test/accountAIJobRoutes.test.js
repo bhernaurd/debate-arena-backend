@@ -7,6 +7,7 @@ import express from 'express';
 import { createAccountAuthRouter } from '../accountAuthRoutes.js';
 
 const INSTALLATION_ID = 'android-ai-job-installation-001';
+const SECOND_INSTALLATION_ID = 'android-ai-job-installation-002';
 const OTHER_INSTALLATION_ID = 'android-ai-job-installation-999';
 const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
 const ACCESS_TOKEN = 'aaa.bbb.ccc';
@@ -112,14 +113,15 @@ function makeAccountAuthService() {
             throw new Error('not used');
         },
         async authorizeAccessToken(input) {
-            assert.deepEqual(input, {
-                installationId: INSTALLATION_ID,
-                accessToken: ACCESS_TOKEN,
-            });
+            assert.equal(input.accessToken, ACCESS_TOKEN);
+            assert.ok(
+                [INSTALLATION_ID, SECOND_INSTALLATION_ID].includes(input.installationId),
+                `unexpected installation ${input.installationId}`
+            );
             return {
                 accountId: ACCOUNT_ID,
                 sessionId: '33333333-3333-4333-8333-333333333333',
-                installationId: INSTALLATION_ID,
+                installationId: input.installationId,
                 authVersion: 1,
             };
         },
@@ -316,6 +318,37 @@ test('account-authenticated recovery reads a created job by backend id and clien
     );
     assert.ok(accountReads.length >= 2);
     assert.ok(accountReads.every((query) => query.params[1] === ACCOUNT_ID));
+});
+
+test('same account can idempotently resume a deterministic request from another installation', async (t) => {
+    const server = await startServer({ isPro: true });
+    t.after(server.close);
+
+    const created = await post(server, requestBody());
+    assert.equal(created.status, 202);
+
+    const resumed = await post(
+        server,
+        requestBody({ userId: SECOND_INSTALLATION_ID }),
+        { 'X-Installation-ID': SECOND_INSTALLATION_ID }
+    );
+    const resumedBody = await resumed.json();
+
+    assert.equal(resumed.status, 200);
+    assert.equal(resumedBody.success, true);
+    assert.equal(resumedBody.job.id, JOB_ID);
+    assert.equal(resumedBody.job.clientRequestId, CLIENT_REQUEST_ID);
+    assert.equal(
+        resumedBody.job.userId,
+        INSTALLATION_ID,
+        'original installation remains provenance for the account-owned job'
+    );
+    assert.equal(
+        server.pool.queries.filter((query) =>
+            query.text.includes('INSERT INTO ai_generation_jobs')
+        ).length,
+        1
+    );
 });
 
 test('rejects an installation mismatch before account authorization or persistence', async (t) => {
