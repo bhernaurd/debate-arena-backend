@@ -75,7 +75,12 @@ test('FCM service obtains OAuth once and sends HTTP v1 messages with string data
     assert.equal(second.ok, true);
     assert.equal(calls.length, 3, 'OAuth access token should be reused for the second send');
     assert.equal(calls[0].url, 'https://oauth2.googleapis.com/token');
-    assert.match(String(calls[0].options.body), /grant_type=urn%3Aietf-params%3Aoauth%3Agrant-type%3Ajwt-bearer/);
+    const oauthForm = new URLSearchParams(String(calls[0].options.body));
+    assert.equal(
+        oauthForm.get('grant_type'),
+        'urn:ietf:params:oauth:grant-type:jwt-bearer'
+    );
+    assert.ok(oauthForm.get('assertion'));
     assert.equal(
         calls[1].url,
         'https://fcm.googleapis.com/v1/projects/example-project/messages:send'
