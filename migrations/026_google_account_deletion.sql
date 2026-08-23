@@ -17,14 +17,14 @@ ALTER TABLE account_deletion_requests
     );
 
 -- Google Play subscription rows intentionally contain account ownership as
--- part of the verified record. If Play support is present when an account is
--- permanently deleted, remove those account-bound rows so the deleted account
--- no longer retains purchase ownership and a still-valid Play subscription can
--- be verified against a newly created Agora account later.
+-- part of the verified record. Authenticated Android AI jobs also gain an
+-- account_id once account-AI ownership support is installed. When an account is
+-- permanently deleted, remove both kinds of account-bound rows so the deleted
+-- account retains neither purchase ownership nor persistent AI transcript data.
 --
--- This trigger is safe to deploy before the Google Play migration: the table is
--- resolved dynamically at deletion time and the cleanup simply becomes a no-op
--- until that table exists.
+-- This trigger is safe to deploy before either Android migration: both tables
+-- and the AI-job account_id column are resolved dynamically at deletion time.
+-- Cleanup simply becomes a no-op until the corresponding support is installed.
 CREATE OR REPLACE FUNCTION release_google_play_on_account_deletion()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -33,6 +33,21 @@ BEGIN
     IF to_regclass('public.google_play_subscription_entitlements') IS NOT NULL THEN
         EXECUTE
             'DELETE FROM public.google_play_subscription_entitlements WHERE account_id = $1'
+            USING NEW.id;
+    END IF;
+
+    IF
+        to_regclass('public.ai_generation_jobs') IS NOT NULL
+        AND EXISTS (
+            SELECT 1
+            FROM pg_attribute
+            WHERE attrelid = to_regclass('public.ai_generation_jobs')
+              AND attname = 'account_id'
+              AND NOT attisdropped
+        )
+    THEN
+        EXECUTE
+            'DELETE FROM public.ai_generation_jobs WHERE account_id = $1'
             USING NEW.id;
     END IF;
 
@@ -55,4 +70,4 @@ COMMENT ON TABLE account_deletion_requests IS
     'Account-deletion workflow for iOS, Android, support, and Apple notification initiated requests.';
 
 COMMENT ON FUNCTION release_google_play_on_account_deletion() IS
-    'Releases account-bound Google Play subscription verification rows when an Agora account is permanently deleted, if Google Play support is installed.';
+    'Removes account-bound Google Play subscription rows and authenticated Android AI-job transcript rows when an Agora account is permanently deleted, when those Android support tables/columns are installed.';
