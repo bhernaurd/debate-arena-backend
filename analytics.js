@@ -85,10 +85,18 @@ function sanitizeMetadata(meta) {
   return meta;
 }
 
-function isEntitlementUsable(row) {
+export function isEntitlementUsable(row) {
   if (!row) return false;
 
   const status = String(row.status || '').toLowerCase();
+  const isLifetime =
+    row.is_lifetime_pro === true ||
+    row.product_id === 'agora_pro_lifetime';
+
+  if (isLifetime) {
+    return status === 'active' && !row.revocation_date;
+  }
+
   const now = Date.now();
   const expiresAt = row.expires_date
     ? new Date(row.expires_date).getTime()
@@ -133,7 +141,11 @@ export function createAnalyticsRouter(pool, options = {}) {
         se.environment,
         se.expires_date,
         se.grace_period_expires_date,
+        se.revocation_date,
         se.auto_renew_enabled,
+        se.pro_access_source,
+        se.is_recurring_pro,
+        se.is_lifetime_pro,
         COALESCE(se.pricing_cohort, 'unknown') AS pricing_cohort
       FROM subscription_entitlements se
       WHERE se.user_id = $1
@@ -146,13 +158,17 @@ export function createAnalyticsRouter(pool, options = {}) {
          )
       ORDER BY
         CASE
+          WHEN se.is_lifetime_pro = true
+            AND se.status = 'active'
+            AND se.revocation_date IS NULL
+            THEN 0
           WHEN se.status IN ('trial', 'active')
             AND se.expires_date > NOW()
-            THEN 0
+            THEN 1
           WHEN se.status = 'grace_period'
             AND se.grace_period_expires_date > NOW()
-            THEN 0
-          ELSE 1
+            THEN 1
+          ELSE 2
         END,
         CASE WHEN se.environment = 'Production' THEN 0 ELSE 1 END,
         se.updated_at DESC
@@ -177,12 +193,19 @@ export function createAnalyticsRouter(pool, options = {}) {
       subscriptionStatus: entitlement?.status || 'none',
       subscriptionProductId: entitlement?.product_id || null,
       subscriptionEnvironment: entitlement?.environment || null,
+      subscriptionAccessSource:
+        entitlement?.pro_access_source || 'unknown',
+      subscriptionIsRecurring:
+        entitlement?.is_recurring_pro === true,
+      subscriptionIsLifetime:
+        entitlement?.is_lifetime_pro === true,
       subscriptionPricingCohort:
         entitlement?.pricing_cohort || 'unknown',
       subscriptionAutoRenewEnabled:
         entitlement?.auto_renew_enabled ?? null,
       revenueEligible:
         entitlement?.environment === 'Production' &&
+        entitlement?.is_recurring_pro === true &&
         analyticsAccessTier === 'paid_pro',
       analyticsVersion: 'july31_analytics_v1',
       pricingCohortAnalyticsVersion: 'founding_pricing_v1',
@@ -362,6 +385,7 @@ export function createAnalyticsRouter(pool, options = {}) {
              WHERE environment = 'Production'
                AND status IN ('trial', 'grace_period')
                AND is_trial = true
+               AND is_recurring_pro = true
                AND (
                  (status = 'trial' AND expires_date > NOW()) OR
                  (status = 'grace_period' AND grace_period_expires_date > NOW())
@@ -371,11 +395,35 @@ export function createAnalyticsRouter(pool, options = {}) {
              WHERE environment = 'Production'
                AND status IN ('active', 'grace_period')
                AND is_trial = false
+               AND is_recurring_pro = true
                AND (
                  (status = 'active' AND expires_date > NOW()) OR
                  (status = 'grace_period' AND grace_period_expires_date > NOW())
                )
            ) AS active_paid_subscribers,
+           COUNT(*) FILTER (
+             WHERE environment = 'Production'
+               AND is_lifetime_pro = true
+               AND status = 'active'
+               AND revocation_date IS NULL
+           ) AS active_lifetime_pro,
+           COUNT(*) FILTER (
+             WHERE environment = 'Production'
+               AND (
+                 (
+                   is_lifetime_pro = true
+                   AND status = 'active'
+                   AND revocation_date IS NULL
+                 ) OR (
+                   is_recurring_pro = true
+                   AND status IN ('trial', 'active', 'grace_period')
+                   AND (
+                     (status IN ('trial', 'active') AND expires_date > NOW()) OR
+                     (status = 'grace_period' AND grace_period_expires_date > NOW())
+                   )
+                 )
+               )
+           ) AS active_pro_access,
            COUNT(*) FILTER (
              WHERE environment = 'Production'
                AND product_id = 'agora_pro_monthly'
@@ -401,6 +449,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND COALESCE(pricing_cohort, 'unknown') = 'founding_2026'
                AND status IN ('trial', 'grace_period')
                AND is_trial = true
+               AND is_recurring_pro = true
                AND (
                  (status = 'trial' AND expires_date > NOW()) OR
                  (status = 'grace_period' AND grace_period_expires_date > NOW())
@@ -411,6 +460,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND COALESCE(pricing_cohort, 'unknown') = 'founding_2026'
                AND status IN ('active', 'grace_period')
                AND is_trial = false
+               AND is_recurring_pro = true
                AND (
                  (status = 'active' AND expires_date > NOW()) OR
                  (status = 'grace_period' AND grace_period_expires_date > NOW())
@@ -443,6 +493,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND COALESCE(pricing_cohort, 'unknown') = 'standard'
                AND status IN ('trial', 'grace_period')
                AND is_trial = true
+               AND is_recurring_pro = true
                AND (
                  (status = 'trial' AND expires_date > NOW()) OR
                  (status = 'grace_period' AND grace_period_expires_date > NOW())
@@ -453,6 +504,7 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND COALESCE(pricing_cohort, 'unknown') = 'standard'
                AND status IN ('active', 'grace_period')
                AND is_trial = false
+               AND is_recurring_pro = true
                AND (
                  (status = 'active' AND expires_date > NOW()) OR
                  (status = 'grace_period' AND grace_period_expires_date > NOW())
@@ -483,6 +535,7 @@ export function createAnalyticsRouter(pool, options = {}) {
            COUNT(*) FILTER (
              WHERE environment = 'Production'
                AND COALESCE(pricing_cohort, 'unknown') = 'unknown'
+               AND is_recurring_pro = true
                AND status IN ('active', 'trial', 'grace_period')
                AND (
                  (status IN ('trial', 'active') AND expires_date > NOW()) OR
@@ -491,6 +544,7 @@ export function createAnalyticsRouter(pool, options = {}) {
            ) AS active_unknown_cohort,
            COUNT(*) FILTER (
              WHERE environment = 'Production'
+               AND is_recurring_pro = true
                AND status IN ('active', 'trial', 'grace_period')
                AND auto_renew_enabled = false
                AND (
@@ -500,6 +554,7 @@ export function createAnalyticsRouter(pool, options = {}) {
            ) AS active_auto_renew_off,
            COUNT(*) FILTER (
              WHERE environment = 'Production'
+               AND is_recurring_pro = true
                AND status = 'billing_retry'
            ) AS billing_retry_subscriptions
          FROM subscription_entitlements se
