@@ -4,6 +4,10 @@ import {
     AccountAuthError,
     createAccountAuthService,
 } from './lib/accountAuthService.js';
+import {
+    AccountProAccessError,
+    createAccountProAccessService,
+} from './lib/accountProAccessService.js';
 import { createGoogleAccountAuthService } from './lib/googleAccountAuthService.js';
 import {
     GooglePlaySubscriptionError,
@@ -201,6 +205,31 @@ function deletionResponse(result) {
     };
 }
 
+function subscriptionEntitlementResponse(result) {
+    const entitlement = result.entitlement;
+
+    return {
+        success: true,
+        accountId: result.accountId,
+        isPro: Boolean(result.hasProAccess),
+        checkedAt: serializeDate(result.checkedAt),
+        entitlement: entitlement
+            ? {
+                productId: entitlement.productId,
+                status: entitlement.status,
+                isTrial: Boolean(entitlement.isTrial),
+                accessExpiresAt: serializeDate(
+                    entitlement.accessExpiresAt
+                ),
+                source:
+                    entitlement.environment === 'GooglePlay'
+                        ? 'google_play'
+                        : 'app_store',
+            }
+            : null,
+    };
+}
+
 function googlePlayErrorResponse(error) {
     const status =
         Number.isInteger(error?.status) &&
@@ -230,7 +259,8 @@ function googlePlayErrorResponse(error) {
 function publicError(error) {
     if (
         error instanceof AccountAuthError ||
-        error instanceof AccountAuthRouteError
+        error instanceof AccountAuthRouteError ||
+        error instanceof AccountProAccessError
     ) {
         const status = Number.isInteger(error.status)
             ? error.status
@@ -241,9 +271,14 @@ function publicError(error) {
                 status: 503,
                 body: {
                     error: {
-                        code: 'account_authentication_unavailable',
+                        code:
+                            error instanceof AccountProAccessError
+                                ? 'subscription_entitlement_unavailable'
+                                : 'account_authentication_unavailable',
                         message:
-                            'Account authentication is temporarily unavailable.',
+                            error instanceof AccountProAccessError
+                                ? 'Subscription entitlement is temporarily unavailable.'
+                                : 'Account authentication is temporarily unavailable.',
                         retryable: true,
                     },
                 },
@@ -344,6 +379,7 @@ export function createAccountAuthRouter(
         service = null,
         googleService = null,
         googlePlayService = null,
+        proAccessService = null,
         revokeSession = null,
         logger = console,
         now = () => Date.now(),
@@ -354,6 +390,8 @@ export function createAccountAuthRouter(
     const googleAccountAuthService =
         googleService ?? createGoogleAccountAuthService({ pool });
     let googlePlaySubscriptionService = googlePlayService;
+    const accountProAccessService =
+        proAccessService ?? createAccountProAccessService({ pool });
 
     function resolvedGooglePlaySubscriptionService() {
         if (!googlePlaySubscriptionService) {
@@ -397,6 +435,12 @@ export function createAccountAuthRouter(
     ) {
         throw new Error(
             'Google Play subscription service is missing syncPurchase().'
+        );
+    }
+
+    if (typeof accountProAccessService?.getCurrentAccess !== 'function') {
+        throw new Error(
+            'Account Pro access service is missing getCurrentAccess().'
         );
     }
 
@@ -542,6 +586,29 @@ export function createAccountAuthRouter(
 
             return res.status(200).json(
                 authorizationResponse(result)
+            );
+        })
+    );
+
+    router.get(
+        '/subscription/entitlement',
+        asyncRoute(async (req, res) => {
+            const installationId = requireInstallationId(req);
+            const accessToken = requireBearerToken(req);
+
+            const authorization =
+                await accountAuthService.authorizeAccessToken({
+                    installationId,
+                    accessToken,
+                });
+
+            const result =
+                await accountProAccessService.getCurrentAccess({
+                    accountId: authorization.accountId,
+                });
+
+            return res.status(200).json(
+                subscriptionEntitlementResponse(result)
             );
         })
     );
