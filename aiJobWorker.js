@@ -8,6 +8,7 @@
 // import './aiJobWorker.js';
 
 import { processQueuedAIJobs } from './aiJobs.js';
+import './subscriptionAdminNotificationWorker.js';
 
 const INTERVAL_MS = 10_000;
 let isRunning = false;
