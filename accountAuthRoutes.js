@@ -353,11 +353,18 @@ export function createAccountAuthRouter(
         service ?? createAccountAuthService({ pool });
     const googleAccountAuthService =
         googleService ?? createGoogleAccountAuthService({ pool });
-    const googlePlaySubscriptionService =
-        googlePlayService ?? createGooglePlaySubscriptionService({
-            pool,
-            accountAuthService,
-        });
+    let googlePlaySubscriptionService = googlePlayService;
+
+    function resolvedGooglePlaySubscriptionService() {
+        if (!googlePlaySubscriptionService) {
+            googlePlaySubscriptionService =
+                createGooglePlaySubscriptionService({
+                    pool,
+                    accountAuthService,
+                });
+        }
+        return googlePlaySubscriptionService;
+    }
 
     const revokeAccountSession =
         revokeSession ?? createPostgresAccountSessionRevoker(pool);
@@ -384,7 +391,10 @@ export function createAccountAuthRouter(
         );
     }
 
-    if (typeof googlePlaySubscriptionService?.syncPurchase !== 'function') {
+    if (
+        googlePlaySubscriptionService &&
+        typeof googlePlaySubscriptionService.syncPurchase !== 'function'
+    ) {
         throw new Error(
             'Google Play subscription service is missing syncPurchase().'
         );
@@ -479,17 +489,18 @@ export function createAccountAuthRouter(
 
             try {
                 const result =
-                    await googlePlaySubscriptionService.syncPurchase({
-                        installationId,
-                        accessToken,
-                        packageName: body.packageName,
-                        purchaseToken: body.purchaseToken,
-                        productId: body.productId,
-                        basePlanId: body.basePlanId,
-                        offerId: body.offerId,
-                        pricingCohortHint: body.pricingCohortHint,
-                        paywallSessionId: body.paywallSessionId,
-                    });
+                    await resolvedGooglePlaySubscriptionService()
+                        .syncPurchase({
+                            installationId,
+                            accessToken,
+                            packageName: body.packageName,
+                            purchaseToken: body.purchaseToken,
+                            productId: body.productId,
+                            basePlanId: body.basePlanId,
+                            offerId: body.offerId,
+                            pricingCohortHint: body.pricingCohortHint,
+                            paywallSessionId: body.paywallSessionId,
+                        });
 
                 return res.status(200).json(result);
             } catch (error) {
