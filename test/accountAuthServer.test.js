@@ -186,7 +186,7 @@ test('existing application routers remain registered', () => {
     const requiredFragments = [
         'app.use(createPaywallConfigurationRouter());',
         'app.use(createDailyChallengeRouter(pool));',
-        'app.use(createPushRouter(pool));',
+        'app.use(createPushRouter(pool, { accountAuthService }));',
         'app.use(questionsRouter);',
         'app.use(aiJobsRouter);',
         'app.use(createAppStoreSubscriptionRouter(pool, {',
