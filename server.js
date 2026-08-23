@@ -539,7 +539,7 @@ app.use(createAffiliateRouter(pool, {
 }));
 app.use(createPaywallConfigurationRouter());
 app.use(createDailyChallengeRouter(pool));
-app.use(createPushRouter(pool));
+app.use(createPushRouter(pool, { accountAuthService }));
 app.use(questionsRouter);
 app.use(aiJobsRouter);
 app.use(createAppStoreSubscriptionRouter(pool, {
