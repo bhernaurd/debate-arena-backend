@@ -321,16 +321,9 @@ export function createAccountAIJobRouter({
             );
             const existingJob = existingResult.rows[0];
             if (existingJob) {
-                if (
-                    existingJob.user_id &&
-                    existingJob.user_id !== authorization.installationId
-                ) {
-                    fail(
-                        'client_request_owner_conflict',
-                        'This client request belongs to another installation.',
-                        { status: 409 }
-                    );
-                }
+                // The authenticated Agora account owns idempotency. Keep the
+                // original installation id as provenance, but allow the same
+                // account to resume the deterministic request from another device.
                 requireJobAccount(existingJob, authorization.accountId);
                 await client.query('COMMIT');
                 client.release();
@@ -400,16 +393,8 @@ export function createAccountAIJobRouter({
                         'AI job insert conflicted, but the existing job could not be loaded.'
                     );
                 }
-                if (
-                    job.user_id &&
-                    job.user_id !== authorization.installationId
-                ) {
-                    fail(
-                        'client_request_owner_conflict',
-                        'This client request belongs to another installation.',
-                        { status: 409 }
-                    );
-                }
+                // A racing insert from the same account is still the same
+                // idempotent request even when another installation created it.
                 requireJobAccount(job, authorization.accountId);
                 responseStatus = 200;
             }
