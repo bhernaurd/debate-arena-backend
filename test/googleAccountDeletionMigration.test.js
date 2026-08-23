@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const migration = fs.readFileSync(
-    path.join(__dirname, '..', 'migrations', '026_google_account_deletion.sql'),
+    path.join(__dirname, '..', 'migrations', '027_google_account_deletion.sql'),
     'utf8'
 );
 

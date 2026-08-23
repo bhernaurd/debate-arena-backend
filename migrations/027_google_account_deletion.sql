@@ -1,4 +1,4 @@
--- 026_google_account_deletion.sql
+-- 027_google_account_deletion.sql
 -- Android uses the same account-deletion audit table as iOS, but Google
 -- reauthentication does not require Apple token revocation.
 
