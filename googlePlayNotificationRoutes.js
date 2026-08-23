@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import express from 'express';
 
 import {
@@ -79,13 +80,7 @@ function constantTimeEmailEqual(left, right) {
     const b = Buffer.from(String(right ?? '').trim().toLowerCase(), 'utf8');
     return a.length === b.length &&
         a.length > 0 &&
-        cryptoTimingSafeEqual(a, b);
-}
-
-function cryptoTimingSafeEqual(left, right) {
-    // Keep the crypto import surface out of route parsing until needed.
-    // Buffer equality is only attempted after equal-length validation above.
-    return left.equals(right);
+        crypto.timingSafeEqual(a, b);
 }
 
 function decodePubSubPayload(body) {
