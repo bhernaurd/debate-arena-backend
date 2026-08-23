@@ -13,6 +13,9 @@ import {
     createSubscriptionAdminNotificationService,
 } from './lib/subscriptionAdminNotificationService.js';
 import {
+    createSubscriptionAdminDatabaseAdapter,
+} from './lib/subscriptionAdminDatabaseAdapter.js';
+import {
     createSubscriptionAdminEventScanner,
 } from './subscriptionAdminEventScanner.js';
 
@@ -32,9 +35,12 @@ pool.on('error', (error) => {
     );
 });
 
+const notificationPool =
+    createSubscriptionAdminDatabaseAdapter(pool);
+
 export const subscriptionAdminNotificationService =
     createSubscriptionAdminNotificationService({
-        pool,
+        pool: notificationPool,
     });
 
 export const subscriptionAdminEventScanner =
