@@ -75,8 +75,10 @@ function requireBearerToken(req) {
             { status: 401 }
         );
     }
-    const match = /^Bearer\s+([^\s]+)$/i.exec(authorization.trim());
-    if (!match || !match[1]) {
+    const match = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(
+        authorization.trim()
+    );
+    if (!match) {
         fail(
             'invalid_access_token',
             'The account session is invalid or expired.',
