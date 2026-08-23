@@ -758,7 +758,7 @@ export function createPushRouter(pool, { accountAuthService = null } = {}) {
             return res.json({ count: list.length, tokens: list });
         } catch (err) {
             console.error('[Push] Token list error:', err.message);
-            return res.status(500).json({ error: 'Failed to list push tokens.' });
+            return res.status(500).json({ error: 'Failed to list tokens.' });
         }
     });
 
