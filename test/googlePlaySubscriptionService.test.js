@@ -16,6 +16,15 @@ const PRODUCT_ID = 'agora_pro_yearly';
 const NOW_MS = Date.UTC(2026, 7, 23, 4, 0, 0);
 const EXPIRY = '2027-08-23T04:00:00Z';
 
+function sha256(value) {
+    return crypto.createHash('sha256')
+        .update(value, 'utf8')
+        .digest('hex');
+}
+
+const ACCOUNT_PLAY_ID = sha256(ACCOUNT_ID);
+const OTHER_ACCOUNT_PLAY_ID = sha256(OTHER_ACCOUNT_ID);
+
 function makeAccountAuthService() {
     return {
         async authorizeAccessToken(input) {
@@ -45,7 +54,7 @@ function makePublisherService(overrides = {}) {
                     'ACKNOWLEDGEMENT_STATE_PENDING',
                 startTime: '2026-08-23T04:00:00Z',
                 externalAccountIdentifiers: {
-                    obfuscatedExternalAccountId: ACCOUNT_ID,
+                    obfuscatedExternalAccountId: ACCOUNT_PLAY_ID,
                 },
                 lineItems: [
                     {
@@ -190,13 +199,10 @@ test('verifies, persists, then acknowledges an entitled Google Play purchase', a
     );
     assert.ok(insert);
     assert.match(insert.params[0], /^[0-9a-f]{64}$/);
-    assert.equal(
-        insert.params[0],
-        crypto.createHash('sha256')
-            .update(PURCHASE_TOKEN, 'utf8')
-            .digest('hex')
-    );
+    assert.equal(insert.params[0], sha256(PURCHASE_TOKEN));
+    assert.equal(insert.params[16], ACCOUNT_PLAY_ID);
     assert.equal(insert.params.includes(PURCHASE_TOKEN), false);
+    assert.equal(insert.params.includes(ACCOUNT_ID), true);
 
     const commitIndex = pool.queries.findIndex((query) =>
         query.text === 'COMMIT'
@@ -218,7 +224,7 @@ test('rejects a verified Play purchase linked to a different Agora account', asy
                 acknowledgementState:
                     'ACKNOWLEDGEMENT_STATE_PENDING',
                 externalAccountIdentifiers: {
-                    obfuscatedExternalAccountId: OTHER_ACCOUNT_ID,
+                    obfuscatedExternalAccountId: OTHER_ACCOUNT_PLAY_ID,
                 },
                 lineItems: [
                     {
@@ -291,7 +297,7 @@ test('does not grant Pro or acknowledge an on-hold subscription', async () => {
                 acknowledgementState:
                     'ACKNOWLEDGEMENT_STATE_PENDING',
                 externalAccountIdentifiers: {
-                    obfuscatedExternalAccountId: ACCOUNT_ID,
+                    obfuscatedExternalAccountId: ACCOUNT_PLAY_ID,
                 },
                 lineItems: [
                     {
