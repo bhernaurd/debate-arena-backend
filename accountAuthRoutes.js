@@ -1,5 +1,6 @@
 import express from 'express';
 
+import { createAccountAIJobRouter } from './accountAIJobRoutes.js';
 import { createGooglePlayNotificationRouter } from './googlePlayNotificationRoutes.js';
 import {
     AccountAuthError,
@@ -469,6 +470,21 @@ export function createAccountAuthRouter(
         '/google-play',
         createGooglePlayNotificationRouter(pool, { logger })
     );
+
+    // Production PostgreSQL pools expose connect(); lightweight unit-test pools
+    // used by unrelated account-route tests do not. Mounting conditionally keeps
+    // those tests isolated while the account AI router itself has focused tests.
+    if (typeof pool?.connect === 'function') {
+        router.use(
+            '/ai-jobs',
+            createAccountAIJobRouter({
+                pool,
+                accountAuthService,
+                proAccessService: accountProAccessService,
+                logger,
+            })
+        );
+    }
 
     // iOS remains unchanged and continues using Sign in with Apple.
     router.post(
