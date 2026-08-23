@@ -4,6 +4,7 @@ import { processAIJob } from './aiJobs.js';
 import {
     ExpandedAgoraAccessError,
     authorizeAIJobCreate,
+    reactivateExpandedOpeningForRetry,
 } from './expandedAgoraAccess.js';
 import { AccountAuthError } from './lib/accountAuthService.js';
 import { AccountProAccessError } from './lib/accountProAccessService.js';
@@ -88,6 +89,10 @@ function requireBearerToken(req) {
     return match[1];
 }
 
+function normalizeAccountId(value) {
+    return cleanString(value, 128).toLowerCase();
+}
+
 function normalizeMessages(messages) {
     if (!Array.isArray(messages)) return [];
     return messages
@@ -154,7 +159,7 @@ function publicError(error) {
             status,
             body: {
                 success: false,
-                error: error.message || 'The account AI job could not be created.',
+                error: error.message || 'The account AI job request failed.',
                 code: error.code || 'account_ai_job_failed',
                 retryable: Boolean(error.retryable),
             },
@@ -201,10 +206,21 @@ function entitlementMetadata(access) {
     };
 }
 
+function requireJobAccount(row, accountId) {
+    const storedAccountId = normalizeAccountId(row?.account_id);
+    if (!storedAccountId || storedAccountId !== normalizeAccountId(accountId)) {
+        fail(
+            'ai_job_account_conflict',
+            'This AI job belongs to another Agora account.',
+            { status: 409 }
+        );
+    }
+}
+
 /**
- * Creates persistent AI jobs for signed-in Android clients. Authentication and
- * Pro status are resolved entirely from the Agora account session; client Pro
- * metadata and StoreKit proof are ignored on this route.
+ * Creates and recovers persistent AI jobs for signed-in Android clients.
+ * Authentication and Pro status are resolved entirely from the Agora account
+ * session; client Pro metadata and StoreKit proof are ignored on these routes.
  */
 export function createAccountAIJobRouter({
     pool,
@@ -228,6 +244,30 @@ export function createAccountAIJobRouter({
         throw new Error('Account AI jobs require the Pro access service.');
     }
 
+    async function authorizeRequest(req, bodyUserId = null) {
+        const installationId = requireInstallationId(req, bodyUserId);
+        const accessToken = requireBearerToken(req);
+        const authorization = await accountAuthService.authorizeAccessToken({
+            installationId,
+            accessToken,
+        });
+        const accountId = normalizeAccountId(authorization.accountId);
+        if (!accountId) {
+            throw new Error('Account authorization returned an invalid account id.');
+        }
+        return { installationId, accountId };
+    }
+
+    function respondWithError(res, error, client = null) {
+        const response = publicError(error);
+        if (response.status >= 500) {
+            logger?.error?.('[AccountAIJobs] Request failed.', {
+                errorCode: error?.code || 'unknown_error',
+            });
+        }
+        return res.status(response.status).json(response.body);
+    }
+
     const router = express.Router();
 
     router.post('/', async (req, res) => {
@@ -236,12 +276,7 @@ export function createAccountAIJobRouter({
             const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
                 ? req.body
                 : {};
-            const installationId = requireInstallationId(req, body.userId);
-            const accessToken = requireBearerToken(req);
-            const authorization = await accountAuthService.authorizeAccessToken({
-                installationId,
-                accessToken,
-            });
+            const authorization = await authorizeRequest(req, body.userId);
             const accountAccess = await proAccessService.getCurrentAccess({
                 accountId: authorization.accountId,
             });
@@ -270,7 +305,6 @@ export function createAccountAIJobRouter({
             const safeMetadata = {
                 ...clientMetadata,
                 ...verifiedMetadata,
-                authenticatedAccountId: authorization.accountId,
             };
 
             client = await pool.connect();
@@ -289,7 +323,7 @@ export function createAccountAIJobRouter({
             if (existingJob) {
                 if (
                     existingJob.user_id &&
-                    existingJob.user_id !== installationId
+                    existingJob.user_id !== authorization.installationId
                 ) {
                     fail(
                         'client_request_owner_conflict',
@@ -297,6 +331,7 @@ export function createAccountAIJobRouter({
                         { status: 409 }
                     );
                 }
+                requireJobAccount(existingJob, authorization.accountId);
                 await client.query('COMMIT');
                 client.release();
                 client = null;
@@ -308,7 +343,7 @@ export function createAccountAIJobRouter({
 
             const accessDecision = await authorizeAIJobCreate(client, {
                 jobType,
-                userId: installationId,
+                userId: authorization.installationId,
                 debateId,
                 clientRequestId,
                 metadata: safeMetadata,
@@ -324,11 +359,12 @@ export function createAccountAIJobRouter({
                     job_type,
                     debate_id,
                     user_id,
+                    account_id,
                     status,
                     payload,
                     metadata
                 )
-                VALUES ($1, $2, $3, $4, 'pending', $5::jsonb, $6::jsonb)
+                VALUES ($1, $2, $3, $4, $5, 'pending', $6::jsonb, $7::jsonb)
                 ON CONFLICT (client_request_id) DO NOTHING
                 RETURNING *
                 `,
@@ -336,7 +372,8 @@ export function createAccountAIJobRouter({
                     clientRequestId,
                     jobType,
                     debateId || null,
-                    installationId,
+                    authorization.installationId,
+                    authorization.accountId,
                     JSON.stringify({ messages, systemPrompt }),
                     JSON.stringify({
                         ...safeMetadata,
@@ -363,13 +400,17 @@ export function createAccountAIJobRouter({
                         'AI job insert conflicted, but the existing job could not be loaded.'
                     );
                 }
-                if (job.user_id && job.user_id !== installationId) {
+                if (
+                    job.user_id &&
+                    job.user_id !== authorization.installationId
+                ) {
                     fail(
                         'client_request_owner_conflict',
                         'This client request belongs to another installation.',
                         { status: 409 }
                     );
                 }
+                requireJobAccount(job, authorization.accountId);
                 responseStatus = 200;
             }
 
@@ -408,14 +449,158 @@ export function createAccountAIJobRouter({
                 }
                 client.release();
             }
+            return respondWithError(res, error);
+        }
+    });
 
-            const response = publicError(error);
-            if (response.status >= 500) {
-                logger?.error?.('[AccountAIJobs] Request failed.', {
-                    errorCode: error?.code || 'unknown_error',
+    router.get('/client/:clientRequestId', async (req, res) => {
+        try {
+            const authorization = await authorizeRequest(req);
+            const clientRequestId = cleanString(req.params.clientRequestId, 200);
+            if (!clientRequestId) {
+                fail('invalid_ai_job', 'clientRequestId is required.', { status: 400 });
+            }
+
+            const result = await pool.query(
+                `
+                SELECT *
+                FROM ai_generation_jobs
+                WHERE client_request_id = $1
+                  AND account_id = $2
+                LIMIT 1
+                `,
+                [clientRequestId, authorization.accountId]
+            );
+            const job = result.rows[0];
+            if (!job) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'AI job not found.',
+                    code: 'ai_job_not_found',
                 });
             }
-            return res.status(response.status).json(response.body);
+            return res.status(200).json({ success: true, job: publicJob(job) });
+        } catch (error) {
+            return respondWithError(res, error);
+        }
+    });
+
+    router.get('/:jobId', async (req, res) => {
+        try {
+            const authorization = await authorizeRequest(req);
+            const jobId = cleanString(req.params.jobId, 200);
+            if (!jobId) {
+                fail('invalid_ai_job', 'jobId is required.', { status: 400 });
+            }
+
+            const result = await pool.query(
+                `
+                SELECT *
+                FROM ai_generation_jobs
+                WHERE id = $1
+                  AND account_id = $2
+                LIMIT 1
+                `,
+                [jobId, authorization.accountId]
+            );
+            const job = result.rows[0];
+            if (!job) {
+                return res.status(404).json({
+                    success: false,
+                    error: 'AI job not found.',
+                    code: 'ai_job_not_found',
+                });
+            }
+            return res.status(200).json({ success: true, job: publicJob(job) });
+        } catch (error) {
+            return respondWithError(res, error);
+        }
+    });
+
+    router.post('/:jobId/retry', async (req, res) => {
+        let client = null;
+        try {
+            const body = req.body && typeof req.body === 'object' && !Array.isArray(req.body)
+                ? req.body
+                : {};
+            const authorization = await authorizeRequest(req, body.userId);
+            const jobId = cleanString(req.params.jobId, 200);
+            if (!jobId) {
+                fail('invalid_ai_job', 'jobId is required.', { status: 400 });
+            }
+
+            client = await pool.connect();
+            await client.query('BEGIN');
+
+            const existingResult = await client.query(
+                `
+                SELECT *
+                FROM ai_generation_jobs
+                WHERE id = $1
+                  AND account_id = $2
+                  AND status = 'failed'
+                FOR UPDATE
+                `,
+                [jobId, authorization.accountId]
+            );
+            const existingJob = existingResult.rows[0];
+            if (!existingJob) {
+                await client.query('ROLLBACK');
+                client.release();
+                client = null;
+                return res.status(404).json({
+                    success: false,
+                    error: 'Failed AI job not found.',
+                    code: 'ai_job_not_found',
+                });
+            }
+
+            await reactivateExpandedOpeningForRetry(client, existingJob);
+
+            const result = await client.query(
+                `
+                UPDATE ai_generation_jobs
+                SET
+                    status = 'pending',
+                    attempts = 0,
+                    error_message = NULL,
+                    failed_at = NULL,
+                    processing_started_at = NULL
+                WHERE id = $1
+                  AND account_id = $2
+                RETURNING *
+                `,
+                [jobId, authorization.accountId]
+            );
+
+            await client.query('COMMIT');
+            client.release();
+            client = null;
+
+            const job = result.rows[0];
+            setImmediate(() => {
+                processAIJob(job.id).catch((error) => {
+                    logger?.error?.('[AccountAIJobs] Retry processing error.', {
+                        jobId: job.id,
+                        error: error?.message || String(error),
+                    });
+                });
+            });
+
+            return res.status(200).json({
+                success: true,
+                job: publicJob(job),
+            });
+        } catch (error) {
+            if (client) {
+                try {
+                    await client.query('ROLLBACK');
+                } catch {
+                    // Preserve the original failure.
+                }
+                client.release();
+            }
+            return respondWithError(res, error);
         }
     });
 
