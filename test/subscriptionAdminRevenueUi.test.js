@@ -98,5 +98,10 @@ test('Revenue enhancer leaves the rendered client script syntactically valid', (
 
   assert.ok(script, 'dashboard script not found');
   assert.doesNotMatch(script, /<\/html>/i);
-  assert.doesNotThrow(() => new vm.Script(script, { filename: 'subscription-admin-client.js' }));
+  try {
+    new vm.Script(script, { filename: 'subscription-admin-client.js' });
+  } catch (error) {
+    console.error(error?.stack || error);
+    throw error;
+  }
 });
