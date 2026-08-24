@@ -51,7 +51,7 @@ test('Overview keeps four primary KPIs and moves subscriber detail to Breakdown'
   assert.doesNotMatch(overview, /<h2>Access source<\/h2>/);
   assert.doesNotMatch(overview, /<h2>Status<\/h2>/);
   assert.match(overview, /<h2>Apple payouts<\/h2>/);
-  assert.match(overview, /Recent customers/);
+  assert.match(overview, /Recent subscribers/);
 
   const loadOverview = html.match(/async function loadOverview\(\)\{([\s\S]*?)async function loadBreakdown/i)?.[1] || '';
   assert.ok(loadOverview, 'loadOverview function not found');
@@ -73,9 +73,22 @@ test('Overview keeps four primary KPIs and moves subscriber detail to Breakdown'
   assert.match(html, /metric\('Canceling'/);
 });
 
+test('Customers navigation is removed and Events becomes Subscribers', () => {
+  const html = applyDashboardEnhancements(renderBaseDashboard());
+  const nav = html.match(/<nav>([\s\S]*?)<\/nav>/i)?.[1] || '';
+
+  assert.ok(nav, 'Navigation not found');
+  assert.doesNotMatch(nav, /data-view="customers"/);
+  assert.doesNotMatch(nav, />Customers<\/button>/);
+  assert.doesNotMatch(nav, />Events<\/button>/);
+  assert.match(nav, /data-view="events">Subscribers<\/button>/);
+  assert.match(html, /events:\['Subscribers','Current subscribers and subscription lifecycle history'\]/);
+  assert.match(html, /<h2>Subscribers<\/h2><span>Current state · click a subscriber for full history<\/span>/);
+});
+
 test('Apple payout schedule is collapsed by default and emphasizes current information', () => {
   const html = applyDashboardEnhancements(renderBaseDashboard());
-  const payoutSection = html.match(/<div class="section apple-payout-section">([\s\S]*?)<div class="section"><div class="sectionhead"><h2>Recent customers/i)?.[1] || '';
+  const payoutSection = html.match(/<div class="section apple-payout-section">([\s\S]*?)<div class="section"><div class="sectionhead"><h2>Recent subscribers/i)?.[1] || '';
 
   assert.ok(payoutSection, 'Apple payout section not found');
   assert.match(payoutSection, /id="applePayoutSummary"/);
