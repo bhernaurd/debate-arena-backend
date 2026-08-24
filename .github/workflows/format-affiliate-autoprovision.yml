@@ -1,0 +1,65 @@
+name: Format affiliate autoprovision patch
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.event.issue.title == '[automation] format affiliate autoprovision'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: automation/affiliate-auto-provision-1000-final
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22.23.1"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Clean formatting only
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_required(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected one match, found {count}')
+              return text.replace(old, new, 1)
+
+          service_path = Path('lib/appStoreConnectAffiliateService.js')
+          service = service_path.read_text()
+          service = replace_required(service, '''        if (\ncandidateCode.customCode !== normalizedCustomCode ||\ncandidateCode.active !== true\n        ) {\ncontinue;\n        }\n\n        if (candidateOffer.id === offer.id) {\nreturn {\n  created: false,\n  status: 'already_exists',\n  offerId: offer.id,\n  offerName: offer.name,\n  customCodeId: candidateCode.id,\n  customCode: normalizedCustomCode,\n  numberOfCodes: candidateCode.numberOfCodes,\n  active: candidateCode.active,\n  expirationDate: candidateCode.expirationDate || null,\n};\n        }\n\n        throw statusError(\n409,\n`${normalizedCustomCode} is already active on a different App Store Connect offer (${candidateOffer.name || candidateOffer.id}).`,\n'app_store_connect_custom_code_conflict'\n        );''', '''        if (\n          candidateCode.customCode !== normalizedCustomCode ||\n          candidateCode.active !== true\n        ) {\n          continue;\n        }\n\n        if (candidateOffer.id === offer.id) {\n          return {\n            created: false,\n            status: 'already_exists',\n            offerId: offer.id,\n            offerName: offer.name,\n            customCodeId: candidateCode.id,\n            customCode: normalizedCustomCode,\n            numberOfCodes: candidateCode.numberOfCodes,\n            active: candidateCode.active,\n            expirationDate: candidateCode.expirationDate || null,\n          };\n        }\n\n        throw statusError(\n          409,\n          `${normalizedCustomCode} is already active on a different App Store Connect offer (${candidateOffer.name || candidateOffer.id}).`,\n          'app_store_connect_custom_code_conflict'\n        );''', 'service existing-code block')
+          service = replace_required(service, '''        data: {\ntype: 'subscriptionOfferCodeCustomCodes',\nattributes,\nrelationships: {\n  offerCode: {\n    data: {\n      type: 'subscriptionOfferCodes',\n      id: offer.id,\n    },\n  },\n},\n        },''', '''        data: {\n          type: 'subscriptionOfferCodeCustomCodes',\n          attributes,\n          relationships: {\n            offerCode: {\n              data: {\n                type: 'subscriptionOfferCodes',\n                id: offer.id,\n              },\n            },\n          },\n        },''', 'service create payload')
+          service_path.write_text(service)
+
+          routes_path = Path('affiliateRoutes.js')
+          routes = routes_path.read_text()
+          routes = replace_required(routes, '''        const appleMessage = isTest\n? 'Sandbox/test affiliate created. Automatic production Apple provisioning was skipped.'\n: appleConnected\n  ? (appleProvisioning.status === 'created'\n      ? 'Apple creator code created automatically with ' + number(appleProvisioning.numberOfCodes || 1000) + ' redemptions.'\n      : 'Apple creator code already existed in the shared offer and is linked.')\n  : 'Affiliate created, but the Apple creator code still needs attention: ' + String(appleProvisioning.message || 'Apple provisioning failed.');''', '''        const appleMessage = isTest\n          ? 'Sandbox/test affiliate created. Automatic production Apple provisioning was skipped.'\n          : appleConnected\n            ? (appleProvisioning.status === 'created'\n                ? 'Apple creator code created automatically with ' + number(appleProvisioning.numberOfCodes || 1000) + ' redemptions.'\n                : 'Apple creator code already existed in the shared offer and is linked.')\n            : 'Affiliate created, but the Apple creator code still needs attention: ' + String(appleProvisioning.message || 'Apple provisioning failed.');''', 'route Apple message')
+          routes = replace_required(routes, '''        $('modal').innerHTML = '<h2>Affiliate Created</h2><div class="modal-sub">Copy these links now. The private dashboard link can also be recovered later from this admin dashboard when encrypted token storage is configured.</div>' +\n'<div class="result-box">' + resultLine('Referral Link', payload.referralUrl) + resultLine('Private Dashboard', payload.dashboardUrl) + resultLine('Apple Redemption', payload.appleRedemptionUrl) + '</div>' +\n'<div class="' + (appleConnected || isTest ? 'result-box' : 'notice danger') + '" style="margin-top:12px">' + html(appleMessage) + '</div>' +\n'<div class="modal-actions">' +\n  (!isTest && !appleConnected && payload.affiliate?.id ? '<button class="button" data-modal-action="retry-apple" data-affiliate-id="' + html(payload.affiliate.id) + '">Retry Apple Connection</button>' : '') +\n  '<button class="button gold" data-modal-action="close-refresh">Done</button></div>';''', '''        $('modal').innerHTML = '<h2>Affiliate Created</h2><div class="modal-sub">Copy these links now. The private dashboard link can also be recovered later from this admin dashboard when encrypted token storage is configured.</div>' +\n          '<div class="result-box">' + resultLine('Referral Link', payload.referralUrl) + resultLine('Private Dashboard', payload.dashboardUrl) + resultLine('Apple Redemption', payload.appleRedemptionUrl) + '</div>' +\n          '<div class="' + (appleConnected || isTest ? 'result-box' : 'notice danger') + '" style="margin-top:12px">' + html(appleMessage) + '</div>' +\n          '<div class="modal-actions">' +\n            (!isTest && !appleConnected && payload.affiliate?.id ? '<button class="button" data-modal-action="retry-apple" data-affiliate-id="' + html(payload.affiliate.id) + '">Retry Apple Connection</button>' : '') +\n            '<button class="button gold" data-modal-action="close-refresh">Done</button></div>';''', 'route result modal')
+          routes = replace_required(routes, '''        const payload = await adminFetch('/api/admin/affiliates/' + encodeURIComponent(affiliateId) + '/app-store-connect-code', {\nmethod:'POST', body:{ numberOfCodes:1000 }\n        });''', '''        const payload = await adminFetch('/api/admin/affiliates/' + encodeURIComponent(affiliateId) + '/app-store-connect-code', {\n          method:'POST', body:{ numberOfCodes:1000 }\n        });''', 'route retry fetch')
+          routes = replace_required(routes, '''        toast(provisioning.status === 'created'\n? 'Apple creator code created with 1,000 redemptions.'\n: 'Apple creator code is connected.');''', '''        toast(provisioning.status === 'created'\n          ? 'Apple creator code created with 1,000 redemptions.'\n          : 'Apple creator code is connected.');''', 'route retry toast')
+          routes = replace_required(routes, '''        try {\nappleProvisioning = await provisionAffiliateAppleCode(\n  created.affiliate,\n  req.body?.appleCustomCodeCount ?? 1000\n);\n        } catch (appleError) {\nconsole.error('[affiliate] automatic App Store Connect creator-code provisioning:', {\n  code: appleError?.code || 'app_store_connect_custom_code_provisioning_failed',\n  message: appleError?.message || String(appleError),\n  affiliateId: created?.affiliate?.id || null,\n  customCode: created?.affiliate?.normalized_code || null,\n});\nappleProvisioning = {\n  created: false,\n  status: 'failed',\n  code: appleError?.code || 'app_store_connect_custom_code_provisioning_failed',\n  message: appleError?.message || 'App Store Connect creator-code provisioning failed.',\n};\n        }''', '''        try {\n          appleProvisioning = await provisionAffiliateAppleCode(\n            created.affiliate,\n            req.body?.appleCustomCodeCount ?? 1000\n          );\n        } catch (appleError) {\n          console.error('[affiliate] automatic App Store Connect creator-code provisioning:', {\n            code: appleError?.code || 'app_store_connect_custom_code_provisioning_failed',\n            message: appleError?.message || String(appleError),\n            affiliateId: created?.affiliate?.id || null,\n            customCode: created?.affiliate?.normalized_code || null,\n          });\n          appleProvisioning = {\n            created: false,\n            status: 'failed',\n            code: appleError?.code || 'app_store_connect_custom_code_provisioning_failed',\n            message: appleError?.message || 'App Store Connect creator-code provisioning failed.',\n          };\n        }''', 'route provisioning try/catch')
+          routes_path.write_text(routes)
+          PY
+      - name: Validate formatting-only update
+        run: |
+          npm ci
+          npm run check
+          node --test test/appStoreConnectAffiliateProvisioning.test.js
+          npm test
+      - name: Push formatting commit to PR branch
+        shell: bash
+        run: |
+          git config user.name "Agora Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add affiliateRoutes.js lib/appStoreConnectAffiliateService.js
+          git commit -m "Clean affiliate provisioning formatting"
+          git push origin HEAD:refs/heads/automation/affiliate-auto-provision-1000-final
