@@ -1,0 +1,38 @@
+name: Debug affiliate autoprovision
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+
+jobs:
+  debug:
+    if: github.event.issue.title == '[automation] debug affiliate autoprovision'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Run patch and capture diagnostics
+        shell: bash
+        run: |
+          sed -n "/python3 <<'PY'/,/^          PY$/p" .github/workflows/affiliate-autoprovision-v2.yml \
+            | tail -n +2 \
+            | head -n -1 \
+            | sed 's/^          //' > /tmp/affiliate_patch.py
+          set +e
+          python3 /tmp/affiliate_patch.py > /tmp/affiliate-debug.log 2>&1
+          code=$?
+          echo "patch_exit=$code" >> /tmp/affiliate-debug.log
+          set -e
+          git reset --hard HEAD
+          git clean -fd
+          git checkout -B automation/affiliate-autoprovision-debug
+          cp /tmp/affiliate-debug.log .affiliate-autoprovision-debug.log
+          git config user.name "Agora Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git add .affiliate-autoprovision-debug.log
+          git commit -m "Capture affiliate autoprovision diagnostics"
+          git push --force origin HEAD:refs/heads/automation/affiliate-autoprovision-debug
