@@ -1627,6 +1627,11 @@ function renderAffiliateAdminDashboardPage() {
     tr:last-child td { border-bottom: 0; }
     tbody tr:hover { background: rgba(255,255,255,.018); }
     .partner-name { font-weight: 750; color: #eee8f1; }
+    .partner-link {
+      appearance: none; border: 0; padding: 0; margin: 0; background: transparent; color: #eee8f1;
+      font: inherit; font-weight: 750; text-align: left; cursor: pointer;
+    }
+    .partner-link:hover, .partner-link:focus-visible { color: var(--gold-soft); outline: none; }
     .code { font-family: ui-monospace,SFMono-Regular,Menlo,monospace; color: var(--gold-soft); font-size: 11px; }
     .badge { display: inline-flex; align-items: center; gap: 5px; border: 1px solid rgba(255,255,255,.09); background: rgba(255,255,255,.035); border-radius: 999px; padding: 4px 7px; font-size: 10px; color: #d7d0dc; white-space: nowrap; }
     .badge.positive { color: var(--positive); border-color: rgba(143,208,174,.22); background: rgba(143,208,174,.06); }
@@ -1634,6 +1639,17 @@ function renderAffiliateAdminDashboardPage() {
     .badge.danger { color: var(--danger); border-color: rgba(223,143,146,.22); background: rgba(223,143,146,.06); }
     .badge.info { color: var(--info); border-color: rgba(154,185,223,.22); background: rgba(154,185,223,.06); }
     .actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+    .affiliate-actions { display: flex; gap: 6px; align-items: flex-start; flex-wrap: nowrap; }
+    .row-menu { margin: 0; }
+    .row-menu > summary {
+      list-style: none; width: 32px; height: 29px; display: inline-flex; align-items: center; justify-content: center;
+      border: 1px solid rgba(255,255,255,.09); background: rgba(255,255,255,.035); color: #ddd6e2;
+      border-radius: 9px; cursor: pointer; font-weight: 750; letter-spacing: .08em; user-select: none;
+    }
+    .row-menu > summary::-webkit-details-marker { display: none; }
+    .row-menu > summary:hover, .row-menu[open] > summary { background: rgba(255,255,255,.065); }
+    .row-menu-panel { display: flex; flex-direction: column; align-items: stretch; gap: 6px; margin-top: 6px; min-width: 124px; }
+    .row-menu-panel .button { white-space: nowrap; text-align: left; }
     .toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
     .field, .select, textarea {
       width: 100%; border: 1px solid rgba(255,255,255,.09); background: rgba(255,255,255,.035); color: var(--text);
@@ -2043,7 +2059,7 @@ function renderAffiliateAdminDashboardPage() {
         const operationalActive = a.status === 'active';
         const canToggle = ['active','inactive'].includes(a.status);
         return '<tr>' +
-          '<td><div class="partner-name">' + html(a.display_name) + '</div><div class="muted tiny">Since ' + html(String(a.affiliate_since || '').slice(0,10)) + '</div></td>' +
+          '<td><button class="partner-link" type="button" data-action="details" data-id="' + html(a.id) + '">' + html(a.display_name) + '</button><div class="muted tiny">Since ' + html(String(a.affiliate_since || '').slice(0,10)) + '</div></td>' +
           '<td><span class="code">' + html(a.normalized_code) + '</span></td>' +
           '<td>' + badge(a.is_test ? 'Sandbox' : 'Production', a.is_test ? 'warning' : 'info') + '</td>' +
           '<td>' + statusBadge(a) + '</td>' +
@@ -2053,11 +2069,12 @@ function renderAffiliateAdminDashboardPage() {
           '<td class="money">' + money(a.currently_owed, a.payout_currency) + '</td>' +
           '<td>' + percent(a.commission_rate) + '<div class="muted tiny">' + html(basisLabel(a.commission_basis)) + '</div></td>' +
           '<td>' + badge(number(a.open_alerts), alertKind) + '</td>' +
-          '<td><div class="actions">' +
-            '<button class="button small" data-action="details" data-id="' + html(a.id) + '">Details</button>' +
+          '<td><div class="affiliate-actions">' +
             '<button class="button small" data-action="dashboard" data-id="' + html(a.id) + '">Dashboard</button>' +
-            (canToggle ? '<button class="button small ' + (operationalActive ? 'danger' : 'gold') + '" data-action="toggle" data-id="' + html(a.id) + '" data-active="' + (operationalActive ? 'false' : 'true') + '">' + (operationalActive ? 'Pause' : 'Activate') + '</button>' : '') +
-            '<button class="button small danger" data-action="delete" data-id="' + html(a.id) + '">Delete</button>' +
+            '<details class="row-menu"><summary title="More actions" aria-label="More actions">•••</summary><div class="row-menu-panel">' +
+              (canToggle ? '<button class="button small ' + (operationalActive ? '' : 'gold') + '" data-action="toggle" data-id="' + html(a.id) + '" data-active="' + (operationalActive ? 'false' : 'true') + '">' + (operationalActive ? 'Pause Affiliate' : 'Activate Affiliate') + '</button>' : '') +
+              '<button class="button small danger" data-action="delete" data-id="' + html(a.id) + '">Delete Affiliate</button>' +
+            '</div></details>' +
           '</div></td>' +
         '</tr>';
       }).join('');
