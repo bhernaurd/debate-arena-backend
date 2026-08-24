@@ -1751,6 +1751,7 @@ function renderAffiliateAdminDashboardPage() {
               <option value="active">Active</option>
               <option value="paused">Paused</option>
               <option value="test">Sandbox/Test</option>
+              <option value="archived">Archived</option>
             </select>
           </div>
         </div>
@@ -1990,7 +1991,7 @@ function renderAffiliateAdminDashboardPage() {
       }
     }
 
-    function productionAffiliates() { return affiliates.filter(a => !a.is_test); }
+    function productionAffiliates() { return affiliates.filter(a => !a.is_test && a.status !== 'archived'); }
 
     function renderOverview() {
       renderAppleImports();
@@ -2018,6 +2019,9 @@ function renderAffiliateAdminDashboardPage() {
       const filter = $('affiliateFilter').value;
       const filtered = affiliates.filter(a => {
         if (query && !String(a.display_name || '').toLowerCase().includes(query) && !String(a.normalized_code || '').toLowerCase().includes(query)) return false;
+
+        if (filter === 'archived') return a.status === 'archived';
+        if (a.status === 'archived') return false;
 
         // Keep Sandbox/Test affiliates out of every normal production view.
         // They are only shown when the user explicitly selects Sandbox/Test.
@@ -2056,6 +2060,7 @@ function renderAffiliateAdminDashboardPage() {
             '<button class="button small" data-action="details" data-id="' + html(a.id) + '">Details</button>' +
             '<button class="button small" data-action="dashboard" data-id="' + html(a.id) + '">Dashboard</button>' +
             (canToggle ? '<button class="button small ' + (operationalActive ? 'danger' : 'gold') + '" data-action="toggle" data-id="' + html(a.id) + '" data-active="' + (operationalActive ? 'false' : 'true') + '">' + (operationalActive ? 'Pause' : 'Activate') + '</button>' : '') +
+            (a.status !== 'archived' ? '<button class="button small danger" data-action="delete" data-id="' + html(a.id) + '">Delete</button>' : '') +
           '</div></td>' +
         '</tr>';
       }).join('');
@@ -2179,7 +2184,7 @@ function renderAffiliateAdminDashboardPage() {
       ignoredToggle.textContent = (showIgnoredAppleImports ? 'Hide Ignored' : 'Show Ignored') + (appleIgnored.length ? ' (' + appleIgnored.length + ')' : '');
 
       const importRows = appleImports.map(item => renderAppleImportRow(item, 'import'));
-      const linkedRows = appleLinked.map(item => renderAppleImportRow(item, 'linked'));
+      const linkedRows = appleLinked.filter(item => item.linkedAffiliate?.status !== 'archived').map(item => renderAppleImportRow(item, 'linked'));
       const ignoredRows = showIgnoredAppleImports ? appleIgnored.map(item => renderAppleImportRow(item, 'ignored')) : [];
       const combined = importRows.concat(linkedRows, ignoredRows);
 
@@ -2306,6 +2311,26 @@ function renderAffiliateAdminDashboardPage() {
         await adminFetch('/api/admin/affiliates/' + encodeURIComponent(id) + '/operational-status', { method:'POST', body:{ active: shouldActivate } });
         toast('Affiliate ' + verb + 'd.');
         await loadAffiliates(false);
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function deleteAffiliate(id) {
+      const a = affiliateById(id);
+      if (!a) return;
+      const appleNotice = a.is_test
+        ? 'This removes the affiliate from normal views while preserving historical records.'
+        : 'This will deactivate the Apple creator code, remove the affiliate from normal views, revoke its private dashboard link, and preserve historical referral and payout records.';
+      if (!confirm('Delete ' + a.display_name + '?\n\n' + appleNotice)) return;
+      try {
+        const payload = await adminFetch('/api/admin/affiliates/' + encodeURIComponent(id), { method:'DELETE' });
+        const apple = payload.appleDeactivation || {};
+        const message = a.is_test
+          ? 'Affiliate deleted from active views.'
+          : apple.status === 'deactivated'
+            ? 'Affiliate deleted and Apple creator code deactivated.'
+            : 'Affiliate deleted. Apple creator code was already inactive.';
+        toast(message);
+        await Promise.all([loadAffiliates(false), loadAppleImports(false), loadAlerts(false)]);
       } catch (error) { toast(error.message, true); }
     }
 
@@ -2626,6 +2651,7 @@ function renderAffiliateAdminDashboardPage() {
       if (button.dataset.action === 'details') openDetails(id);
       if (button.dataset.action === 'dashboard') openPartnerDashboard(id);
       if (button.dataset.action === 'toggle') toggleAffiliate(id, button.dataset.active === 'true');
+      if (button.dataset.action === 'delete') deleteAffiliate(id);
     });
 
     $('appleImportRows').addEventListener('click', event => {
@@ -3222,6 +3248,99 @@ export function createAffiliateRouter(pool, options = {}) {
         actor,
       });
       return res.json({ success: true, preference });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.delete('/api/admin/affiliates/:id', adminOnly, async (req, res) => {
+    try {
+      const affiliates = await service.listAffiliates();
+      const affiliate = affiliates.find(
+        item => String(item?.id || '') === String(req.params.id || '')
+      );
+
+      if (!affiliate) {
+        const error = new Error('Affiliate not found.');
+        error.statusCode = 404;
+        error.code = 'affiliate_not_found';
+        throw error;
+      }
+
+      if (affiliate.status === 'archived') {
+        return res.json({
+          success: true,
+          affiliate,
+          alreadyArchived: true,
+          appleDeactivation: {
+            status: 'already_inactive',
+            deactivatedCount: 0,
+          },
+        });
+      }
+
+      let appleDeactivation = {
+        status: 'skipped',
+        reason: 'test_affiliate',
+        deactivatedCount: 0,
+      };
+
+      // Deactivate Apple first. If Apple rejects the request, the Agora record
+      // stays active so the website never claims a still-redeemable code was deleted.
+      if (!affiliate.is_test) {
+        if (typeof appStoreConnectService?.deactivateCustomCode !== 'function') {
+          const error = new Error('App Store Connect custom-code deactivation is unavailable.');
+          error.statusCode = 503;
+          error.code = 'app_store_connect_custom_code_deactivation_unavailable';
+          throw error;
+        }
+        appleDeactivation = await appStoreConnectService.deactivateCustomCode({
+          offerReferenceName: affiliate.apple_offer_identifier,
+          customCode: affiliate.normalized_code,
+        });
+      }
+
+      const client = await pool.connect();
+      let archivedAffiliate = null;
+      try {
+        await client.query('BEGIN');
+        const archived = await client.query(
+          `
+          UPDATE affiliates
+          SET status = 'archived',
+              code_status = 'disabled',
+              archived_at = COALESCE(archived_at, NOW()),
+              updated_at = NOW()
+          WHERE id = $1
+          RETURNING *
+          `,
+          [affiliate.id]
+        );
+        archivedAffiliate = archived.rows[0] || affiliate;
+
+        await client.query(
+          `
+          UPDATE affiliate_dashboard_tokens
+          SET status = 'revoked',
+              revoked_at = COALESCE(revoked_at, NOW())
+          WHERE affiliate_id = $1
+            AND status = 'active'
+          `,
+          [affiliate.id]
+        );
+        await client.query('COMMIT');
+      } catch (databaseError) {
+        await client.query('ROLLBACK');
+        throw databaseError;
+      } finally {
+        client.release();
+      }
+
+      return res.json({
+        success: true,
+        affiliate: archivedAffiliate,
+        appleDeactivation,
+      });
     } catch (error) {
       return jsonError(res, error);
     }
