@@ -53,7 +53,7 @@ test('Overview keeps four primary KPIs and moves subscriber detail to Breakdown'
   assert.match(overview, /Apple payout periods/);
   assert.match(overview, /Recent customers/);
 
-  const loadOverview = html.match(/async function loadOverview\(\)\{([\s\S]*?)function payoutDateLabel/i)?.[1] || '';
+  const loadOverview = html.match(/async function loadOverview\(\)\{([\s\S]*?)async function loadBreakdown/i)?.[1] || '';
   assert.ok(loadOverview, 'loadOverview function not found');
   assert.match(loadOverview, /metric\('Active Pro'/);
   assert.match(loadOverview, /metric\('Paid subscribers'/);
