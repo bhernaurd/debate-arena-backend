@@ -1,0 +1,20 @@
+    async function deleteAffiliate(id) {
+      const a = affiliateById(id);
+      if (!a) return;
+      const appleNotice = a.is_test
+        ? 'This removes the affiliate from normal views while preserving historical records.'
+        : 'This will deactivate the Apple creator code, remove the affiliate from normal views, revoke its private dashboard link, and preserve historical referral and payout records.';
+      if (!confirm('Delete ' + a.display_name + '?\n\n' + appleNotice)) return;
+      try {
+        const payload = await adminFetch('/api/admin/affiliates/' + encodeURIComponent(id), { method:'DELETE' });
+        const apple = payload.appleDeactivation || {};
+        const message = a.is_test
+          ? 'Affiliate deleted from active views.'
+          : apple.status === 'deactivated'
+            ? 'Affiliate deleted and Apple creator code deactivated.'
+            : 'Affiliate deleted. Apple creator code was already inactive.';
+        toast(message);
+        await Promise.all([loadAffiliates(false), loadAppleImports(false), loadAlerts(false)]);
+      } catch (error) { toast(error.message, true); }
+    }
+
