@@ -2317,7 +2317,7 @@ function renderAffiliateAdminDashboardPage() {
         '<h2>' + (isImport ? 'Complete Apple Import' : 'Create Affiliate') + '</h2><div class="modal-sub">' +
         (isImport
           ? 'This Apple offer already exists in App Store Connect. Complete the Agora-only fields below to activate the affiliate dashboard, compensation term, and attribution mapping.'
-          : 'This creates the Agora affiliate record only. The Apple Offer Code campaign itself must already exist in App Store Connect. Once an offer exists in Apple, it will automatically appear above under App Store Connect Imports after sync.') +
+          : 'This creates the Agora affiliate and automatically creates its creator code in the shared App Store Connect offer. New production creator codes default to 1,000 redemptions. If the code already exists in that Apple offer, Agora links it without creating a duplicate.') +
         '</div>' +
         '<div class="form-grid">' +
           '<div class="form-group"><label>Display Name</label><input id="newDisplayName" class="field" placeholder="Max Agora" value="" /></div>' +
@@ -2373,11 +2373,37 @@ function renderAffiliateAdminDashboardPage() {
             contactEmail:$('newEmail').value.trim() || null, internalNotes:$('newNotes').value.trim() || null
           }
         });
+        const appleProvisioning = payload.appleProvisioning || {};
+        const appleConnected = ['created','already_exists'].includes(appleProvisioning.status);
+        const appleMessage = isTest
+          ? 'Sandbox/test affiliate created. Automatic production Apple provisioning was skipped.'
+          : appleConnected
+            ? (appleProvisioning.status === 'created'
+                ? 'Apple creator code created automatically with ' + number(appleProvisioning.numberOfCodes || 1000) + ' redemptions.'
+                : 'Apple creator code already existed in the shared offer and is linked.')
+            : 'Affiliate created, but the Apple creator code still needs attention: ' + String(appleProvisioning.message || 'Apple provisioning failed.');
         $('modal').innerHTML = '<h2>Affiliate Created</h2><div class="modal-sub">Copy these links now. The private dashboard link can also be recovered later from this admin dashboard when encrypted token storage is configured.</div>' +
           '<div class="result-box">' + resultLine('Referral Link', payload.referralUrl) + resultLine('Private Dashboard', payload.dashboardUrl) + resultLine('Apple Redemption', payload.appleRedemptionUrl) + '</div>' +
-          '<div class="modal-actions"><button class="button gold" data-modal-action="close-refresh">Done</button></div>';
+          '<div class="' + (appleConnected || isTest ? 'result-box' : 'notice danger') + '" style="margin-top:12px">' + html(appleMessage) + '</div>' +
+          '<div class="modal-actions">' +
+            (!isTest && !appleConnected && payload.affiliate?.id ? '<button class="button" data-modal-action="retry-apple" data-affiliate-id="' + html(payload.affiliate.id) + '">Retry Apple Connection</button>' : '') +
+            '<button class="button gold" data-modal-action="close-refresh">Done</button></div>';
         await Promise.all([loadAffiliates(false), loadAppleImports(false)]);
       } catch (error) { $('createAffiliateError').textContent = error.message; }
+    }
+
+    async function retryAppleConnection(affiliateId) {
+      try {
+        const payload = await adminFetch('/api/admin/affiliates/' + encodeURIComponent(affiliateId) + '/app-store-connect-code', {
+          method:'POST', body:{ numberOfCodes:1000 }
+        });
+        const provisioning = payload.appleProvisioning || {};
+        toast(provisioning.status === 'created'
+          ? 'Apple creator code created with 1,000 redemptions.'
+          : 'Apple creator code is connected.');
+        closeModal();
+        await Promise.all([loadAffiliates(false), loadAppleImports(false)]);
+      } catch (error) { toast(error.message, true); }
     }
 
     function resultLine(label, value) {
@@ -2636,6 +2662,7 @@ function renderAffiliateAdminDashboardPage() {
       if (name === 'close') closeModal();
       if (name === 'close-refresh') { closeModal(); await loadAffiliates(false); }
       if (name === 'create-affiliate') await createAffiliateFromModal();
+      if (name === 'retry-apple') await retryAppleConnection(action.dataset.affiliateId);
       if (name === 'save-apple-canonical') await saveAppleCanonical(action.dataset.code);
       if (name === 'open-dashboard') await openPartnerDashboard(affiliateId);
       if (name === 'copy-referral') {
@@ -3255,11 +3282,62 @@ export function createAffiliateRouter(pool, options = {}) {
     }
   });
 
+  async function provisionAffiliateAppleCode(affiliate, numberOfCodes = 1000) {
+    if (!affiliate || affiliate.is_test) {
+      return {
+        created: false,
+        status: 'skipped',
+        reason: 'test_affiliate',
+      };
+    }
+
+    if (typeof appStoreConnectService?.ensureCustomCode !== 'function') {
+      const error = new Error('App Store Connect custom-code provisioning is unavailable.');
+      error.statusCode = 503;
+      error.code = 'app_store_connect_custom_code_provisioning_unavailable';
+      throw error;
+    }
+
+    return appStoreConnectService.ensureCustomCode({
+      offerReferenceName: affiliate.apple_offer_identifier,
+      customCode: affiliate.normalized_code,
+      numberOfCodes,
+    });
+  }
+
   router.post('/api/admin/affiliates', adminOnly, async (req, res) => {
     try {
       const actor = req.get('x-admin-actor') || 'owner_admin';
       const created = await service.createAffiliate(req.body || {}, actor);
-      return res.status(201).json({ success: true, ...created });
+      let appleProvisioning = {
+        created: false,
+        status: 'skipped',
+        reason: 'test_affiliate',
+      };
+
+      if (created?.affiliate?.is_test !== true) {
+        try {
+          appleProvisioning = await provisionAffiliateAppleCode(
+            created.affiliate,
+            req.body?.appleCustomCodeCount ?? 1000
+          );
+        } catch (appleError) {
+          console.error('[affiliate] automatic App Store Connect creator-code provisioning:', {
+            code: appleError?.code || 'app_store_connect_custom_code_provisioning_failed',
+            message: appleError?.message || String(appleError),
+            affiliateId: created?.affiliate?.id || null,
+            customCode: created?.affiliate?.normalized_code || null,
+          });
+          appleProvisioning = {
+            created: false,
+            status: 'failed',
+            code: appleError?.code || 'app_store_connect_custom_code_provisioning_failed',
+            message: appleError?.message || 'App Store Connect creator-code provisioning failed.',
+          };
+        }
+      }
+
+      return res.status(201).json({ success: true, ...created, appleProvisioning });
     } catch (error) {
       if (error?.code === '23505') {
         const constraint = String(error?.constraint || '');
@@ -3278,6 +3356,37 @@ export function createAffiliateRouter(pool, options = {}) {
             'That affiliate conflicts with an existing unique affiliate record.';
         }
       }
+      return jsonError(res, error);
+    }
+  });
+
+  router.post('/api/admin/affiliates/:id/app-store-connect-code', adminOnly, async (req, res) => {
+    try {
+      const affiliates = await service.listAffiliates();
+      const affiliate = affiliates.find(
+        item => String(item?.id || '') === String(req.params.id || '')
+      );
+
+      if (!affiliate) {
+        const error = new Error('Affiliate not found.');
+        error.statusCode = 404;
+        error.code = 'affiliate_not_found';
+        throw error;
+      }
+
+      if (affiliate.is_test) {
+        const error = new Error('Sandbox/test affiliates do not create production App Store Connect custom codes.');
+        error.statusCode = 400;
+        error.code = 'affiliate_test_apple_provisioning_not_allowed';
+        throw error;
+      }
+
+      const appleProvisioning = await provisionAffiliateAppleCode(
+        affiliate,
+        req.body?.numberOfCodes ?? 1000
+      );
+      return res.json({ success: true, appleProvisioning });
+    } catch (error) {
       return jsonError(res, error);
     }
   });
