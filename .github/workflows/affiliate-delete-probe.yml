@@ -1,0 +1,26 @@
+name: Temporary affiliate delete workflow probe
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+
+jobs:
+  probe:
+    if: github.event.issue.title == '[automation] affiliate delete probe'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Push probe branch
+        run: |
+          git config user.name "Agora Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git checkout -B automation/affiliate-delete-probe
+          printf 'workflow-fired\n' > .affiliate-delete-probe.txt
+          git add .affiliate-delete-probe.txt
+          git commit -m "Probe affiliate delete workflow"
+          git push --force origin HEAD:refs/heads/automation/affiliate-delete-probe
