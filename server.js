@@ -15,6 +15,7 @@ import { createAnalyticsRouter } from './analytics.js';
 import aiJobsRouter from './aiJobs.js';
 import { createAppStoreSubscriptionRouter } from './appStoreSubscriptionRoutes.js';
 import { createSubscriptionAdminRouter } from './subscriptionAdminRoutes.js';
+import { createSubscriptionAdminDashboardRouter } from './subscriptionAdminDashboardRoutes.js';
 import { createPaywallConfigurationRouter } from './paywallConfigurationRoutes.js';
 import { createAffiliateRouter } from './affiliateRoutes.js';
 import { createAccountAuthRouter } from './accountAuthRoutes.js';
@@ -551,6 +552,13 @@ app.use('/api/subscription-admin', createSubscriptionAdminRouter(pool, {
   adminKey:
     process.env.SUBSCRIPTION_DASHBOARD_ADMIN_KEY ||
     process.env.ANALYTICS_ADMIN_KEY,
+}));
+
+app.use('/subscription-admin', createSubscriptionAdminDashboardRouter({
+  adminKey:
+    process.env.SUBSCRIPTION_DASHBOARD_ADMIN_KEY ||
+    process.env.ANALYTICS_ADMIN_KEY,
+  port: PORT,
 }));
 
 app.use('/analytics', createAnalyticsRouter(pool, {
