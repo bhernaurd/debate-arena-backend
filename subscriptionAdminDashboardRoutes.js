@@ -1,8 +1,17 @@
 import express from 'express';
+import pg from 'pg';
 
 import {
   createSubscriptionAdminDashboardRouter as createBaseSubscriptionAdminDashboardRouter,
 } from './subscriptionAdminDashboardBaseRoutes.js';
+import {
+  loadSubscriptionAdminHistory,
+} from './lib/subscriptionAdminHistoryService.js';
+import {
+  enhanceSubscriptionAdminHistoryHtml,
+} from './lib/subscriptionAdminHistoryUi.js';
+
+const { Pool } = pg;
 
 function enhanceDashboardHtml(html) {
   return String(html)
@@ -46,6 +55,22 @@ function enhanceDashboardHtml(html) {
 
 export function createSubscriptionAdminDashboardRouter(options = {}) {
   const router = express.Router();
+  const historyPool = options.historyPool || new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: process.env.DATABASE_URL?.includes('railway')
+      ? { rejectUnauthorized: false }
+      : false,
+    max: 2,
+  });
+
+  if (!options.historyPool) {
+    historyPool.on('error', (error) => {
+      console.error(
+        '[SubscriptionDashboardHistory] Postgres pool error:',
+        error?.message || error
+      );
+    });
+  }
 
   router.use((_req, res, next) => {
     const originalSend = res.send.bind(res);
@@ -53,7 +78,9 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
     res.send = (body) => {
       const enhancedBody =
         typeof body === 'string'
-          ? enhanceDashboardHtml(body)
+          ? enhanceSubscriptionAdminHistoryHtml(
+              enhanceDashboardHtml(body)
+            )
           : body;
 
       return originalSend(enhancedBody);
@@ -65,6 +92,31 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
   router.use(
     createBaseSubscriptionAdminDashboardRouter(options)
   );
+
+  // This route intentionally comes after the base dashboard router. Requests
+  // therefore pass through the base dashboard's secure session middleware
+  // before this private history query is allowed to run.
+  router.get('/data/history', async (_req, res) => {
+    try {
+      const history = await loadSubscriptionAdminHistory(historyPool);
+      return res.json({
+        success: true,
+        ...history,
+      });
+    } catch (error) {
+      console.error(
+        '[SubscriptionDashboardHistory] Failed:',
+        error?.message || error
+      );
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'subscription_history_failed',
+          message: 'Subscription history is temporarily unavailable.',
+        },
+      });
+    }
+  });
 
   return router;
 }
