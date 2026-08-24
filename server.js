@@ -19,6 +19,7 @@ import { createSubscriptionAdminDashboardRouter } from './subscriptionAdminDashb
 import { createPaywallConfigurationRouter } from './paywallConfigurationRoutes.js';
 import { createAffiliateRouter } from './affiliateRoutes.js';
 import { createAccountAuthRouter } from './accountAuthRoutes.js';
+import { createAccountSubscriptionEntitlementRouter } from './accountSubscriptionEntitlementRoutes.js';
 import { createAccountDebateHistoryRouter } from './accountDebateHistoryRoutes.js';
 import { createAccountAchievementRouter } from './accountAchievementRoutes.js';
 import { createAccountDailyChallengeProgressRouter } from './accountDailyChallengeProgressRoutes.js';
@@ -530,6 +531,14 @@ app.use(
 app.use('/api/account/apple/challenge', accountChallengeLimiter);
 app.use('/api/account/apple/sign-in', accountSignInLimiter);
 app.use('/api/account/session', accountSessionLimiter);
+app.use(
+  '/api/account/subscription',
+  accountSessionLimiter,
+  createAccountSubscriptionEntitlementRouter({
+    accountAuthService,
+    proAccessService: accountProAccessService,
+  })
+);
 app.use('/api/account', accountAuthRouter);
 
 app.use('/affiliate', affiliatePortalLimiter);
