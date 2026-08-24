@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import test from 'node:test';
 
-import { createAppStoreConnectAffiliateService } from '../../lib/appStoreConnectAffiliateService.js';
+import { createAppStoreConnectAffiliateService } from '../lib/appStoreConnectAffiliateService.js';
 
 function privateKeyPem() {
   const { privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
@@ -88,7 +88,7 @@ test('deactivateCustomCode deactivates every active batch for the creator code',
 });
 
 test('Affiliate Admin delete is wired to Apple deactivation and archival', () => {
-  const source = fs.readFileSync(new URL('../../affiliateRoutes.js', import.meta.url), 'utf8');
+  const source = fs.readFileSync(new URL('../affiliateRoutes.js', import.meta.url), 'utf8');
   assert.match(source, /data-action="delete"/);
   assert.match(source, /router\.delete\('\/api\/admin\/affiliates\/:id'/);
   assert.match(source, /deactivateCustomCode/);
