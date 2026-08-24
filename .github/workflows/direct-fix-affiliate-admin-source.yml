@@ -1,0 +1,129 @@
+name: Direct Fix Affiliate Admin Source
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.issue.title == '[automation] direct fix affiliate admin source'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out latest main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Patch source directly and add unlock bootstrap
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('affiliateRoutes.js')
+          source = path.read_text()
+
+          old = r"if (!confirm('Delete ' + a.display_name + '?\n\n' + appleNotice)) return;"
+          new = r"if (!confirm('Delete ' + a.display_name + '?\\n\\n' + appleNotice)) return;"
+          if old in source:
+              source = source.replace(old, new, 1)
+          elif new not in source:
+              raise SystemExit('Delete confirmation escape target not found')
+
+          marker = "  <script>\n    let adminKey = sessionStorage.getItem('agoraAffiliateAdminKey') || '';"
+          bootstrap_marker = 'data-affiliate-admin-unlock-bootstrap'
+          if bootstrap_marker not in source:
+              if marker not in source:
+                  raise SystemExit('Admin script marker not found')
+              bootstrap = '''  <script data-affiliate-admin-unlock-bootstrap>
+    (() => {
+      const storageKey = 'agoraAffiliateAdminKey';
+      async function attemptUnlock() {
+        const input = document.getElementById('adminKey');
+        const errorEl = document.getElementById('loginError');
+        const button = document.getElementById('unlockAdmin');
+        const value = String(input?.value || '').trim();
+        if (!value) {
+          if (errorEl) errorEl.textContent = 'Enter the admin key.';
+          return;
+        }
+        if (errorEl) errorEl.textContent = 'Checking key…';
+        if (button) button.disabled = true;
+        try {
+          const response = await fetch('/api/admin/affiliates', {
+            headers: { 'x-admin-key': value, 'x-admin-actor': 'owner_admin' }
+          });
+          let payload = null;
+          try { payload = await response.json(); } catch { payload = null; }
+          if (!response.ok) {
+            if (response.status === 401) sessionStorage.removeItem(storageKey);
+            if (errorEl) errorEl.textContent = payload?.error?.message || ('Unlock failed (' + response.status + ').');
+            return;
+          }
+          sessionStorage.setItem(storageKey, value);
+          if (errorEl) errorEl.textContent = 'Key verified. Opening dashboard…';
+          window.location.reload();
+        } catch (error) {
+          if (errorEl) errorEl.textContent = error?.message || 'Unable to contact the admin API.';
+        } finally {
+          if (button) button.disabled = false;
+        }
+      }
+      window.addEventListener('DOMContentLoaded', () => {
+        const button = document.getElementById('unlockAdmin');
+        const input = document.getElementById('adminKey');
+        button?.addEventListener('click', event => {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          attemptUnlock();
+        }, true);
+        input?.addEventListener('keydown', event => {
+          if (event.key !== 'Enter') return;
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          attemptUnlock();
+        }, true);
+      });
+    })();
+  </script>
+
+'''
+              source = source.replace(marker, bootstrap + marker, 1)
+
+          path.write_text(source)
+          PY
+
+          node --check affiliateRoutes.js
+          node --test test/affiliateAdminInlineScriptSyntax.test.js
+
+      - name: Commit direct source fix and remove temporary patch machinery
+        shell: bash
+        run: |
+          rm -f scripts/fixAffiliateAdminRender.js scripts/startServerWithAdminRenderGuard.js
+          rm -f .github/workflows/fix-affiliate-admin-inline-script.yml .github/workflows/one-time-fix-affiliate-admin-render.yml .github/workflows/direct-fix-affiliate-admin-source.yml
+          python3 <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('package.json')
+          data = json.loads(p.read_text())
+          scripts = data.get('scripts', {})
+          scripts.pop('postinstall', None)
+          scripts['start'] = 'node server.js'
+          check = scripts.get('check', '')
+          for part in [' && node --check scripts/startServerWithAdminRenderGuard.js', ' && node --check scripts/fixAffiliateAdminRender.js']:
+              check = check.replace(part, '')
+          scripts['check'] = check
+          data['scripts'] = scripts
+          p.write_text(json.dumps(data, indent=2) + '\n')
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add affiliateRoutes.js package.json test/affiliateAdminInlineScriptSyntax.test.js scripts .github/workflows
+          git commit -m "Fix Affiliate Admin unlock in source"
+          git push origin HEAD:main
