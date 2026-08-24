@@ -1,0 +1,49 @@
+name: Temporary affiliate delete runner v2
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    if: github.event.issue.title == '[automation] run affiliate delete patch v2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Apply embedded patch script
+        shell: bash
+        run: |
+          python3 <<'PY2'
+          from pathlib import Path
+          source = Path('.github/workflows/one-time-affiliate-delete.yml').read_text()
+          marker = "          python3 <<'PY'\n"
+          start = source.index(marker) + len(marker)
+          end = source.index("\n          PY\n", start)
+          raw = source[start:end]
+          script = '\n'.join(line[10:] if line.startswith('          ') else line for line in raw.splitlines())
+          exec(compile(script, 'affiliate-delete-patch.py', 'exec'), {'__name__': '__main__'})
+          PY2
+
+      - name: Push implementation branch
+        shell: bash
+        run: |
+          git config user.name "Agora Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git checkout -B automation/affiliate-delete-apple-deactivate
+          git add affiliateRoutes.js lib/appStoreConnectAffiliateService.js test/affiliateDeleteAdmin.test.js
+          git commit -m "Delete affiliates with Apple code deactivation"
+          git push --force origin HEAD:refs/heads/automation/affiliate-delete-apple-deactivate
+
+      - name: Validate implementation
+        run: |
+          npm ci
+          npm run check
+          node --test test/appStoreConnectAffiliateProvisioning.test.js test/affiliateDeleteAdmin.test.js
+          npm test
