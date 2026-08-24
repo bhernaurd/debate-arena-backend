@@ -1,0 +1,589 @@
+name: One-time affiliate App Store provisioning patch
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/one-time-affiliate-autoprovision.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Patch affiliate provisioning
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(text, old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected exactly one match, found {count}')
+              return text.replace(old, new, 1)
+
+          service_path = Path('lib/appStoreConnectAffiliateService.js')
+          service = service_path.read_text()
+
+          service_marker = "\n  function affiliateSummary(affiliate) {\n"
+          if service.count(service_marker) != 1:
+              raise SystemExit('App Store service insertion marker not found exactly once')
+
+          service_insert = r'''
+  function normalizeCustomCodeCount(value, fallback = 1000) {
+    const candidate = value == null || String(value).trim() === ''
+      ? fallback
+      : Number(value);
+
+    if (!Number.isInteger(candidate) || candidate < 1 || candidate > 25000) {
+      throw statusError(
+        400,
+        'Apple custom-code redemption limit must be an integer between 1 and 25,000.',
+        'invalid_app_store_connect_custom_code_count'
+      );
+    }
+
+    return candidate;
+  }
+
+  async function ensureCustomCode({
+    offerReferenceName,
+    customCode,
+    numberOfCodes = 1000,
+    expirationDate = null,
+  } = {}) {
+    assertConfigured();
+
+    const normalizedOfferName = normalizeAppleOfferIdentifier(offerReferenceName);
+    const normalizedCustomCode = normalizeAffiliateCode(customCode);
+    const cleanNumberOfCodes = normalizeCustomCodeCount(numberOfCodes, 1000);
+    const cleanExpirationDate = cleanText(expirationDate);
+
+    if (!normalizedOfferName) {
+      throw statusError(
+        400,
+        'An App Store Connect offer reference name is required.',
+        'app_store_connect_offer_reference_required'
+      );
+    }
+
+    if (!normalizedCustomCode) {
+      throw statusError(
+        400,
+        'A creator code is required.',
+        'app_store_connect_custom_code_required'
+      );
+    }
+
+    if (cleanExpirationDate && !/^\d{4}-\d{2}-\d{2}$/.test(cleanExpirationDate)) {
+      throw statusError(
+        400,
+        'Apple custom-code expirationDate must be YYYY-MM-DD.',
+        'invalid_app_store_connect_custom_code_expiration'
+      );
+    }
+
+    const offers = await listOfferCodes();
+    const matchingOffers = offers.filter(
+      offer => offer.normalizedName === normalizedOfferName
+    );
+
+    if (!matchingOffers.length) {
+      throw statusError(
+        404,
+        `No App Store Connect offer matches “${cleanText(offerReferenceName)}”.`,
+        'app_store_connect_offer_not_found'
+      );
+    }
+
+    const activeMatches = matchingOffers.filter(offer => offer.active === true);
+    const offer = activeMatches.length === 1
+      ? activeMatches[0]
+      : matchingOffers.length === 1
+        ? matchingOffers[0]
+        : null;
+
+    if (!offer) {
+      throw statusError(
+        409,
+        `More than one App Store Connect offer matches “${cleanText(offerReferenceName)}”.`,
+        'app_store_connect_offer_ambiguous'
+      );
+    }
+
+    for (const candidateOffer of offers) {
+      for (const candidateCode of candidateOffer.customCodes || []) {
+        if (
+          candidateCode.customCode !== normalizedCustomCode ||
+          candidateCode.active !== true
+        ) {
+          continue;
+        }
+
+        if (candidateOffer.id === offer.id) {
+          return {
+            created: false,
+            status: 'already_exists',
+            offerId: offer.id,
+            offerName: offer.name,
+            customCodeId: candidateCode.id,
+            customCode: normalizedCustomCode,
+            numberOfCodes: candidateCode.numberOfCodes,
+            active: candidateCode.active,
+            expirationDate: candidateCode.expirationDate || null,
+          };
+        }
+
+        throw statusError(
+          409,
+          `${normalizedCustomCode} is already active on a different App Store Connect offer (${candidateOffer.name || candidateOffer.id}).`,
+          'app_store_connect_custom_code_conflict'
+        );
+      }
+    }
+
+    const attributes = {
+      customCode: normalizedCustomCode,
+      numberOfCodes: cleanNumberOfCodes,
+    };
+    if (cleanExpirationDate) attributes.expirationDate = cleanExpirationDate;
+
+    const payload = await apiFetch('/subscriptionOfferCodeCustomCodes', {
+      method: 'POST',
+      body: {
+        data: {
+          type: 'subscriptionOfferCodeCustomCodes',
+          attributes,
+          relationships: {
+            offerCode: {
+              data: {
+                type: 'subscriptionOfferCodes',
+                id: offer.id,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const createdCode = mapCustomCode(payload?.data || {});
+
+    return {
+      created: true,
+      status: 'created',
+      offerId: offer.id,
+      offerName: offer.name,
+      customCodeId: createdCode.id || null,
+      customCode: createdCode.customCode || normalizedCustomCode,
+      numberOfCodes: createdCode.numberOfCodes ?? cleanNumberOfCodes,
+      active: createdCode.active,
+      expirationDate: createdCode.expirationDate || cleanExpirationDate || null,
+    };
+  }
+'''
+
+          service = service.replace(service_marker, '\n' + service_insert + service_marker, 1)
+          service = replace_once(
+              service,
+              "    listOfferCodes,\n    listImports,\n    getSubscriptionPricingSummary,\n",
+              "    listOfferCodes,\n    listImports,\n    ensureCustomCode,\n    getSubscriptionPricingSummary,\n",
+              'App Store service export'
+          )
+          service_path.write_text(service)
+
+          routes_path = Path('affiliateRoutes.js')
+          routes = routes_path.read_text()
+
+          routes = replace_once(
+              routes,
+              "          : 'This creates the Agora affiliate record only. The Apple Offer Code campaign itself must already exist in App Store Connect. Once an offer exists in Apple, it will automatically appear above under App Store Connect Imports after sync.') +\n",
+              "          : 'This creates the Agora affiliate and automatically creates its creator code inside the shared App Store Connect offer. New production codes default to 1,000 redemptions. If the code already exists in that Apple offer, Agora links it without creating a duplicate active batch.') +\n",
+              'Create Affiliate modal description'
+          )
+
+          offer_field = "          '<div class=\\\"form-group full\\\"><label>Shared Apple Offer Reference Name</label><input id=\\\"newOfferRef\\\" class=\\\"field\\\" placeholder=\\\"Affiliate First Month $0.99\\\" value=\\\"' + html(prefill?.canonical?.offerName || '') + '\\" /><div class=\\\"muted tiny\\\" style=\\\"margin-top:5px\\\">Production affiliates may intentionally share this Apple offer. The creator code identifies the affiliate inside Agora.</div></div>' +\n"
+          offer_field_new = offer_field + "          (!isImport ? '<div class=\\\"form-group\\\"><label>Apple Redemption Limit</label><input id=\\\"newAppleCodeCount\\\" class=\\\"field\\\" type=\\\"number\\\" min=\\\"1\\\" max=\\\"25000\\\" step=\\\"1\\\" value=\\\"1000\\\" /><div class=\\\"muted tiny\\\" style=\\\"margin-top:5px\\\">Default: 1,000 redemptions. Apple allows up to 25,000 per custom-code batch.</div></div>' : '') +\n"
+          routes = replace_once(routes, offer_field, offer_field_new, 'Apple redemption limit field')
+
+          routes = replace_once(
+              routes,
+              "      const offerRef = $('newOfferRef').value.trim();\n",
+              "      const offerRef = $('newOfferRef').value.trim();\n      const appleCodeCount = Number($('newAppleCodeCount')?.value || 1000);\n",
+              'Read Apple redemption limit'
+          )
+
+          routes = replace_once(
+              routes,
+              "      if (!isTest && !offerRef) {\n        $('createAffiliateError').textContent = 'Production affiliates require the shared App Store Connect offer reference name.';\n        return;\n      }\n",
+              "      if (!isTest && !offerRef) {\n        $('createAffiliateError').textContent = 'Production affiliates require the shared App Store Connect offer reference name.';\n        return;\n      }\n      if (!isTest && (!Number.isInteger(appleCodeCount) || appleCodeCount < 1 || appleCodeCount > 25000)) {\n        $('createAffiliateError').textContent = 'Apple redemption limit must be a whole number from 1 to 25,000.';\n        return;\n      }\n",
+              'Validate Apple redemption limit'
+          )
+
+          routes = replace_once(
+              routes,
+              "            internalName:name, displayName:name, customCode:code, appleOfferIdentifier:offerRef || null,\n",
+              "            internalName:name, displayName:name, customCode:code, appleOfferIdentifier:offerRef || null, appleCustomCodeCount:appleCodeCount,\n",
+              'Send Apple redemption limit'
+          )
+
+          old_success = """        $('modal').innerHTML = '<h2>Affiliate Created</h2><div class=\"modal-sub\">Copy these links now. The private dashboard link can also be recovered later from this admin dashboard when encrypted token storage is configured.</div>' +
+          '<div class=\"result-box\">' + resultLine('Referral Link', payload.referralUrl) + resultLine('Private Dashboard', payload.dashboardUrl) + resultLine('Apple Redemption', payload.appleRedemptionUrl) + '</div>' +
+          '<div class=\"modal-actions\"><button class=\"button gold\" data-modal-action=\"close-refresh\">Done</button></div>';
+"""
+          new_success = """        const appleProvisioning = payload.appleProvisioning || {};
+        const appleConnected = ['created','already_exists'].includes(appleProvisioning.status);
+        const appleMessage = isTest
+          ? 'Sandbox/test affiliate created. Automatic production App Store Connect provisioning was skipped.'
+          : appleConnected
+            ? (appleProvisioning.status === 'created'
+                ? 'Apple creator code created automatically with ' + number(appleProvisioning.numberOfCodes || appleCodeCount) + ' redemptions.'
+                : 'Apple creator code already existed under the shared offer and is linked.')
+            : 'Affiliate created, but the App Store Connect creator code still needs attention: ' + String(appleProvisioning.message || 'Apple provisioning failed.');
+        $('modal').innerHTML = '<h2>Affiliate Created</h2><div class=\"modal-sub\">Copy these links now. The private dashboard link can also be recovered later from this admin dashboard when encrypted token storage is configured.</div>' +
+          '<div class=\"result-box\">' + resultLine('Referral Link', payload.referralUrl) + resultLine('Private Dashboard', payload.dashboardUrl) + resultLine('Apple Redemption', payload.appleRedemptionUrl) + '</div>' +
+          '<div class=\"' + (appleConnected || isTest ? 'result-box' : 'notice danger') + '\" style=\"margin-top:12px\">' + html(appleMessage) + '</div>' +
+          '<div class=\"modal-actions\">' +
+            (!isTest && !appleConnected && payload.affiliate?.id ? '<button class=\"button\" data-modal-action=\"retry-apple\" data-affiliate-id=\"' + html(payload.affiliate.id) + '\">Retry Apple Connection</button>' : '') +
+            '<button class=\"button gold\" data-modal-action=\"close-refresh\">Done</button></div>';
+"""
+          routes = replace_once(routes, old_success, new_success, 'Affiliate Created modal result')
+
+          result_line_marker = "\n    function resultLine(label, value) {\n"
+          retry_function = r'''
+    async function retryAppleConnection(affiliateId) {
+      try {
+        const payload = await adminFetch('/api/admin/affiliates/' + encodeURIComponent(affiliateId) + '/app-store-connect-code', {
+          method:'POST', body:{ numberOfCodes:1000 }
+        });
+        const provisioning = payload.appleProvisioning || {};
+        toast(provisioning.status === 'created' ? 'Apple creator code created.' : 'Apple creator code is connected.');
+        closeModal();
+        await Promise.all([loadAffiliates(false), loadAppleImports(false)]);
+      } catch (error) { toast(error.message, true); }
+    }
+'''
+          if routes.count(result_line_marker) != 1:
+              raise SystemExit('Retry function insertion marker not found exactly once')
+          routes = routes.replace(result_line_marker, '\n' + retry_function + result_line_marker, 1)
+
+          routes = replace_once(
+              routes,
+              "      if (name === 'create-affiliate') await createAffiliateFromModal();\n",
+              "      if (name === 'create-affiliate') await createAffiliateFromModal();\n      if (name === 'retry-apple') await retryAppleConnection(action.dataset.affiliateId);\n",
+              'Retry Apple modal action'
+          )
+
+          create_route_marker = "  router.post('/api/admin/affiliates', adminOnly, async (req, res) => {\n"
+          provision_helper = r'''  async function provisionAffiliateAppleCode(affiliate, numberOfCodes = 1000) {
+    if (!affiliate || affiliate.is_test) {
+      return {
+        created: false,
+        status: 'skipped',
+        reason: 'test_affiliate',
+      };
+    }
+
+    if (typeof appStoreConnectService?.ensureCustomCode !== 'function') {
+      const error = new Error('App Store Connect custom-code provisioning is unavailable.');
+      error.statusCode = 503;
+      error.code = 'app_store_connect_custom_code_provisioning_unavailable';
+      throw error;
+    }
+
+    return appStoreConnectService.ensureCustomCode({
+      offerReferenceName: affiliate.apple_offer_identifier,
+      customCode: affiliate.normalized_code,
+      numberOfCodes,
+    });
+  }
+
+'''
+          if routes.count(create_route_marker) != 1:
+              raise SystemExit('Affiliate create route marker not found exactly once')
+          routes = routes.replace(create_route_marker, provision_helper + create_route_marker, 1)
+
+          old_create_route = """  router.post('/api/admin/affiliates', adminOnly, async (req, res) => {
+    try {
+      const actor = req.get('x-admin-actor') || 'owner_admin';
+      const created = await service.createAffiliate(req.body || {}, actor);
+      return res.status(201).json({ success: true, ...created });
+    } catch (error) {
+"""
+          new_create_route = """  router.post('/api/admin/affiliates', adminOnly, async (req, res) => {
+    try {
+      const actor = req.get('x-admin-actor') || 'owner_admin';
+      const created = await service.createAffiliate(req.body || {}, actor);
+      let appleProvisioning = {
+        created: false,
+        status: 'skipped',
+        reason: 'test_affiliate',
+      };
+
+      if (created?.affiliate?.is_test !== true) {
+        try {
+          appleProvisioning = await provisionAffiliateAppleCode(
+            created.affiliate,
+            req.body?.appleCustomCodeCount ?? 1000
+          );
+        } catch (appleError) {
+          console.error('[affiliate] automatic App Store Connect creator-code provisioning:', {
+            code: appleError?.code || 'app_store_connect_custom_code_provisioning_failed',
+            message: appleError?.message || String(appleError),
+            affiliateId: created?.affiliate?.id || null,
+            customCode: created?.affiliate?.normalized_code || null,
+          });
+          appleProvisioning = {
+            created: false,
+            status: 'failed',
+            code: appleError?.code || 'app_store_connect_custom_code_provisioning_failed',
+            message: appleError?.message || 'App Store Connect creator-code provisioning failed.',
+          };
+        }
+      }
+
+      return res.status(201).json({ success: true, ...created, appleProvisioning });
+    } catch (error) {
+"""
+          routes = replace_once(routes, old_create_route, new_create_route, 'Affiliate create route provisioning')
+
+          retry_route_marker = "\n  router.post('/api/admin/affiliates/:id/regenerate-dashboard-token', adminOnly, async (req, res) => {\n"
+          retry_route = r'''
+  router.post('/api/admin/affiliates/:id/app-store-connect-code', adminOnly, async (req, res) => {
+    try {
+      const affiliates = await service.listAffiliates();
+      const affiliate = affiliates.find(
+        item => String(item?.id || '') === String(req.params.id || '')
+      );
+
+      if (!affiliate) {
+        const error = new Error('Affiliate not found.');
+        error.statusCode = 404;
+        error.code = 'affiliate_not_found';
+        throw error;
+      }
+
+      if (affiliate.is_test) {
+        const error = new Error('Sandbox/test affiliates do not create production App Store Connect custom codes.');
+        error.statusCode = 400;
+        error.code = 'affiliate_test_apple_provisioning_not_allowed';
+        throw error;
+      }
+
+      const appleProvisioning = await provisionAffiliateAppleCode(
+        affiliate,
+        req.body?.numberOfCodes ?? 1000
+      );
+
+      return res.json({ success: true, appleProvisioning });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+'''
+          if routes.count(retry_route_marker) != 1:
+              raise SystemExit('Retry endpoint insertion marker not found exactly once')
+          routes = routes.replace(retry_route_marker, '\n' + retry_route + retry_route_marker, 1)
+
+          routes_path.write_text(routes)
+
+          test_path = Path('test/appStoreConnectAffiliateProvisioning.test.js')
+          test_path.write_text(r'''import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import test from 'node:test';
+
+import { createAppStoreConnectAffiliateService } from '../lib/appStoreConnectAffiliateService.js';
+
+function privateKeyPem() {
+  const { privateKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
+  return privateKey.export({ type: 'pkcs8', format: 'pem' });
+}
+
+function response(status, body) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    async text() {
+      return body == null ? '' : JSON.stringify(body);
+    },
+  };
+}
+
+function buildService(handler) {
+  const calls = [];
+  const service = createAppStoreConnectAffiliateService({
+    issuerId: 'issuer-id',
+    keyId: 'key-id',
+    privateKey: privateKeyPem(),
+    subscriptionId: 'subscription-id',
+    fetchImpl: async (url, options = {}) => {
+      const call = {
+        url: String(url),
+        method: options.method || 'GET',
+        body: options.body ? JSON.parse(options.body) : null,
+      };
+      calls.push(call);
+      return handler(call);
+    },
+  });
+  return { service, calls };
+}
+
+function offer(id, name, active = true) {
+  return {
+    type: 'subscriptionOfferCodes',
+    id,
+    attributes: {
+      name,
+      active,
+      customerEligibilities: [],
+    },
+  };
+}
+
+function customCode(id, code, { active = true, numberOfCodes = 1000 } = {}) {
+  return {
+    type: 'subscriptionOfferCodeCustomCodes',
+    id,
+    attributes: {
+      customCode: code,
+      active,
+      numberOfCodes,
+      createdDate: '2026-08-24T12:00:00Z',
+    },
+  };
+}
+
+test('ensureCustomCode creates a 1,000-redemption batch by default', async () => {
+  const { service, calls } = buildService(call => {
+    const url = new URL(call.url);
+    if (call.method === 'GET' && url.pathname.endsWith('/subscriptions/subscription-id/offerCodes')) {
+      return response(200, { data: [offer('offer-1', 'Affiliate First Month $0.99')], links: {} });
+    }
+    if (call.method === 'GET' && url.pathname.endsWith('/subscriptionOfferCodes/offer-1/customCodes')) {
+      return response(200, { data: [], links: {} });
+    }
+    if (call.method === 'POST' && url.pathname.endsWith('/subscriptionOfferCodeCustomCodes')) {
+      return response(201, {
+        data: customCode('custom-1', 'NEWCREATOR', { numberOfCodes: 1000 }),
+      });
+    }
+    throw new Error(`Unexpected request: ${call.method} ${url.pathname}`);
+  });
+
+  const result = await service.ensureCustomCode({
+    offerReferenceName: 'Affiliate First Month $0.99',
+    customCode: 'newcreator',
+  });
+
+  assert.equal(result.status, 'created');
+  assert.equal(result.created, true);
+  assert.equal(result.numberOfCodes, 1000);
+
+  const post = calls.find(call => call.method === 'POST');
+  assert.ok(post);
+  assert.deepEqual(post.body.data.attributes, {
+    customCode: 'NEWCREATOR',
+    numberOfCodes: 1000,
+  });
+  assert.deepEqual(post.body.data.relationships.offerCode.data, {
+    type: 'subscriptionOfferCodes',
+    id: 'offer-1',
+  });
+});
+
+test('ensureCustomCode links an already-active code on the shared offer without creating a duplicate', async () => {
+  const { service, calls } = buildService(call => {
+    const url = new URL(call.url);
+    if (call.method === 'GET' && url.pathname.endsWith('/subscriptions/subscription-id/offerCodes')) {
+      return response(200, { data: [offer('offer-1', 'Affiliate First Month $0.99')], links: {} });
+    }
+    if (call.method === 'GET' && url.pathname.endsWith('/subscriptionOfferCodes/offer-1/customCodes')) {
+      return response(200, { data: [customCode('custom-existing', '365PUSHING')], links: {} });
+    }
+    throw new Error(`Unexpected request: ${call.method} ${url.pathname}`);
+  });
+
+  const result = await service.ensureCustomCode({
+    offerReferenceName: 'Affiliate First Month $0.99',
+    customCode: '365PUSHING',
+  });
+
+  assert.equal(result.status, 'already_exists');
+  assert.equal(result.created, false);
+  assert.equal(result.customCodeId, 'custom-existing');
+  assert.equal(calls.some(call => call.method === 'POST'), false);
+});
+
+test('ensureCustomCode rejects an active code that belongs to a different offer', async () => {
+  const { service } = buildService(call => {
+    const url = new URL(call.url);
+    if (call.method === 'GET' && url.pathname.endsWith('/subscriptions/subscription-id/offerCodes')) {
+      return response(200, {
+        data: [
+          offer('target-offer', 'Affiliate First Month $0.99'),
+          offer('other-offer', 'Other Campaign'),
+        ],
+        links: {},
+      });
+    }
+    if (call.method === 'GET' && url.pathname.endsWith('/subscriptionOfferCodes/target-offer/customCodes')) {
+      return response(200, { data: [], links: {} });
+    }
+    if (call.method === 'GET' && url.pathname.endsWith('/subscriptionOfferCodes/other-offer/customCodes')) {
+      return response(200, { data: [customCode('conflict-code', 'TAKENCODE')], links: {} });
+    }
+    throw new Error(`Unexpected request: ${call.method} ${url.pathname}`);
+  });
+
+  await assert.rejects(
+    service.ensureCustomCode({
+      offerReferenceName: 'Affiliate First Month $0.99',
+      customCode: 'TAKENCODE',
+    }),
+    error => error?.code === 'app_store_connect_custom_code_conflict'
+  );
+});
+
+test('Affiliate Admin creation is wired to auto-provision Apple codes and exposes retry', () => {
+  const source = fs.readFileSync(new URL('../affiliateRoutes.js', import.meta.url), 'utf8');
+  assert.match(source, /appleCustomCodeCount:appleCodeCount/);
+  assert.match(source, /automatic App Store Connect creator-code provisioning/);
+  assert.match(source, /\/app-store-connect-code'/);
+  assert.match(source, /value=\\\"1000\\\"/);
+});
+''')
+          PY
+
+      - name: Remove one-time workflow from patch branch
+        run: rm .github/workflows/one-time-affiliate-autoprovision.yml
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run syntax checks
+        run: npm run check
+
+      - name: Run provisioning tests
+        run: node --test test/appStoreConnectAffiliateProvisioning.test.js
+
+      - name: Commit patch branch
+        shell: bash
+        run: |
+          git config user.name "Agora Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git checkout -B automation/affiliate-auto-provision-1000
+          git add affiliateRoutes.js lib/appStoreConnectAffiliateService.js test/appStoreConnectAffiliateProvisioning.test.js .github/workflows/one-time-affiliate-autoprovision.yml
+          git commit -m "Auto-provision affiliate App Store custom codes"
+          git push --force origin HEAD:refs/heads/automation/affiliate-auto-provision-1000
