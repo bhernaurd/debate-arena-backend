@@ -1,0 +1,91 @@
+name: One-time Affiliate Admin render fix
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.event.head_commit.message == 'Run one-time Affiliate Admin render fix'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out latest main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Apply clean source fix and regression test
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          routes = Path('affiliateRoutes.js')
+          source = routes.read_text()
+          old = r"if (!confirm('Delete ' + a.display_name + '?\n\n' + appleNotice)) return;"
+          new = r"if (!confirm('Delete ' + a.display_name + '?\\n\\n' + appleNotice)) return;"
+          count = source.count(old)
+          if count != 1:
+              raise SystemExit(f'Expected one Delete confirmation escape target, found {count}')
+          routes.write_text(source.replace(old, new, 1))
+
+          package = Path('package.json')
+          package_source = package.read_text()
+          package_source = package_source.replace(
+              '"start": "node scripts/startServerWithAdminRenderGuard.js"',
+              '"start": "node server.js"'
+          )
+          package_source = package_source.replace(
+              ' && node --check scripts/startServerWithAdminRenderGuard.js',
+              ''
+          )
+          package.write_text(package_source)
+
+          test = Path('test/affiliateAdminInlineScriptSyntax.test.js')
+          test.write_text(r'''import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import test from 'node:test';
+import vm from 'node:vm';
+
+test('Affiliate Admin rendered inline script parses in JavaScript', () => {
+  const source = fs.readFileSync(new URL('../affiliateRoutes.js', import.meta.url), 'utf8');
+  const startMarker = 'function renderAffiliateAdminDashboardPage() {';
+  const endMarker = '\n}\n\nexport function createAffiliateRouter';
+  const start = source.indexOf(startMarker);
+  const end = source.indexOf(endMarker, start);
+  assert.notEqual(start, -1, 'renderAffiliateAdminDashboardPage start not found');
+  assert.notEqual(end, -1, 'renderAffiliateAdminDashboardPage end not found');
+
+  const fnSource = source.slice(start, end + 2);
+  const render = new Function(`${fnSource}; return renderAffiliateAdminDashboardPage;`)();
+  const html = render();
+  const match = html.match(/<script>([\s\S]*?)<\/script>/i);
+  assert.ok(match, 'Affiliate Admin inline script not found');
+  assert.doesNotThrow(() => new vm.Script(match[1], { filename: 'affiliate-admin-inline.js' }));
+});
+''')
+          PY
+
+          rm -f scripts/startServerWithAdminRenderGuard.js
+          rm -f .github/workflows/fix-affiliate-admin-inline-script.yml
+          rm -f .github/workflows/one-time-fix-affiliate-admin-render.yml
+
+          node --test test/affiliateAdminInlineScriptSyntax.test.js
+          npm run check
+          npm test
+
+      - name: Commit clean fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Fix Affiliate Admin browser script parsing"
+          git push origin HEAD:main
