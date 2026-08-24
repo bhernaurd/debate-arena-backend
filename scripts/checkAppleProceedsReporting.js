@@ -10,6 +10,10 @@ function bool(value) {
   return Boolean(String(value || '').trim());
 }
 
+function reportingValue(reportName, fallbackName) {
+  return process.env[reportName] || process.env[fallbackName] || '';
+}
+
 async function main() {
   const connectionString = process.env.DATABASE_URL?.trim();
   if (!connectionString) throw new Error('DATABASE_URL is required.');
@@ -60,6 +64,11 @@ async function main() {
       finance = result.rows[0] || null;
     }
 
+    const dedicatedReportingKey =
+      bool(process.env.APP_STORE_CONNECT_REPORTS_ISSUER_ID) ||
+      bool(process.env.APP_STORE_CONNECT_REPORTS_KEY_ID) ||
+      bool(process.env.APP_STORE_CONNECT_REPORTS_PRIVATE_KEY);
+
     const readiness = {
       ready:
         reportsService.isConfigured() &&
@@ -68,9 +77,25 @@ async function main() {
         schema.has_finance_imports === true &&
         schema.has_finance_rows === true,
       configuration: {
-        issuer_id: bool(process.env.APP_STORE_CONNECT_ISSUER_ID),
-        key_id: bool(process.env.APP_STORE_CONNECT_KEY_ID),
-        private_key: bool(process.env.APP_STORE_CONNECT_PRIVATE_KEY),
+        reporting_key_source: dedicatedReportingKey ? 'dedicated' : 'shared',
+        issuer_id: bool(
+          reportingValue(
+            'APP_STORE_CONNECT_REPORTS_ISSUER_ID',
+            'APP_STORE_CONNECT_ISSUER_ID'
+          )
+        ),
+        key_id: bool(
+          reportingValue(
+            'APP_STORE_CONNECT_REPORTS_KEY_ID',
+            'APP_STORE_CONNECT_KEY_ID'
+          )
+        ),
+        private_key: bool(
+          reportingValue(
+            'APP_STORE_CONNECT_REPORTS_PRIVATE_KEY',
+            'APP_STORE_CONNECT_PRIVATE_KEY'
+          )
+        ),
         vendor_number: bool(process.env.APP_STORE_CONNECT_VENDOR_NUMBER),
         automatic_sync_enabled:
           ['1', 'true', 'yes', 'on'].includes(
@@ -88,7 +113,7 @@ async function main() {
 
     if (!readiness.ready) {
       console.log(
-        '[AppleProceeds] Next: run npm run migrate, add APP_STORE_CONNECT_VENDOR_NUMBER, then run npm run apple-proceeds:sync -- --days 90.'
+        '[AppleProceeds] Next: run npm run migrate, add APP_STORE_CONNECT_VENDOR_NUMBER, configure an App Store Connect Team reporting key with Finance access if the shared key cannot access reports, then run npm run apple-proceeds:sync -- --days 90.'
       );
     }
   } finally {
