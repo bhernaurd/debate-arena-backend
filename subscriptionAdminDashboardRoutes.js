@@ -12,7 +12,7 @@ function enhanceDashboardHtml(html) {
     )
     .replace(
       `(r.is_trial?' <span class="pill warn">Trial</span>':'')`,
-      `(r.is_trial?' <span class="pill warn">Trial</span>':(r.recurring_revenue_active?' <span class="pill good">Paid</span>':''))`
+      `(r.is_trial?' <span class="pill warn">Trial</span>':(r.has_pro_access && r.is_recurring_pro && r.status==='active'?' <span class="pill good">Paid</span>':''))`
     );
 }
 
