@@ -78,6 +78,9 @@ test('Breakdown mirrors History with period selection and subscriber-only metric
   assert.match(breakdown, /id="breakdownPeriod"/);
   assert.match(breakdown, /<option value="current">Current<\/option>/);
   assert.match(breakdown, /id="breakdownNote"/);
+  assert.match(breakdown, /<h2>Subscriber growth<\/h2>/);
+  assert.match(breakdown, /id="breakdownChartSummary"/);
+  assert.match(breakdown, /id="breakdownChart"/);
   assert.match(breakdown, /<h2>Subscriber history<\/h2>/);
   assert.match(breakdown, /id="breakdownTable"/);
   assert.doesNotMatch(breakdown, /Access source/);
@@ -85,6 +88,10 @@ test('Breakdown mirrors History with period selection and subscriber-only metric
 
   assert.match(html, /async function loadBreakdown\(\)/);
   assert.match(html, /api\('\/overview'\),api\('\/history'\)/);
+  assert.match(html, /function renderSubscriberGrowthChart\(selected='current'\)/);
+  assert.match(html, /activeProAtMonthEnd/);
+  assert.match(html, /active_pro_entitlements/);
+  assert.match(html, /Subscriber growth by month/);
   assert.match(html, /metric\('Total subscribers'/);
   assert.match(html, /metric\('Free period'/);
   assert.match(html, /metric\('Monthly'/);
