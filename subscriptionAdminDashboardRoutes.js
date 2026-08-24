@@ -12,6 +12,9 @@ import {
 import {
   enhanceSubscriptionAdminHistoryHtml,
 } from './lib/subscriptionAdminHistoryUi.js';
+import {
+  enhanceSubscriptionAdminPayoutHtml,
+} from './lib/subscriptionAdminPayoutUi.js';
 
 const { Pool } = pg;
 
@@ -80,8 +83,10 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
     res.send = (body) => {
       const enhancedBody =
         typeof body === 'string'
-          ? enhanceSubscriptionAdminHistoryHtml(
-              enhanceDashboardHtml(body)
+          ? enhanceSubscriptionAdminPayoutHtml(
+              enhanceSubscriptionAdminHistoryHtml(
+                enhanceDashboardHtml(body)
+              )
             )
           : body;
 
