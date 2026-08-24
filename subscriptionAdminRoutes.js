@@ -249,14 +249,14 @@ export function createSubscriptionAdminRouter(
               COUNT(*) FILTER (WHERE recurring_revenue_active)::int AS paid_recurring,
               COUNT(*) FILTER (WHERE trial_active)::int AS trials,
               ROUND(COALESCE(SUM(estimated_mrr_usd), 0), 2) AS estimated_mrr_usd
-            FROM subscription_admin_customers_v1
+            FROM subscription_admin_current_customers_v1
             WHERE environment = 'Production'
             GROUP BY pro_access_source
             ORDER BY pro_access_source
           `),
           pool.query(`
             SELECT status, COUNT(*)::int AS count
-            FROM subscription_admin_customers_v1
+            FROM subscription_admin_current_customers_v1
             WHERE environment = 'Production'
             GROUP BY status
             ORDER BY count DESC, status ASC
@@ -288,7 +288,7 @@ export function createSubscriptionAdminRouter(
               currency,
               price_milliunits,
               updated_at
-            FROM subscription_admin_customers_v1
+            FROM subscription_admin_current_customers_v1
             WHERE environment = 'Production'
             ORDER BY
               COALESCE(latest_transaction_signed_date, updated_at) DESC NULLS LAST,
@@ -327,7 +327,7 @@ export function createSubscriptionAdminRouter(
 
       const countResult = await pool.query(
         `SELECT COUNT(*)::int AS count
-         FROM subscription_admin_customers_v1
+         FROM subscription_admin_current_customers_v1
          ${filters.whereSql}`,
         filters.values
       );
@@ -385,7 +385,7 @@ export function createSubscriptionAdminRouter(
           estimated_mrr_usd,
           created_at,
           updated_at
-        FROM subscription_admin_customers_v1
+        FROM subscription_admin_current_customers_v1
         ${filters.whereSql}
         ORDER BY
           CASE WHEN has_pro_access THEN 0 ELSE 1 END,
