@@ -67,16 +67,19 @@ test('Revenue keeps four financial KPIs and removes subscriber KPIs', () => {
   assert.doesNotMatch(metricSet, /Paid customers|New paid|Trial starts|Trial → Paid|Cancellation requests|Subscriptions ended/);
 });
 
-test('Revenue includes trend graph and simplified monthly financial table', () => {
+test('Revenue includes a gross-sales-only trend graph and simplified monthly financial table', () => {
   const html = renderFinalDashboard();
   const revenue = html.match(/<section id="view-history"[^>]*>([\s\S]*?)<section id="view-events"/i)?.[1] || '';
+  const trendFn = html.match(/function renderRevenueTrend\(selected='all'\)\{([\s\S]*?)function historyTableHtml/i)?.[1] || '';
   const historyTableFn = html.match(/function historyTableHtml\(months,currentMonth\)\{([\s\S]*?)function financialPeriodsHtml/i)?.[1] || '';
 
   assert.ok(revenue, 'Revenue section not found');
-  assert.match(revenue, /<h2>Revenue trend<\/h2>/);
+  assert.match(revenue, /<h2>Gross sales trend<\/h2>/);
   assert.match(revenue, /id="revenueTrendChart"/);
   assert.match(revenue, /<h2>Monthly financial history<\/h2>/);
-  assert.match(html, /function renderRevenueTrend\(selected='all'\)/);
+  assert.ok(trendFn, 'renderRevenueTrend not found');
+  assert.match(trendFn, /Gross sales by month/);
+  assert.doesNotMatch(trendFn, /proceeds|Apple proceeds/i);
   assert.ok(historyTableFn, 'historyTableHtml not found');
   assert.match(historyTableFn, /Gross sales<\/th><th>Apple proceeds est\.<\/th><th>Fees \+ tax est\.<\/th><th>Refunds<\/th><th>Final proceeds<\/th>/);
   assert.doesNotMatch(historyTableFn, /<th>New paid<\/th>|<th>Trials<\/th>|<th>Trial → Paid<\/th>|<th>Cancels<\/th>|<th>Ended<\/th>/);
