@@ -34,14 +34,349 @@ function shortId(value) {
         : `${text.slice(0, 8)}…${text.slice(-4)}`;
 }
 
+function productLabel(productId) {
+    switch (cleanText(productId, 200)) {
+        case 'agora_pro_monthly':
+            return 'Monthly';
+        case 'agora_pro_yearly':
+            return 'Yearly';
+        case AGORA_PRO_LIFETIME_PRODUCT_ID:
+            return 'Lifetime';
+        default:
+            return cleanText(productId, 200) || 'Unknown';
+    }
+}
+
+function formatPrice(price, currency) {
+    if (price == null || price === '') return null;
+
+    const numeric = Number(price);
+    const currencyCode = cleanText(currency, 16)?.toUpperCase();
+
+    if (
+        !Number.isSafeInteger(numeric) ||
+        numeric < 0 ||
+        !currencyCode ||
+        !/^[A-Z]{3}$/.test(currencyCode)
+    ) {
+        return null;
+    }
+
+    try {
+        return new Intl.NumberFormat('en-US', {
+            style: 'currency',
+            currency: currencyCode,
+        }).format(numeric / 1000);
+    } catch {
+        return `${(numeric / 1000).toFixed(2)} ${currencyCode}`;
+    }
+}
+
+function normalizedEventType(row) {
+    return String(row?.event_type || '').trim().toUpperCase();
+}
+
+function normalizedSubtype(row) {
+    return String(row?.subtype || '').trim().toUpperCase();
+}
+
+function positiveTransactionPrice(row) {
+    const price = Number(row?.price_milliunits);
+    return Number.isSafeInteger(price) && price > 0;
+}
+
+export function classifySubscriptionAdminMilestone(
+    row,
+    {
+        hadTrial = false,
+        hadPriorPaidTransaction = false,
+    } = {}
+) {
+    const type = normalizedEventType(row);
+    const subtype = normalizedSubtype(row);
+    const isTrial = row?.is_trial === true;
+
+    if (type === 'SUBSCRIBED' && subtype === 'INITIAL_BUY') {
+        if (isTrial) {
+            return 'trial_started';
+        }
+
+        if (positiveTransactionPrice(row)) {
+            return 'new_paid_subscription';
+        }
+    }
+
+    // A normal DID_RENEW remains quiet unless the existing renewal setting is
+    // enabled. The one DID_RENEW we always care about is the first real charge
+    // after a free trial. Historical transaction state distinguishes that
+    // conversion from every later routine renewal.
+    if (
+        type === 'DID_RENEW' &&
+        !isTrial &&
+        positiveTransactionPrice(row) &&
+        hadTrial &&
+        !hadPriorPaidTransaction
+    ) {
+        return 'trial_converted_to_paid';
+    }
+
+    return null;
+}
+
 function isLifetimeGrantEvent(row) {
     return (
         row?.product_id === AGORA_PRO_LIFETIME_PRODUCT_ID &&
-        String(row?.event_type || '').trim().toUpperCase() ===
-            'ONE_TIME_CHARGE' &&
+        normalizedEventType(row) === 'ONE_TIME_CHARGE' &&
         String(row?.status_after || '').trim().toLowerCase() ===
             'active'
     );
+}
+
+async function loadTrialConversionHistory(pool, row) {
+    if (
+        normalizedEventType(row) !== 'DID_RENEW' ||
+        row?.is_trial === true ||
+        !positiveTransactionPrice(row) ||
+        !row?.original_transaction_id
+    ) {
+        return {
+            hadTrial: false,
+            hadPriorPaidTransaction: false,
+        };
+    }
+
+    const currentAt =
+        row.transaction_purchase_date ||
+        row.event_at ||
+        new Date();
+
+    const result = await pool.query(
+        `
+        SELECT
+            COALESCE(
+                BOOL_OR(is_trial = TRUE),
+                FALSE
+            ) AS had_trial,
+            COALESCE(
+                BOOL_OR(
+                    is_trial = FALSE
+                    AND price_milliunits IS NOT NULL
+                    AND price_milliunits > 0
+                ),
+                FALSE
+            ) AS had_prior_paid_transaction
+        FROM app_store_transactions
+        WHERE original_transaction_id = $1
+          AND environment = $2
+          AND transaction_id <> $3
+          AND COALESCE(purchase_date, signed_date, created_at) < $4::timestamptz
+        `,
+        [
+            row.original_transaction_id,
+            row.environment,
+            row.transaction_id,
+            currentAt,
+        ]
+    );
+
+    return {
+        hadTrial: result.rows[0]?.had_trial === true,
+        hadPriorPaidTransaction:
+            result.rows[0]?.had_prior_paid_transaction === true,
+    };
+}
+
+function milestonePresentation(kind) {
+    switch (kind) {
+        case 'trial_started':
+            return {
+                title: '🎉 New Agora Pro trial started',
+                accessLine: 'Access: Free trial',
+            };
+        case 'new_paid_subscription':
+            return {
+                title: '💰 New paying Agora Pro subscriber',
+                accessLine: 'Access: Paid',
+            };
+        case 'trial_converted_to_paid':
+            return {
+                title: '💰 Agora Pro trial converted to paid',
+                accessLine: 'Conversion: Trial → Paid',
+            };
+        default:
+            return null;
+    }
+}
+
+async function enqueueSubscriptionMilestone({
+    pool,
+    row,
+    kind,
+    notifySandbox,
+}) {
+    const environment =
+        cleanText(row.environment, 32) || 'Production';
+
+    if (
+        environment.toLowerCase() === 'sandbox' &&
+        !notifySandbox
+    ) {
+        return {
+            queued: false,
+            reason: 'sandbox_disabled',
+        };
+    }
+
+    const presentation = milestonePresentation(kind);
+    if (!presentation) {
+        return {
+            queued: false,
+            reason: 'unknown_milestone',
+        };
+    }
+
+    const notificationUUID =
+        cleanText(row.notification_uuid, 128);
+    const dedupeBase =
+        notificationUUID ||
+        cleanText(row.event_key, 256) ||
+        cleanText(row.transaction_id, 128) ||
+        'unknown';
+    const accountId = row.account_id || null;
+    const originalTransactionId =
+        cleanText(row.original_transaction_id, 128);
+    const transactionId =
+        cleanText(row.transaction_id, 128);
+    const productId = cleanText(row.product_id, 200);
+    const affiliateCode = cleanText(row.affiliate_code, 64);
+    const priceText = formatPrice(
+        row.price_milliunits,
+        row.currency
+    );
+
+    const detailLines = [
+        `Plan: ${productLabel(productId)}`,
+        presentation.accessLine,
+        `Environment: ${environment}`,
+    ];
+
+    if (priceText && kind !== 'trial_started') {
+        detailLines.push(`Apple transaction price: ${priceText}`);
+    }
+
+    if (typeof row.auto_renew_enabled === 'boolean') {
+        detailLines.push(
+            `Auto-renew: ${row.auto_renew_enabled ? 'On' : 'Off'}`
+        );
+    }
+
+    if (row.expires_date) {
+        const label = kind === 'trial_started'
+            ? 'Trial access until'
+            : 'Access until';
+        detailLines.push(
+            `${label}: ${new Date(row.expires_date).toISOString()}`
+        );
+    }
+
+    if (affiliateCode) {
+        detailLines.push(`Affiliate: ${affiliateCode}`);
+    }
+
+    if (accountId) {
+        detailLines.push(`Account: ${shortId(accountId)}`);
+    }
+
+    if (originalTransactionId) {
+        detailLines.push(
+            `Original transaction: ${shortId(originalTransactionId)}`
+        );
+    }
+
+    const body = detailLines.join(' • ').slice(0, 900);
+    const telegramText =
+        [presentation.title, '', ...detailLines]
+            .join('\n')
+            .slice(0, 3500);
+
+    const result = await pool.query(
+        `
+        INSERT INTO subscription_admin_notifications (
+            dedupe_key,
+            source,
+            notification_uuid,
+            notification_type,
+            subtype,
+            environment,
+            account_id,
+            original_transaction_id,
+            transaction_id,
+            product_id,
+            event_kind,
+            title,
+            body,
+            telegram_text,
+            payload
+        )
+        VALUES (
+            $1,
+            'app_store_notification',
+            $2,
+            $3,
+            $4,
+            $5,
+            $6::uuid,
+            $7,
+            $8,
+            $9,
+            $10,
+            $11,
+            $12,
+            $13,
+            $14::jsonb
+        )
+        ON CONFLICT (dedupe_key) DO NOTHING
+        RETURNING id
+        `,
+        [
+            `apple_admin:${environment}:${dedupeBase}:${kind}`,
+            notificationUUID,
+            cleanText(row.event_type, 100) || 'UNKNOWN',
+            cleanText(row.subtype, 100),
+            environment,
+            accountId,
+            originalTransactionId,
+            transactionId,
+            productId,
+            kind,
+            presentation.title,
+            body,
+            telegramText,
+            JSON.stringify({
+                eventKind: kind,
+                productId,
+                accountId,
+                originalTransactionId,
+                transactionId,
+                affiliateCode,
+                appleTransactionPrice: priceText,
+                entitlementStatus: cleanText(row.status_after, 64),
+                isTrial: row.is_trial === true,
+                autoRenewEnabled:
+                    typeof row.auto_renew_enabled === 'boolean'
+                        ? row.auto_renew_enabled
+                        : null,
+                expiresDate: row.expires_date || null,
+            }),
+        ]
+    );
+
+    return {
+        queued: result.rowCount > 0,
+        duplicate: result.rowCount === 0,
+        id: result.rows[0]?.id || null,
+        eventKind: kind,
+    };
 }
 
 async function enqueueLifetimeGrant({
@@ -256,6 +591,7 @@ export function createSubscriptionAdminEventScanner({
                     event.expires_date,
                     event.event_at,
                     transaction.app_account_token,
+                    transaction.purchase_date AS transaction_purchase_date,
                     transaction.price_milliunits,
                     transaction.currency,
                     transaction.offer_type,
@@ -301,44 +637,65 @@ export function createSubscriptionAdminEventScanner({
             }
 
             for (const row of result.rows) {
-                const outcome = isLifetimeGrantEvent(row)
-                    ? await enqueueLifetimeGrant({
+                const trialHistory =
+                    await loadTrialConversionHistory(pool, row);
+                const milestoneKind =
+                    classifySubscriptionAdminMilestone(
+                        row,
+                        trialHistory
+                    );
+
+                let outcome;
+
+                if (isLifetimeGrantEvent(row)) {
+                    outcome = await enqueueLifetimeGrant({
                         pool,
                         row,
                         notifySandbox:
                             notificationService.config?.notifySandbox === true,
-                    })
-                    : await notificationService.enqueueAppleNotification({
-                        notificationUUID: row.notification_uuid,
-                        notificationType: row.event_type,
-                        subtype: row.subtype,
-                        environment: row.environment,
-                        transaction: {
-                            transactionId: row.transaction_id,
-                            originalTransactionId:
-                                row.original_transaction_id,
-                            productId: row.product_id,
-                            appAccountToken: row.app_account_token,
-                            price: row.price_milliunits,
-                            currency: row.currency,
-                        },
-                        entitlement: {
-                            originalTransactionId:
-                                row.original_transaction_id,
-                            productId: row.product_id,
-                            status: row.status_after,
-                            isTrial: row.is_trial === true,
-                            autoRenewEnabled:
-                                row.auto_renew_enabled ?? null,
-                            expiresDate: row.expires_date || null,
-                        },
-                        affiliateAttribution: row.affiliate_code
-                            ? {
-                                normalizedCode:
-                                    row.affiliate_code,
-                            }
-                            : null,
                     });
+                } else if (milestoneKind) {
+                    outcome = await enqueueSubscriptionMilestone({
+                        pool,
+                        row,
+                        kind: milestoneKind,
+                        notifySandbox:
+                            notificationService.config?.notifySandbox === true,
+                    });
+                } else {
+                    outcome =
+                        await notificationService.enqueueAppleNotification({
+                            notificationUUID: row.notification_uuid,
+                            notificationType: row.event_type,
+                            subtype: row.subtype,
+                            environment: row.environment,
+                            transaction: {
+                                transactionId: row.transaction_id,
+                                originalTransactionId:
+                                    row.original_transaction_id,
+                                productId: row.product_id,
+                                appAccountToken: row.app_account_token,
+                                price: row.price_milliunits,
+                                currency: row.currency,
+                            },
+                            entitlement: {
+                                originalTransactionId:
+                                    row.original_transaction_id,
+                                productId: row.product_id,
+                                status: row.status_after,
+                                isTrial: row.is_trial === true,
+                                autoRenewEnabled:
+                                    row.auto_renew_enabled ?? null,
+                                expiresDate: row.expires_date || null,
+                            },
+                            affiliateAttribution: row.affiliate_code
+                                ? {
+                                    normalizedCode:
+                                        row.affiliate_code,
+                                }
+                                : null,
+                        });
+                }
 
                 scanned += 1;
                 if (outcome?.queued === true) {
