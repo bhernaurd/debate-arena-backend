@@ -1,0 +1,6 @@
+patch_exit=1
+Traceback (most recent call last):
+  File "<stdin>", line 10, in <module>
+  File "affiliate-delete-patch.py", line 176, in <module>
+  File "affiliate-delete-patch.py", line 6, in replace_once
+SystemExit: affiliate list filters: expected exactly one match, found 0
