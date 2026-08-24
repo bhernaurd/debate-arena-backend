@@ -6,6 +6,7 @@ on:
       - affiliate-actions-cleanup
     paths:
       - .github/workflows/apply-compact-affiliate-actions.yml
+      - test/affiliateAdminCompactActions.test.js
 
 permissions:
   contents: write
