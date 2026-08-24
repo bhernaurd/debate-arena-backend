@@ -1,0 +1,93 @@
+  router.delete('/api/admin/affiliates/:id', adminOnly, async (req, res) => {
+    try {
+      const affiliates = await service.listAffiliates();
+      const affiliate = affiliates.find(
+        item => String(item?.id || '') === String(req.params.id || '')
+      );
+
+      if (!affiliate) {
+        const error = new Error('Affiliate not found.');
+        error.statusCode = 404;
+        error.code = 'affiliate_not_found';
+        throw error;
+      }
+
+      if (affiliate.status === 'archived') {
+        return res.json({
+          success: true,
+          affiliate,
+          alreadyArchived: true,
+          appleDeactivation: {
+            status: 'already_inactive',
+            deactivatedCount: 0,
+          },
+        });
+      }
+
+      let appleDeactivation = {
+        status: 'skipped',
+        reason: 'test_affiliate',
+        deactivatedCount: 0,
+      };
+
+      // Deactivate Apple first. If Apple rejects the request, the Agora record
+      // stays active so the website never claims a still-redeemable code was deleted.
+      if (!affiliate.is_test) {
+        if (typeof appStoreConnectService?.deactivateCustomCode !== 'function') {
+          const error = new Error('App Store Connect custom-code deactivation is unavailable.');
+          error.statusCode = 503;
+          error.code = 'app_store_connect_custom_code_deactivation_unavailable';
+          throw error;
+        }
+        appleDeactivation = await appStoreConnectService.deactivateCustomCode({
+          offerReferenceName: affiliate.apple_offer_identifier,
+          customCode: affiliate.normalized_code,
+        });
+      }
+
+      const client = await pool.connect();
+      let archivedAffiliate = null;
+      try {
+        await client.query('BEGIN');
+        const archived = await client.query(
+          `
+          UPDATE affiliates
+          SET status = 'archived',
+              code_status = 'disabled',
+              archived_at = COALESCE(archived_at, NOW()),
+              updated_at = NOW()
+          WHERE id = $1
+          RETURNING *
+          `,
+          [affiliate.id]
+        );
+        archivedAffiliate = archived.rows[0] || affiliate;
+
+        await client.query(
+          `
+          UPDATE affiliate_dashboard_tokens
+          SET status = 'revoked',
+              revoked_at = COALESCE(revoked_at, NOW())
+          WHERE affiliate_id = $1
+            AND status = 'active'
+          `,
+          [affiliate.id]
+        );
+        await client.query('COMMIT');
+      } catch (databaseError) {
+        await client.query('ROLLBACK');
+        throw databaseError;
+      } finally {
+        client.release();
+      }
+
+      return res.json({
+        success: true,
+        affiliate: archivedAffiliate,
+        appleDeactivation,
+      });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
