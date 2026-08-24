@@ -29,11 +29,11 @@ function addMonths(date, amount) {
 
 function financeRegions() {
   const configured = cleanText(process.env.APP_STORE_CONNECT_FINANCE_REGIONS, 200);
-  const values = (configured || 'US')
+  const values = (configured || 'ZZ')
     .split(',')
     .map((value) => value.trim().toUpperCase())
     .filter((value) => /^[A-Z0-9]{2}$/.test(value));
-  return [...new Set(values.length ? values : ['US'])];
+  return [...new Set(values.length ? values : ['ZZ'])];
 }
 
 const enabled = booleanEnvironment('APP_STORE_CONNECT_REPORTS_ENABLED', false);
@@ -87,7 +87,7 @@ if (enabled) {
     async function runFinanceSync(reason = 'scheduled') {
       const reportType =
         cleanText(process.env.APP_STORE_CONNECT_FINANCE_REPORT_TYPE, 32).toUpperCase() ||
-        'FINANCE_DETAIL';
+        'FINANCIAL';
       const now = new Date();
       const months = [monthKey(addMonths(now, -1)), monthKey(addMonths(now, -2))];
 
