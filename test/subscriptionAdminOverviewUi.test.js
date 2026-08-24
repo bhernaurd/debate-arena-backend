@@ -45,6 +45,8 @@ test('Overview keeps four primary KPIs and moves subscriber detail to Breakdown'
   assert.match(html, /data-view="breakdown">Breakdown<\/button>/);
   assert.match(html, /id="view-breakdown"/);
   assert.match(html, /id="breakdownMetrics"/);
+  assert.match(html, /id="breakdownPeriod"/);
+  assert.match(html, /id="breakdownTable"/);
 
   const overview = html.match(/<section id="view-overview">([\s\S]*?)<section id="view-breakdown"/i)?.[1] || '';
   assert.ok(overview, 'Overview section not found');
@@ -53,7 +55,7 @@ test('Overview keeps four primary KPIs and moves subscriber detail to Breakdown'
   assert.match(overview, /<h2>Apple payouts<\/h2>/);
   assert.match(overview, /Recent subscribers/);
 
-  const loadOverview = html.match(/async function loadOverview\(\)\{([\s\S]*?)async function loadBreakdown/i)?.[1] || '';
+  const loadOverview = html.match(/async function loadOverview\(\)\{([\s\S]*?)let breakdownData/i)?.[1] || '';
   assert.ok(loadOverview, 'loadOverview function not found');
   assert.match(loadOverview, /metric\('Active Pro'/);
   assert.match(loadOverview, /metric\('Paid subscribers'/);
@@ -64,13 +66,36 @@ test('Overview keeps four primary KPIs and moves subscriber detail to Breakdown'
   assert.doesNotMatch(loadOverview, /metric\('Annual'/);
   assert.doesNotMatch(loadOverview, /metric\('Lifetime'/);
   assert.doesNotMatch(loadOverview, /metric\('Canceling'/);
+  assert.doesNotMatch(loadOverview, /sourceDistribution/);
+  assert.doesNotMatch(loadOverview, /statusDistribution/);
+});
+
+test('Breakdown mirrors History with period selection and subscriber-only metrics', () => {
+  const html = applyDashboardEnhancements(renderBaseDashboard());
+  const breakdown = html.match(/<section id="view-breakdown"[^>]*>([\s\S]*?)<section id="view-customers"/i)?.[1] || '';
+
+  assert.ok(breakdown, 'Breakdown section not found');
+  assert.match(breakdown, /id="breakdownPeriod"/);
+  assert.match(breakdown, /<option value="current">Current<\/option>/);
+  assert.match(breakdown, /id="breakdownNote"/);
+  assert.match(breakdown, /<h2>Subscriber history<\/h2>/);
+  assert.match(breakdown, /id="breakdownTable"/);
+  assert.doesNotMatch(breakdown, /Access source/);
+  assert.doesNotMatch(breakdown, /Estimated MRR|Gross sales|Apple proceeds/);
 
   assert.match(html, /async function loadBreakdown\(\)/);
-  assert.match(html, /metric\('Trials'/);
+  assert.match(html, /api\('\/overview'\),api\('\/history'\)/);
+  assert.match(html, /metric\('Total subscribers'/);
+  assert.match(html, /metric\('Free period'/);
   assert.match(html, /metric\('Monthly'/);
   assert.match(html, /metric\('Annual'/);
   assert.match(html, /metric\('Lifetime'/);
   assert.match(html, /metric\('Canceling'/);
+  assert.match(html, /metric\('Free period starts'/);
+  assert.match(html, /metric\('New paid'/);
+  assert.match(html, /metric\('Free → Paid'/);
+  assert.match(html, /metric\('Subscriptions ended'/);
+  assert.match(html, /breakdownPeriod'\)\.addEventListener\('change',renderBreakdownPeriod\)/);
 });
 
 test('Customers navigation is removed and Events becomes Subscribers', () => {
