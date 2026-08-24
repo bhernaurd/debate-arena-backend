@@ -1,0 +1,74 @@
+name: Apply Revenue Dashboard UI
+
+on:
+  push:
+    paths:
+      - '.github/workflows/apply-revenue-ui.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - name: Wire Revenue enhancer
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('subscriptionAdminDashboardRoutes.js')
+          text = path.read_text()
+
+          import_anchor = """import {
+            enhanceSubscriptionAdminOverviewHtml,
+          } from './lib/subscriptionAdminOverviewUi.js';
+          """
+          revenue_import = """import {
+            enhanceSubscriptionAdminOverviewHtml,
+          } from './lib/subscriptionAdminOverviewUi.js';
+          import {
+            enhanceSubscriptionAdminRevenueHtml,
+          } from './lib/subscriptionAdminRevenueUi.js';
+          """
+          if "subscriptionAdminRevenueUi.js" not in text:
+              if import_anchor not in text:
+                  raise SystemExit('Overview enhancer import anchor not found')
+              text = text.replace(import_anchor, revenue_import, 1)
+
+          old = """          ? enhanceSubscriptionAdminOverviewHtml(
+              enhanceSubscriptionAdminPayoutHtml(
+                enhanceSubscriptionAdminHistoryHtml(
+                  enhanceDashboardHtml(body)
+                )
+              )
+            )
+          : body;"""
+          new = """          ? enhanceSubscriptionAdminRevenueHtml(
+              enhanceSubscriptionAdminOverviewHtml(
+                enhanceSubscriptionAdminPayoutHtml(
+                  enhanceSubscriptionAdminHistoryHtml(
+                    enhanceDashboardHtml(body)
+                  )
+                )
+              )
+            )
+          : body;"""
+          if "? enhanceSubscriptionAdminRevenueHtml(" not in text:
+              if old not in text:
+                  raise SystemExit('Dashboard enhancement composition anchor not found')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+      - name: Commit production wiring
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/apply-revenue-ui.yml
+          git add subscriptionAdminDashboardRoutes.js
+          git commit -m "Use focused Revenue dashboard"
+          git push origin main
