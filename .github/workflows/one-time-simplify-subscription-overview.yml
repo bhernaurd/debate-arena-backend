@@ -1,0 +1,40 @@
+name: One-time subscription overview simplification
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  simplify-overview:
+    if: ${{ github.event.head_commit.message == 'Run one-time subscription overview simplification' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v6
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Apply overview simplification
+        run: python3 scripts/applySubscriptionOverviewSimplification.py
+
+      - name: Verify dashboard and backend
+        run: |
+          node --test test/subscriptionAdminOverviewUi.test.js
+          npm run check
+          npm test
+
+      - name: Commit verified update
+        run: |
+          rm -f scripts/applySubscriptionOverviewSimplification.py
+          rm -f .github/workflows/one-time-simplify-subscription-overview.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Simplify subscription overview and add breakdown tab"
+          git push origin HEAD:main
