@@ -14,6 +14,7 @@ import questionsRouter from './questions.js';
 import { createAnalyticsRouter } from './analytics.js';
 import aiJobsRouter from './aiJobs.js';
 import { createAppStoreSubscriptionRouter } from './appStoreSubscriptionRoutes.js';
+import { createSubscriptionAdminRouter } from './subscriptionAdminRoutes.js';
 import { createPaywallConfigurationRouter } from './paywallConfigurationRoutes.js';
 import { createAffiliateRouter } from './affiliateRoutes.js';
 import { createAccountAuthRouter } from './accountAuthRoutes.js';
@@ -530,7 +531,6 @@ app.use('/api/account/apple/sign-in', accountSignInLimiter);
 app.use('/api/account/session', accountSessionLimiter);
 app.use('/api/account', accountAuthRouter);
 
-
 app.use('/affiliate', affiliatePortalLimiter);
 app.use(createAffiliateRouter(pool, {
   accountAuthService,
@@ -545,6 +545,12 @@ app.use(aiJobsRouter);
 app.use(createAppStoreSubscriptionRouter(pool, {
   accountSubscriptionOwnershipService,
   affiliateSubscriptionAttributionService,
+}));
+
+app.use('/api/subscription-admin', createSubscriptionAdminRouter(pool, {
+  adminKey:
+    process.env.SUBSCRIPTION_DASHBOARD_ADMIN_KEY ||
+    process.env.ANALYTICS_ADMIN_KEY,
 }));
 
 app.use('/analytics', createAnalyticsRouter(pool, {
