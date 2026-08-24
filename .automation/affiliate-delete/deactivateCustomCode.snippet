@@ -1,0 +1,93 @@
+  async function deactivateCustomCode({
+    offerReferenceName,
+    customCode,
+  } = {}) {
+    assertConfigured();
+
+    const normalizedOfferName = normalizeAppleOfferIdentifier(offerReferenceName);
+    const normalizedCustomCode = normalizeAffiliateCode(customCode);
+
+    if (!normalizedOfferName) {
+      throw statusError(
+        400,
+        'An App Store Connect offer reference name is required.',
+        'app_store_connect_offer_reference_required'
+      );
+    }
+
+    if (!normalizedCustomCode) {
+      throw statusError(
+        400,
+        'A creator code is required.',
+        'app_store_connect_custom_code_required'
+      );
+    }
+
+    const offers = await listOfferCodes();
+    const matchingOffers = offers.filter(
+      offer => offer.normalizedName === normalizedOfferName
+    );
+
+    if (!matchingOffers.length) {
+      throw statusError(
+        404,
+        `No App Store Connect offer matches “${cleanText(offerReferenceName)}”.`,
+        'app_store_connect_offer_not_found'
+      );
+    }
+
+    const activeOffers = matchingOffers.filter(offer => offer.active === true);
+    const offer = activeOffers.length === 1
+      ? activeOffers[0]
+      : matchingOffers.length === 1
+        ? matchingOffers[0]
+        : null;
+
+    if (!offer) {
+      throw statusError(
+        409,
+        `More than one App Store Connect offer matches “${cleanText(offerReferenceName)}”.`,
+        'app_store_connect_offer_ambiguous'
+      );
+    }
+
+    const activeBatches = (offer.customCodes || []).filter(
+      item => item.customCode === normalizedCustomCode && item.active === true
+    );
+
+    if (!activeBatches.length) {
+      return {
+        status: 'already_inactive',
+        offerId: offer.id,
+        offerName: offer.name,
+        customCode: normalizedCustomCode,
+        deactivatedCount: 0,
+        customCodeIds: [],
+      };
+    }
+
+    const customCodeIds = [];
+    for (const batch of activeBatches) {
+      await apiFetch(`/subscriptionOfferCodeCustomCodes/${encodeURIComponent(batch.id)}`, {
+        method: 'PATCH',
+        body: {
+          data: {
+            type: 'subscriptionOfferCodeCustomCodes',
+            id: batch.id,
+            attributes: { active: false },
+          },
+        },
+      });
+      customCodeIds.push(batch.id);
+    }
+
+    return {
+      status: 'deactivated',
+      offerId: offer.id,
+      offerName: offer.name,
+      customCode: normalizedCustomCode,
+      deactivatedCount: customCodeIds.length,
+      customCodeIds,
+    };
+  }
+
