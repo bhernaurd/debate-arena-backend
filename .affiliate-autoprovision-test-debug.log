@@ -1,0 +1,2946 @@
+patch_exit=0
+npm warn deprecated node-domexception@1.0.0: Use your platform's native DOMException instead
+npm warn deprecated uuid@8.3.2: uuid@10 and below is no longer supported.  For ESM codebases, update to uuid@latest.  For CommonJS codebases, use uuid@11 (but be aware this version will likely be deprecated in 2028).
+
+added 155 packages, and audited 156 packages in 1s
+
+20 packages are looking for funding
+  run `npm fund` for details
+
+6 vulnerabilities (1 low, 2 moderate, 3 high)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues (including breaking changes), run:
+  npm audit fix --force
+
+Run `npm audit` for details.
+npm_ci_exit=0
+
+> debate-arena-backend@1.0.0 check
+> node --check server.js && node --check accountAuthRoutes.js && node --check accountSubscriptionEntitlementRoutes.js && node --check lib/googleSignIn.js && node --check lib/googleAccountAuthService.js && node --check aiJobs.js && node --check expandedAgoraAccess.js && node --check affiliateRoutes.js && node --check appStoreSubscriptionVerifier.js && node --check subscriptionAdminRoutes.js && node --check subscriptionAdminDashboardRoutes.js && node --check lib/subscriptionAdminHistoryService.js && node --check lib/subscriptionAdminHistoryUi.js && node --check lib/agoraProProducts.js && node --check lib/accountProAccessService.js && node --check lib/affiliateProgramService.js && node --check lib/appleAffiliateAnalyticsParser.js && node --check scripts/createAffiliate.js && node --check scripts/probeAffiliateAppleAnalytics.js && node --check scripts/importAffiliateAppleAnalytics.js && node --check scripts/calculateAffiliatePayout.js && node --check scripts/finalizeAffiliatePayouts.js && node --check scripts/runMigrations.js && node --check scripts/runAffiliateHandoffMigration.js && node --check lib/appStoreConnectAffiliateService.js && node --check lib/affiliateAppleImportPreferencesService.js && node --check lib/affiliateAccountReferralService.js && node --check lib/affiliateReferralHandoffService.js && node --check lib/affiliateSubscriptionAttributionService.js && node --check scripts/reconcileAffiliateSubscriptionAttributions.js && node --check scripts/reconcileSubscriptionOwnership.js && node --check lib/subscriptionAdminNotificationService.js && node --check subscriptionAdminEventScanner.js && node --check subscriptionAdminNotificationWorker.js && node --check scripts/sendSubscriptionAdminTest.js && node --check scripts/checkLifetimeProReadiness.js && node --check scripts/checkSubscriptionDashboardReadiness.js && node --check scripts/checkSubscriptionCurrentState.js && node --check scripts/checkSubscriptionHistory.js
+
+check_exit=0
+TAP version 13
+# Subtest: ensureCustomCode creates 1,000 redemptions by default
+ok 1 - ensureCustomCode creates 1,000 redemptions by default
+  ---
+  duration_ms: 6.14101
+  type: 'test'
+  ...
+# Subtest: ensureCustomCode reuses an existing active code on the shared offer
+ok 2 - ensureCustomCode reuses an existing active code on the shared offer
+  ---
+  duration_ms: 1.125037
+  type: 'test'
+  ...
+# Subtest: ensureCustomCode rejects the same active code on a different offer
+ok 3 - ensureCustomCode rejects the same active code on a different offer
+  ---
+  duration_ms: 1.800581
+  type: 'test'
+  ...
+# Subtest: Affiliate Admin is wired for automatic provisioning and retry
+ok 4 - Affiliate Admin is wired for automatic provisioning and retry
+  ---
+  duration_ms: 1.261647
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 70.002515
+focused_test_exit=0
+
+> debate-arena-backend@1.0.0 test
+> node --test
+
+TAP version 13
+# Subtest: returns the expected Chicago campaign boundaries
+ok 1 - returns the expected Chicago campaign boundaries
+  ---
+  duration_ms: 22.238038
+  type: 'test'
+  ...
+# Subtest: respects the first and last worldwide local-date boundaries
+ok 2 - respects the first and last worldwide local-date boundaries
+  ---
+  duration_ms: 0.786058
+  type: 'test'
+  ...
+# Subtest: rejects an invalid IANA time zone
+ok 3 - rejects an invalid IANA time zone
+  ---
+  duration_ms: 0.78146
+  type: 'test'
+  ...
+# Subtest: achievement route requires installation and strict Bearer authentication
+ok 4 - achievement route requires installation and strict Bearer authentication
+  ---
+  duration_ms: 1.01927
+  type: 'test'
+  ...
+# Subtest: achievement router exposes one authenticated merge endpoint
+ok 5 - achievement router exposes one authenticated merge endpoint
+  ---
+  duration_ms: 0.219183
+  type: 'test'
+  ...
+# Subtest: achievement responses disable caching
+ok 6 - achievement responses disable caching
+  ---
+  duration_ms: 0.241495
+  type: 'test'
+  ...
+# Subtest: achievement errors never log request bodies or access tokens
+ok 7 - achievement errors never log request bodies or access tokens
+  ---
+  duration_ms: 0.1974
+  type: 'test'
+  ...
+# Subtest: migration uses account and achievement id as the canonical key
+ok 8 - migration uses account and achievement id as the canonical key
+  ---
+  duration_ms: 0.242116
+  type: 'test'
+  ...
+# Subtest: migration stores only account-owned unlock metadata
+ok 9 - migration stores only account-owned unlock metadata
+  ---
+  duration_ms: 0.131113
+  type: 'test'
+  ...
+# Subtest: repository preserves the earliest unlock date
+ok 10 - repository preserves the earliest unlock date
+  ---
+  duration_ms: 0.23768
+  type: 'test'
+  ...
+# Subtest: empty record arrays remain valid for cross-device download
+ok 11 - empty record arrays remain valid for cross-device download
+  ---
+  duration_ms: 0.174908
+  type: 'test'
+  ...
+# Subtest: server shares account authorization with the achievement service
+ok 12 - server shares account authorization with the achievement service
+  ---
+  duration_ms: 0.369905
+  type: 'test'
+  ...
+# Subtest: achievement router mounts before the generic account router
+ok 13 - achievement router mounts before the generic account router
+  ---
+  duration_ms: 0.448871
+  type: 'test'
+  ...
+# Subtest: server rate-limits account achievement sync
+ok 14 - server rate-limits account achievement sync
+  ---
+  duration_ms: 0.182188
+  type: 'test'
+  ...
+# Subtest: authenticates before writing achievement unlocks
+ok 15 - authenticates before writing achievement unlocks
+  ---
+  duration_ms: 4.794619
+  type: 'test'
+  ...
+# Subtest: allows an empty upload so a new device can download canonical unlocks
+ok 16 - allows an empty upload so a new device can download canonical unlocks
+  ---
+  duration_ms: 0.477753
+  type: 'test'
+  ...
+# Subtest: normalizes achievement ids and ISO timestamps
+ok 17 - normalizes achievement ids and ISO timestamps
+  ---
+  duration_ms: 0.343526
+  type: 'test'
+  ...
+# Subtest: rejects duplicate achievement ids in one batch
+ok 18 - rejects duplicate achievement ids in one batch
+  ---
+  duration_ms: 0.644669
+  type: 'test'
+  ...
+# Subtest: rejects unsupported schema versions
+ok 19 - rejects unsupported schema versions
+  ---
+  duration_ms: 0.297348
+  type: 'test'
+  ...
+# Subtest: rejects invalid achievement identifiers
+ok 20 - rejects invalid achievement identifiers
+  ---
+  duration_ms: 0.279441
+  type: 'test'
+  ...
+# Subtest: rejects invalid unlock timestamps
+ok 21 - rejects invalid unlock timestamps
+  ---
+  duration_ms: 0.403023
+  type: 'test'
+  ...
+# Subtest: rejects batches above the configured maximum
+ok 22 - rejects batches above the configured maximum
+  ---
+  duration_ms: 0.334682
+  type: 'test'
+  ...
+# Subtest: normalizes account authorization failures
+ok 23 - normalizes account authorization failures
+  ---
+  duration_ms: 0.643477
+  type: 'test'
+  ...
+# Subtest: rolls back the complete batch when persistence fails
+ok 24 - rolls back the complete batch when persistence fails
+  ---
+  duration_ms: 0.680802
+  type: 'test'
+  ...
+# Subtest: rejects invalid server time configuration
+ok 25 - rejects invalid server time configuration
+  ---
+  duration_ms: 0.279962
+  type: 'test'
+  ...
+# Subtest: rejects duplicate canonical rows returned by storage
+ok 26 - rejects duplicate canonical rows returned by storage
+  ---
+  duration_ms: 0.341984
+  type: 'test'
+  ...
+# Subtest: creates an installation-bound Apple sign-in challenge
+ok 27 - creates an installation-bound Apple sign-in challenge
+  ---
+  duration_ms: 57.916663
+  type: 'test'
+  ...
+# Subtest: does not expose reauthentication or deletion challenge purposes publicly
+ok 28 - does not expose reauthentication or deletion challenge purposes publicly
+  ---
+  duration_ms: 14.01367
+  type: 'test'
+  ...
+# Subtest: creates an authenticated Apple challenge for account deletion
+ok 29 - creates an authenticated Apple challenge for account deletion
+  ---
+  duration_ms: 17.929084
+  type: 'test'
+  ...
+# Subtest: confirms account deletion using only the authorized account identity
+ok 30 - confirms account deletion using only the authorized account identity
+  ---
+  duration_ms: 12.914903
+  type: 'test'
+  ...
+# Subtest: requires a valid session before creating or confirming account deletion
+ok 31 - requires a valid session before creating or confirming account deletion
+  ---
+  duration_ms: 22.380713
+  type: 'test'
+  ...
+# Subtest: maps account deletion validation failures without exposing Apple credentials
+ok 32 - maps account deletion validation failures without exposing Apple credentials
+  ---
+  duration_ms: 11.283722
+  type: 'test'
+  ...
+# Subtest: creates a new account from an Apple sign-in request
+ok 33 - creates a new account from an Apple sign-in request
+  ---
+  duration_ms: 10.962038
+  type: 'test'
+  ...
+# Subtest: returns 200 when an existing Apple account signs in
+ok 34 - returns 200 when an existing Apple account signs in
+  ---
+  duration_ms: 8.834135
+  type: 'test'
+  ...
+# Subtest: rotates a refresh token and forwards installation metadata
+ok 35 - rotates a refresh token and forwards installation metadata
+  ---
+  duration_ms: 8.263615
+  type: 'test'
+  ...
+# Subtest: verifies the current database-backed session
+ok 36 - verifies the current database-backed session
+  ---
+  duration_ms: 10.878895
+  type: 'test'
+  ...
+# Subtest: signs out by authorizing and revoking the exact session
+ok 37 - signs out by authorizing and revoking the exact session
+  ---
+  duration_ms: 11.218125
+  type: 'test'
+  ...
+# Subtest: rejects a request that omits X-Installation-ID
+ok 38 - rejects a request that omits X-Installation-ID
+  ---
+  duration_ms: 5.572724
+  type: 'test'
+  ...
+# Subtest: rejects a missing or malformed Bearer token
+ok 39 - rejects a missing or malformed Bearer token
+  ---
+  duration_ms: 23.422842
+  type: 'test'
+  ...
+# Subtest: requires JSON objects for sign-in and refresh requests
+ok 40 - requires JSON objects for sign-in and refresh requests
+  ---
+  duration_ms: 19.955518
+  type: 'test'
+  ...
+# Subtest: maps account service validation failures without exposing causes
+ok 41 - maps account service validation failures without exposing causes
+  ---
+  duration_ms: 13.03514
+  type: 'test'
+  ...
+# Subtest: maps internal failures to a generic retryable 503 response
+ok 42 - maps internal failures to a generic retryable 503 response
+  ---
+  duration_ms: 5.897382
+  type: 'test'
+  ...
+# Subtest: returns a generic 503 for service-side 500 errors
+ok 43 - returns a generic 503 for service-side 500 errors
+  ---
+  duration_ms: 3.937106
+  type: 'test'
+  ...
+# Subtest: rejects sign-out when the database session was not revoked
+ok 44 - rejects sign-out when the database session was not revoked
+  ---
+  duration_ms: 5.704368
+  type: 'test'
+  ...
+# Subtest: PostgreSQL session revocation targets the exact account, session, and installation
+ok 45 - PostgreSQL session revocation targets the exact account, session, and installation
+  ---
+  duration_ms: 0.615746
+  type: 'test'
+  ...
+# Subtest: server.js passes Node syntax validation
+ok 46 - server.js passes Node syntax validation
+  ---
+  duration_ms: 39.567326
+  type: 'test'
+  ...
+# Subtest: env.js remains the first executable import
+ok 47 - env.js remains the first executable import
+  ---
+  duration_ms: 0.334542
+  type: 'test'
+  ...
+# Subtest: server constructs one shared production account service
+ok 48 - server constructs one shared production account service
+  ---
+  duration_ms: 0.334572
+  type: 'test'
+  ...
+# Subtest: account routes and subscription ownership share the same account service
+ok 49 - account routes and subscription ownership share the same account service
+  ---
+  duration_ms: 0.581006
+  type: 'test'
+  ...
+# Subtest: Apple challenge and sign-in endpoints have strict dedicated limits
+ok 50 - Apple challenge and sign-in endpoints have strict dedicated limits
+  ---
+  duration_ms: 0.772347
+  type: 'test'
+  ...
+# Subtest: session endpoints have a separate thirty-request limit
+ok 51 - session endpoints have a separate thirty-request limit
+  ---
+  duration_ms: 0.318439
+  type: 'test'
+  ...
+# Subtest: JSON parsing is registered before account authentication
+ok 52 - JSON parsing is registered before account authentication
+  ---
+  duration_ms: 0.314293
+  type: 'test'
+  ...
+# Subtest: all account rate limiters run before the account router
+ok 53 - all account rate limiters run before the account router
+  ---
+  duration_ms: 0.241155
+  type: 'test'
+  ...
+# Subtest: production wiring does not embed or log authentication secrets
+ok 54 - production wiring does not embed or log authentication secrets
+  ---
+  duration_ms: 0.621485
+  type: 'test'
+  ...
+# Subtest: existing application routers remain registered
+ok 55 - existing application routers remain registered
+  ---
+  duration_ms: 0.579293
+  type: 'test'
+  ...
+# Subtest: creates a short-lived installation-bound Apple challenge
+ok 56 - creates a short-lived installation-bound Apple challenge
+  ---
+  duration_ms: 5.221837
+  type: 'test'
+  ...
+# Subtest: rejects invalid challenge purpose and account binding combinations
+ok 57 - rejects invalid challenge purpose and account binding combinations
+  ---
+  duration_ms: 1.527078
+  type: 'test'
+  ...
+# Subtest: records a nonce failure without consuming a usable challenge
+ok 58 - records a nonce failure without consuming a usable challenge
+  ---
+  duration_ms: 4.804584
+  type: 'test'
+  ...
+# Subtest: consumes a challenge before Apple verification and rejects replay
+ok 59 - consumes a challenge before Apple verification and rejects replay
+  ---
+  duration_ms: 1.307765
+  type: 'test'
+  ...
+# Subtest: creates an account, identity, installation, and session without storing plaintext Apple tokens
+ok 60 - creates an account, identity, installation, and session without storing plaintext Apple tokens
+  ---
+  duration_ms: 2.480632
+  type: 'test'
+  ...
+# Subtest: rejects an Apple subject mismatch after consuming the challenge
+ok 61 - rejects an Apple subject mismatch after consuming the challenge
+  ---
+  duration_ms: 0.765267
+  type: 'test'
+  ...
+# Subtest: maps retryable Apple failures to a temporary service error
+ok 62 - maps retryable Apple failures to a temporary service error
+  ---
+  duration_ms: 0.797955
+  type: 'test'
+  ...
+# Subtest: signing in again with the same Apple identity reuses the account and replaces the installation session
+ok 63 - signing in again with the same Apple identity reuses the account and replaces the installation session
+  ---
+  duration_ms: 3.262463
+  type: 'test'
+  ...
+# Subtest: signing a different Apple identity into the same installation unlinks the previous account
+ok 64 - signing a different Apple identity into the same installation unlinks the previous account
+  ---
+  duration_ms: 2.466842
+  type: 'test'
+  ...
+# Subtest: does not create a new session for a locked existing account
+ok 65 - does not create a new session for a locked existing account
+  ---
+  duration_ms: 1.805247
+  type: 'test'
+  ...
+# Subtest: rotates a refresh token atomically and preserves its token family
+ok 66 - rotates a refresh token atomically and preserves its token family
+  ---
+  duration_ms: 2.012112
+  type: 'test'
+  ...
+# Subtest: detects refresh-token reuse and revokes the entire token family
+ok 67 - detects refresh-token reuse and revokes the entire token family
+  ---
+  duration_ms: 1.635818
+  type: 'test'
+  ...
+# Subtest: rejects an expired refresh session and records its revocation
+ok 68 - rejects an expired refresh session and records its revocation
+  ---
+  duration_ms: 0.934055
+  type: 'test'
+  ...
+# Subtest: database-backed authorization rejects revoked sessions, auth-version changes, and installation mismatches
+    # Subtest: revoked session
+    ok 1 - revoked session
+      ---
+      duration_ms: 1.286314
+      type: 'test'
+      ...
+    # Subtest: auth version change
+    ok 2 - auth version change
+      ---
+      duration_ms: 0.927986
+      type: 'test'
+      ...
+    # Subtest: installation mismatch
+    ok 3 - installation mismatch
+      ---
+      duration_ms: 0.832065
+      type: 'test'
+      ...
+    1..3
+ok 69 - database-backed authorization rejects revoked sessions, auth-version changes, and installation mismatches
+  ---
+  duration_ms: 3.683803
+  type: 'test'
+  ...
+# Subtest: expires access tokens independently of the longer refresh session
+ok 70 - expires access tokens independently of the longer refresh session
+  ---
+  duration_ms: 1.214218
+  type: 'test'
+  ...
+# Subtest: deletes an account after Apple reauthentication and preserves released subscription evidence
+ok 71 - deletes an account after Apple reauthentication and preserves released subscription evidence
+  ---
+  duration_ms: 3.137149
+  type: 'test'
+  ...
+# Subtest: rejects a deletion challenge bound to another installation or account
+ok 72 - rejects a deletion challenge bound to another installation or account
+  ---
+  duration_ms: 1.186647
+  type: 'test'
+  ...
+# Subtest: rejects a mismatched Apple subject without changing account data
+ok 73 - rejects a mismatched Apple subject without changing account data
+  ---
+  duration_ms: 2.224064
+  type: 'test'
+  ...
+# Subtest: restores the account to active when Apple token revocation fails while invalidating old sessions
+ok 74 - restores the account to active when Apple token revocation fails while invalidating old sessions
+  ---
+  duration_ms: 2.008637
+  type: 'test'
+  ...
+# Subtest: loads versioned keys without exposing key material
+ok 75 - loads versioned keys without exposing key material
+  ---
+  duration_ms: 2.387625
+  type: 'test'
+  ...
+# Subtest: rejects a missing active key version
+ok 76 - rejects a missing active key version
+  ---
+  duration_ms: 0.884762
+  type: 'test'
+  ...
+# Subtest: rejects noncanonical key versions
+ok 77 - rejects noncanonical key versions
+  ---
+  duration_ms: 0.280714
+  type: 'test'
+  ...
+# Subtest: encrypts and decrypts an Apple refresh token
+ok 78 - encrypts and decrypts an Apple refresh token
+  ---
+  duration_ms: 1.782584
+  type: 'test'
+  ...
+# Subtest: uses a unique IV for every Apple refresh-token encryption
+ok 79 - uses a unique IV for every Apple refresh-token encryption
+  ---
+  duration_ms: 0.66563
+  type: 'test'
+  ...
+# Subtest: binds encrypted Apple refresh tokens to the identity owner
+ok 80 - binds encrypted Apple refresh tokens to the identity owner
+  ---
+  duration_ms: 0.460928
+  type: 'test'
+  ...
+# Subtest: decrypts data encrypted under a previous key version
+ok 81 - decrypts data encrypted under a previous key version
+  ---
+  duration_ms: 0.674803
+  type: 'test'
+  ...
+# Subtest: rejects tampered encrypted Apple refresh tokens
+ok 82 - rejects tampered encrypted Apple refresh tokens
+  ---
+  duration_ms: 0.600294
+  type: 'test'
+  ...
+# Subtest: rejects noncanonical encrypted-token segments
+ok 83 - rejects noncanonical encrypted-token segments
+  ---
+  duration_ms: 0.699861
+  type: 'test'
+  ...
+# Subtest: generates high-entropy URL-safe Agora refresh tokens
+ok 84 - generates high-entropy URL-safe Agora refresh tokens
+  ---
+  duration_ms: 0.624519
+  type: 'test'
+  ...
+# Subtest: hashes refresh tokens as SHA-256 hexadecimal
+ok 85 - hashes refresh tokens as SHA-256 hexadecimal
+  ---
+  duration_ms: 0.730996
+  type: 'test'
+  ...
+# Subtest: issues and verifies an Agora access token with issuer and audience
+ok 86 - issues and verifies an Agora access token with issuer and audience
+  ---
+  duration_ms: 1.167069
+  type: 'test'
+  ...
+# Subtest: verifies access tokens issued under a previous signing key
+ok 87 - verifies access tokens issued under a previous signing key
+  ---
+  duration_ms: 0.411887
+  type: 'test'
+  ...
+# Subtest: rejects tampered access-token payloads
+ok 88 - rejects tampered access-token payloads
+  ---
+  duration_ms: 0.386629
+  type: 'test'
+  ...
+# Subtest: rejects access tokens signed by an unknown key version
+ok 89 - rejects access tokens signed by an unknown key version
+  ---
+  duration_ms: 0.540726
+  type: 'test'
+  ...
+# Subtest: rejects expired access tokens
+ok 90 - rejects expired access tokens
+  ---
+  duration_ms: 0.493157
+  type: 'test'
+  ...
+# Subtest: rejects access tokens issued too far in the future
+ok 91 - rejects access tokens issued too far in the future
+  ---
+  duration_ms: 0.423464
+  type: 'test'
+  ...
+# Subtest: rejects an access token whose signed lifetime exceeds one hour
+ok 92 - rejects an access token whose signed lifetime exceeds one hour
+  ---
+  duration_ms: 0.364497
+  type: 'test'
+  ...
+# Subtest: rejects incorrect access-token issuer and audience
+ok 93 - rejects incorrect access-token issuer and audience
+  ---
+  duration_ms: 0.474799
+  type: 'test'
+  ...
+# Subtest: rejects noncanonical access-token key versions
+ok 94 - rejects noncanonical access-token key versions
+  ---
+  duration_ms: 0.486186
+  type: 'test'
+  ...
+# Subtest: rejects noncanonical access-token Base64URL segments
+ok 95 - rejects noncanonical access-token Base64URL segments
+  ---
+  duration_ms: 0.36715
+  type: 'test'
+  ...
+# Subtest: rejects invalid account, session, installation, and auth-version claims
+ok 96 - rejects invalid account, session, installation, and auth-version claims
+  ---
+  duration_ms: 0.280623
+  type: 'test'
+  ...
+# Subtest: limits issued Agora access-token lifetime to one hour
+ok 97 - limits issued Agora access-token lifetime to one hour
+  ---
+  duration_ms: 0.177431
+  type: 'test'
+  ...
+# Subtest: route requires installation and strict Bearer authentication
+ok 98 - route requires installation and strict Bearer authentication
+  ---
+  duration_ms: 1.146748
+  type: 'test'
+  ...
+# Subtest: route exposes one authenticated merge endpoint
+ok 99 - route exposes one authenticated merge endpoint
+  ---
+  duration_ms: 0.384736
+  type: 'test'
+  ...
+# Subtest: migration stores active snapshots and permanent clear tombstones
+ok 100 - migration stores active snapshots and permanent clear tombstones
+  ---
+  duration_ms: 0.193074
+  type: 'test'
+  ...
+# Subtest: service blocks resurrection after completion history exists
+ok 101 - service blocks resurrection after completion history exists
+  ---
+  duration_ms: 0.340722
+  type: 'test'
+  ...
+# Subtest: route logs no answers, messages, tokens, or bodies
+ok 102 - route logs no answers, messages, tokens, or bodies
+  ---
+  duration_ms: 0.277649
+  type: 'test'
+  ...
+# Subtest: server mounts progress route before generic account router
+ok 103 - server mounts progress route before generic account router
+  ---
+  duration_ms: 0.253533
+  type: 'test'
+  ...
+# Subtest: server gives progress payloads a route-specific parser and limiter
+ok 104 - server gives progress payloads a route-specific parser and limiter
+  ---
+  duration_ms: 0.413278
+  type: 'test'
+  ...
+# Subtest: allows download-only synchronization
+ok 105 - allows download-only synchronization
+  ---
+  duration_ms: 3.054236
+  type: 'test'
+  ...
+# Subtest: authenticates before applying an active snapshot
+ok 106 - authenticates before applying an active snapshot
+  ---
+  duration_ms: 1.529722
+  type: 'test'
+  ...
+# Subtest: turns a completed challenge upload into a tombstone
+ok 107 - turns a completed challenge upload into a tombstone
+  ---
+  duration_ms: 0.534206
+  type: 'test'
+  ...
+# Subtest: applies explicit clear tombstones
+ok 108 - applies explicit clear tombstones
+  ---
+  duration_ms: 0.44161
+  type: 'test'
+  ...
+# Subtest: rejects unsupported schemas
+ok 109 - rejects unsupported schemas
+  ---
+  duration_ms: 0.757555
+  type: 'test'
+  ...
+# Subtest: rejects duplicate message identifiers
+ok 110 - rejects duplicate message identifiers
+  ---
+  duration_ms: 0.440388
+  type: 'test'
+  ...
+# Subtest: rejects unsupported message roles
+ok 111 - rejects unsupported message roles
+  ---
+  duration_ms: 0.314203
+  type: 'test'
+  ...
+# Subtest: rejects updatedAt before createdAt
+ok 112 - rejects updatedAt before createdAt
+  ---
+  duration_ms: 0.348924
+  type: 'test'
+  ...
+# Subtest: rolls back when persistence fails
+ok 113 - rolls back when persistence fails
+  ---
+  duration_ms: 0.863591
+  type: 'test'
+  ...
+# Subtest: normalizes PostgreSQL Date objects when loading the current snapshot
+ok 114 - normalizes PostgreSQL Date objects when loading the current snapshot
+  ---
+  duration_ms: 1.164915
+  type: 'test'
+  ...
+# Subtest: history sync route requires installation and strict Bearer authentication
+ok 115 - history sync route requires installation and strict Bearer authentication
+  ---
+  duration_ms: 1.395375
+  type: 'test'
+  ...
+# Subtest: history router exposes authenticated upload and paginated download
+ok 116 - history router exposes authenticated upload and paginated download
+  ---
+  duration_ms: 0.334873
+  type: 'test'
+  ...
+# Subtest: history download validates single bounded query values
+ok 117 - history download validates single bounded query values
+  ---
+  duration_ms: 0.314172
+  type: 'test'
+  ...
+# Subtest: history responses disable caching
+ok 118 - history responses disable caching
+  ---
+  duration_ms: 0.194316
+  type: 'test'
+  ...
+# Subtest: history errors never log request bodies or debate content
+ok 119 - history errors never log request bodies or debate content
+  ---
+  duration_ms: 0.300232
+  type: 'test'
+  ...
+# Subtest: server rate-limits history uploads before using the larger parser
+ok 120 - server rate-limits history uploads before using the larger parser
+  ---
+  duration_ms: 0.300663
+  type: 'test'
+  ...
+# Subtest: server shares account authorization with the history service
+ok 121 - server shares account authorization with the history service
+  ---
+  duration_ms: 0.316346
+  type: 'test'
+  ...
+# Subtest: history router mounts before the generic account router
+ok 122 - history router mounts before the generic account router
+  ---
+  duration_ms: 0.193345
+  type: 'test'
+  ...
+# Subtest: migration makes account and SavedDebate UUID the idempotent key
+ok 123 - migration makes account and SavedDebate UUID the idempotent key
+  ---
+  duration_ms: 0.460618
+  type: 'test'
+  ...
+# Subtest: migration preserves messages and reports as validated JSONB
+ok 124 - migration preserves messages and reports as validated JSONB
+  ---
+  duration_ms: 0.6656
+  type: 'test'
+  ...
+# Subtest: migration preserves origin installation and newer-content precedence metadata
+ok 125 - migration preserves origin installation and newer-content precedence metadata
+  ---
+  duration_ms: 0.283457
+  type: 'test'
+  ...
+# Subtest: Ranked history migration stores complete validated result metadata
+ok 126 - Ranked history migration stores complete validated result metadata
+  ---
+  duration_ms: 0.203369
+  type: 'test'
+  ...
+# Subtest: PostgreSQL repository writes and reads Ranked history columns without changing the schema version
+ok 127 - PostgreSQL repository writes and reads Ranked history columns without changing the schema version
+  ---
+  duration_ms: 2.498529
+  type: 'test'
+  ...
+# Subtest: authenticates and upserts a complete SavedDebate snapshot
+ok 128 - authenticates and upserts a complete SavedDebate snapshot
+  ---
+  duration_ms: 4.596371
+  type: 'test'
+  ...
+# Subtest: preserves ordered message and report identifiers
+ok 129 - preserves ordered message and report identifiers
+  ---
+  duration_ms: 0.74088
+  type: 'test'
+  ...
+# Subtest: preserves complete Ranked ladder metadata during sync
+ok 130 - preserves complete Ranked ladder metadata during sync
+  ---
+  duration_ms: 0.845465
+  type: 'test'
+  ...
+# Subtest: rejects incomplete or inconsistent Ranked metadata
+    # Subtest: missing report context
+    ok 1 - missing report context
+      ---
+      duration_ms: 0.970519
+      type: 'test'
+      ...
+    # Subtest: SavedDebate identity mismatch
+    ok 2 - SavedDebate identity mismatch
+      ---
+      duration_ms: 0.535418
+      type: 'test'
+      ...
+    # Subtest: result kind mismatch
+    ok 3 - result kind mismatch
+      ---
+      duration_ms: 0.463342
+      type: 'test'
+      ...
+    # Subtest: Ranked Daily Challenge overlap
+    ok 4 - Ranked Daily Challenge overlap
+      ---
+      duration_ms: 0.581236
+      type: 'test'
+      ...
+    1..4
+ok 131 - rejects incomplete or inconsistent Ranked metadata
+  ---
+  duration_ms: 3.557807
+  type: 'test'
+  ...
+# Subtest: accepts an older debate without analytics, score, report, daily challenge, or mode
+ok 132 - accepts an older debate without analytics, score, report, daily challenge, or mode
+  ---
+  duration_ms: 0.78783
+  type: 'test'
+  ...
+# Subtest: returns a stale ignored result without treating it as a sync failure
+ok 133 - returns a stale ignored result without treating it as a sync failure
+  ---
+  duration_ms: 0.725388
+  type: 'test'
+  ...
+# Subtest: rejects an unsupported history schema version
+ok 134 - rejects an unsupported history schema version
+  ---
+  duration_ms: 0.351107
+  type: 'test'
+  ...
+# Subtest: rejects duplicate SavedDebate identifiers in one batch
+ok 135 - rejects duplicate SavedDebate identifiers in one batch
+  ---
+  duration_ms: 0.653873
+  type: 'test'
+  ...
+# Subtest: rejects duplicate message identifiers in a debate
+ok 136 - rejects duplicate message identifiers in a debate
+  ---
+  duration_ms: 0.412658
+  type: 'test'
+  ...
+# Subtest: rejects an unsupported message role
+ok 137 - rejects an unsupported message role
+  ---
+  duration_ms: 1.341424
+  type: 'test'
+  ...
+# Subtest: rejects out-of-range final and round scores
+    # Subtest: final score
+    ok 1 - final score
+      ---
+      duration_ms: 0.559363
+      type: 'test'
+      ...
+    # Subtest: round score
+    ok 2 - round score
+      ---
+      duration_ms: 0.435501
+      type: 'test'
+      ...
+    1..2
+ok 138 - rejects out-of-range final and round scores
+  ---
+  duration_ms: 1.351139
+  type: 'test'
+  ...
+# Subtest: rejects a batch above the configured maximum
+ok 139 - rejects a batch above the configured maximum
+  ---
+  duration_ms: 0.367371
+  type: 'test'
+  ...
+# Subtest: normalizes account authorization failures
+ok 140 - normalizes account authorization failures
+  ---
+  duration_ms: 0.375192
+  type: 'test'
+  ...
+# Subtest: rolls back the whole batch when an upsert fails
+ok 141 - rolls back the whole batch when an upsert fails
+  ---
+  duration_ms: 0.765747
+  type: 'test'
+  ...
+# Subtest: preserves meaningful whitespace in debate content and report text
+ok 142 - preserves meaningful whitespace in debate content and report text
+  ---
+  duration_ms: 0.60451
+  type: 'test'
+  ...
+# Subtest: rejects an impossible Daily Challenge calendar date
+ok 143 - rejects an impossible Daily Challenge calendar date
+  ---
+  duration_ms: 0.355033
+  type: 'test'
+  ...
+# Subtest: authenticates before downloading account-owned history
+ok 144 - authenticates before downloading account-owned history
+  ---
+  duration_ms: 1.451357
+  type: 'test'
+  ...
+# Subtest: returns Ranked metadata unchanged during account-history download
+ok 145 - returns Ranked metadata unchanged during account-history download
+  ---
+  duration_ms: 0.637738
+  type: 'test'
+  ...
+# Subtest: returns a bounded opaque cursor for the next stable page
+ok 146 - returns a bounded opaque cursor for the next stable page
+  ---
+  duration_ms: 1.054552
+  type: 'test'
+  ...
+# Subtest: rejects malformed download cursors before querying history
+ok 147 - rejects malformed download cursors before querying history
+  ---
+  duration_ms: 0.25832
+  type: 'test'
+  ...
+# Subtest: rejects download limits outside the configured bounds
+    # Subtest: zero
+    ok 1 - zero
+      ---
+      duration_ms: 0.293672
+      type: 'test'
+      ...
+    # Subtest: above maximum
+    ok 2 - above maximum
+      ---
+      duration_ms: 0.210129
+      type: 'test'
+      ...
+    1..2
+ok 148 - rejects download limits outside the configured bounds
+  ---
+  duration_ms: 0.799968
+  type: 'test'
+  ...
+# Subtest: rejects a database row belonging to another account
+ok 149 - rejects a database row belonging to another account
+  ---
+  duration_ms: 0.31964
+  type: 'test'
+  ...
+# Subtest: rejects unstable or duplicate database ordering
+    # Subtest: out of order
+    ok 1 - out of order
+      ---
+      duration_ms: 0.877843
+      type: 'test'
+      ...
+    # Subtest: duplicate
+    ok 2 - duplicate
+      ---
+      duration_ms: 0.703025
+      type: 'test'
+      ...
+    1..2
+ok 150 - rejects unstable or duplicate database ordering
+  ---
+  duration_ms: 1.973085
+  type: 'test'
+  ...
+# Subtest: preserves full SavedDebate fields in download responses
+ok 151 - preserves full SavedDebate fields in download responses
+  ---
+  duration_ms: 0.661243
+  type: 'test'
+  ...
+# Subtest: returns current paid Pro access
+ok 152 - returns current paid Pro access
+  ---
+  duration_ms: 2.391751
+  type: 'test'
+  ...
+# Subtest: allows an unexpired free trial
+ok 153 - allows an unexpired free trial
+  ---
+  duration_ms: 1.92855
+  type: 'test'
+  ...
+# Subtest: allows an unexpired billing grace period
+ok 154 - allows an unexpired billing grace period
+  ---
+  duration_ms: 0.5021
+  type: 'test'
+  ...
+# Subtest: returns no access when no current entitlement exists
+ok 155 - returns no access when no current entitlement exists
+  ---
+  duration_ms: 1.024328
+  type: 'test'
+  ...
+# Subtest: rejects stale or revoked rows returned by a repository
+ok 156 - rejects stale or revoked rows returned by a repository
+  ---
+  duration_ms: 0.670847
+  type: 'test'
+  ...
+# Subtest: rejects an account mismatch from storage
+ok 157 - rejects an account mismatch from storage
+  ---
+  duration_ms: 0.354422
+  type: 'test'
+  ...
+# Subtest: PostgreSQL repository queries account ownership and current entitlement dates
+ok 158 - PostgreSQL repository queries account ownership and current entitlement dates
+  ---
+  duration_ms: 3.034698
+  type: 'test'
+  ...
+# Subtest: resumes the active Ranked debate
+ok 159 - resumes the active Ranked debate
+  ---
+  duration_ms: 45.012346
+  type: 'test'
+  ...
+# Subtest: lists resolved Ranked debates with stable pagination metadata
+ok 160 - lists resolved Ranked debates with stable pagination metadata
+  ---
+  duration_ms: 20.913298
+  type: 'test'
+  ...
+# Subtest: generates a new opening and returns 201
+ok 161 - generates a new opening and returns 201
+  ---
+  duration_ms: 19.929369
+  type: 'test'
+  ...
+# Subtest: returns 200 for an idempotent existing opening
+ok 162 - returns 200 for an idempotent existing opening
+  ---
+  duration_ms: 10.036415
+  type: 'test'
+  ...
+# Subtest: submits a new Ranked turn and returns 201
+ok 163 - submits a new Ranked turn and returns 201
+  ---
+  duration_ms: 11.020263
+  type: 'test'
+  ...
+# Subtest: returns 200 for an idempotent existing turn
+ok 164 - returns 200 for an idempotent existing turn
+  ---
+  duration_ms: 7.52633
+  type: 'test'
+  ...
+# Subtest: rejects a missing installation id
+ok 165 - rejects a missing installation id
+  ---
+  duration_ms: 6.638583
+  type: 'test'
+  ...
+# Subtest: rejects missing and malformed access tokens
+ok 166 - rejects missing and malformed access tokens
+  ---
+  duration_ms: 16.705413
+  type: 'test'
+  ...
+# Subtest: rejects an invalid debate id
+ok 167 - rejects an invalid debate id
+  ---
+  duration_ms: 12.100854
+  type: 'test'
+  ...
+# Subtest: rejects malformed opening input
+ok 168 - rejects malformed opening input
+  ---
+  duration_ms: 10.576971
+  type: 'test'
+  ...
+# Subtest: rejects missing, empty, and oversized turn content
+ok 169 - rejects missing, empty, and oversized turn content
+  ---
+  duration_ms: 19.968708
+  type: 'test'
+  ...
+# Subtest: preserves safe Ranked state-conflict details
+ok 170 - preserves safe Ranked state-conflict details
+  ---
+  duration_ms: 9.60475
+  type: 'test'
+  ...
+# Subtest: preserves disabled rollout and resume states
+ok 171 - preserves disabled rollout and resume states
+  ---
+  duration_ms: 14.325089
+  type: 'test'
+  ...
+# Subtest: hides unexpected internal failures and sensitive data
+ok 172 - hides unexpected internal failures and sensitive data
+  ---
+  duration_ms: 14.80147
+  type: 'test'
+  ...
+# Subtest: rejects an invalid service at router creation
+ok 173 - rejects an invalid service at router creation
+  ---
+  duration_ms: 0.573935
+  type: 'test'
+  ...
+# Subtest: starts placement trial one with its server-required mode and Sonnet debate configuration
+ok 174 - starts placement trial one with its server-required mode and Sonnet debate configuration
+  ---
+  duration_ms: 5.50227
+  type: 'test'
+  ...
+# Subtest: returns an existing debate for a completed idempotent request without generating another topic
+ok 175 - returns an existing debate for a completed idempotent request without generating another topic
+  ---
+  duration_ms: 0.581256
+  type: 'test'
+  ...
+# Subtest: blocks new placement starts while Ranked is disabled
+ok 176 - blocks new placement starts while Ranked is disabled
+  ---
+  duration_ms: 0.784926
+  type: 'test'
+  ...
+# Subtest: requires current Agora Pro access before touching Ranked state
+ok 177 - requires current Agora Pro access before touching Ranked state
+  ---
+  duration_ms: 0.404255
+  type: 'test'
+  ...
+# Subtest: rejects a philosopher already used in an earlier placement trial
+ok 178 - rejects a philosopher already used in an earlier placement trial
+  ---
+  duration_ms: 0.356775
+  type: 'test'
+  ...
+# Subtest: rejects a second start request while another Ranked debate is active
+ok 179 - rejects a second start request while another Ranked debate is active
+  ---
+  duration_ms: 0.406539
+  type: 'test'
+  ...
+# Subtest: marks a reserved request failed when topic generation fails
+ok 180 - marks a reserved request failed when topic generation fails
+  ---
+  duration_ms: 0.494598
+  type: 'test'
+  ...
+# Subtest: blocks a topic generated under a version different from the active configuration
+ok 181 - blocks a topic generated under a version different from the active configuration
+  ---
+  duration_ms: 0.545393
+  type: 'test'
+  ...
+# Subtest: rejects reuse of one request UUID for a different philosopher
+ok 182 - rejects reuse of one request UUID for a different philosopher
+  ---
+  duration_ms: 0.695834
+  type: 'test'
+  ...
+# Subtest: requires a canonical philosopher ID
+ok 183 - requires a canonical philosopher ID
+  ---
+  duration_ms: 0.593294
+  type: 'test'
+  ...
+# Subtest: a fresh in-flight request returns a retryable conflict instead of generating twice
+ok 184 - a fresh in-flight request returns a retryable conflict instead of generating twice
+  ---
+  duration_ms: 0.616808
+  type: 'test'
+  ...
+# Subtest: constructor rejects missing required services
+ok 185 - constructor rejects missing required services
+  ---
+  duration_ms: 0.240174
+  type: 'test'
+  ...
+# Subtest: starts placement trial one with its server-required mode and Sonnet debate configuration
+ok 186 - starts placement trial one with its server-required mode and Sonnet debate configuration
+  ---
+  duration_ms: 6.147079
+  type: 'test'
+  ...
+# Subtest: returns an existing debate for a completed idempotent request without generating another topic
+ok 187 - returns an existing debate for a completed idempotent request without generating another topic
+  ---
+  duration_ms: 0.766889
+  type: 'test'
+  ...
+# Subtest: blocks new placement starts while Ranked is disabled
+ok 188 - blocks new placement starts while Ranked is disabled
+  ---
+  duration_ms: 1.051048
+  type: 'test'
+  ...
+# Subtest: requires current Agora Pro access before touching Ranked state
+ok 189 - requires current Agora Pro access before touching Ranked state
+  ---
+  duration_ms: 0.524382
+  type: 'test'
+  ...
+# Subtest: rejects a philosopher already used in an earlier placement trial
+ok 190 - rejects a philosopher already used in an earlier placement trial
+  ---
+  duration_ms: 0.522199
+  type: 'test'
+  ...
+# Subtest: rejects a second start request while another Ranked debate is active
+ok 191 - rejects a second start request while another Ranked debate is active
+  ---
+  duration_ms: 0.494538
+  type: 'test'
+  ...
+# Subtest: marks a reserved request failed when topic generation fails
+ok 192 - marks a reserved request failed when topic generation fails
+  ---
+  duration_ms: 0.71361
+  type: 'test'
+  ...
+# Subtest: blocks a topic generated under a version different from the active configuration
+ok 193 - blocks a topic generated under a version different from the active configuration
+  ---
+  duration_ms: 0.729214
+  type: 'test'
+  ...
+# Subtest: rejects reuse of one request UUID for a different philosopher
+ok 194 - rejects reuse of one request UUID for a different philosopher
+  ---
+  duration_ms: 0.962507
+  type: 'test'
+  ...
+# Subtest: requires a canonical philosopher ID
+ok 195 - requires a canonical philosopher ID
+  ---
+  duration_ms: 0.793087
+  type: 'test'
+  ...
+# Subtest: a fresh in-flight request returns a retryable conflict instead of generating twice
+ok 196 - a fresh in-flight request returns a retryable conflict instead of generating twice
+  ---
+  duration_ms: 0.889189
+  type: 'test'
+  ...
+# Subtest: constructor rejects missing required services
+ok 197 - constructor rejects missing required services
+  ---
+  duration_ms: 0.327693
+  type: 'test'
+  ...
+# Subtest: bootstraps a new Ranked profile and returns 201
+ok 198 - bootstraps a new Ranked profile and returns 201
+  ---
+  duration_ms: 75.598638
+  type: 'test'
+  ...
+# Subtest: returns 200 when the Ranked profile already exists
+ok 199 - returns 200 when the Ranked profile already exists
+  ---
+  duration_ms: 18.987163
+  type: 'test'
+  ...
+# Subtest: rejects a missing installation id
+ok 200 - rejects a missing installation id
+  ---
+  duration_ms: 17.173748
+  type: 'test'
+  ...
+# Subtest: rejects a missing or malformed access token
+ok 201 - rejects a missing or malformed access token
+  ---
+  duration_ms: 20.863339
+  type: 'test'
+  ...
+# Subtest: maps public Ranked profile service errors
+ok 202 - maps public Ranked profile service errors
+  ---
+  duration_ms: 7.331633
+  type: 'test'
+  ...
+# Subtest: hides internal Ranked profile failures
+ok 203 - hides internal Ranked profile failures
+  ---
+  duration_ms: 5.695364
+  type: 'test'
+  ...
+# Subtest: rejects an invalid service at router creation
+ok 204 - rejects an invalid service at router creation
+  ---
+  duration_ms: 0.549769
+  type: 'test'
+  ...
+# Subtest: bootstraps a new account-owned Ranked profile and fixed five-trial placement sequence
+ok 205 - bootstraps a new account-owned Ranked profile and fixed five-trial placement sequence
+  ---
+  duration_ms: 6.472048
+  type: 'test'
+  ...
+# Subtest: bootstrap is idempotent and never duplicates placement trials
+ok 206 - bootstrap is idempotent and never duplicates placement trials
+  ---
+  duration_ms: 1.325491
+  type: 'test'
+  ...
+# Subtest: returns an existing active Ranked debate summary without starting a new debate
+ok 207 - returns an existing active Ranked debate summary without starting a new debate
+  ---
+  duration_ms: 3.085932
+  type: 'test'
+  ...
+# Subtest: maps account authorization failures without exposing implementation details
+ok 208 - maps account authorization failures without exposing implementation details
+  ---
+  duration_ms: 1.327054
+  type: 'test'
+  ...
+# Subtest: rejects malformed installation identifiers before authorization
+ok 209 - rejects malformed installation identifiers before authorization
+  ---
+  duration_ms: 0.480518
+  type: 'test'
+  ...
+# Subtest: rejects an incomplete or corrupted placement sequence
+ok 210 - rejects an incomplete or corrupted placement sequence
+  ---
+  duration_ms: 0.633873
+  type: 'test'
+  ...
+# Subtest: lists resolved Ranked debates without requiring current Pro access
+ok 211 - lists resolved Ranked debates without requiring current Pro access
+  ---
+  duration_ms: 3.147854
+  type: 'test'
+  ...
+# Subtest: rejects an invalid resolved Ranked history cursor
+ok 212 - rejects an invalid resolved Ranked history cursor
+  ---
+  duration_ms: 0.966183
+  type: 'test'
+  ...
+# Subtest: PostgreSQL resolved history query uses stable completed-at and UUID pagination
+ok 213 - PostgreSQL resolved history query uses stable completed-at and UUID pagination
+  ---
+  duration_ms: 1.294636
+  type: 'test'
+  ...
+# Subtest: authorizes subscription sync through the account session service
+ok 214 - authorizes subscription sync through the account session service
+  ---
+  duration_ms: 4.455099
+  type: 'test'
+  ...
+# Subtest: claims a new subscription whose appAccountToken is the Agora account ID
+ok 215 - claims a new subscription whose appAccountToken is the Agora account ID
+  ---
+  duration_ms: 1.17504
+  type: 'test'
+  ...
+# Subtest: migrates a legacy subscription whose appAccountToken is the current installation ID
+ok 216 - migrates a legacy subscription whose appAccountToken is the current installation ID
+  ---
+  duration_ms: 0.364306
+  type: 'test'
+  ...
+# Subtest: migrates a subscription tied to another installation already linked to the same account
+ok 217 - migrates a subscription tied to another installation already linked to the same account
+  ---
+  duration_ms: 0.488559
+  type: 'test'
+  ...
+# Subtest: migrates a verified legacy transaction with no appAccountToken
+ok 218 - migrates a verified legacy transaction with no appAccountToken
+  ---
+  duration_ms: 0.283648
+  type: 'test'
+  ...
+# Subtest: accepts legacy database evidence for the current installation
+ok 219 - accepts legacy database evidence for the current installation
+  ---
+  duration_ms: 0.403574
+  type: 'test'
+  ...
+# Subtest: rejects an unknown appAccountToken without legacy evidence
+ok 220 - rejects an unknown appAccountToken without legacy evidence
+  ---
+  duration_ms: 0.798746
+  type: 'test'
+  ...
+# Subtest: rejects family-shared subscriptions as exclusive account ownership
+ok 221 - rejects family-shared subscriptions as exclusive account ownership
+  ---
+  duration_ms: 0.31888
+  type: 'test'
+  ...
+# Subtest: rejects ownership when the authenticated installation is no longer linked
+ok 222 - rejects ownership when the authenticated installation is no longer linked
+  ---
+  duration_ms: 0.628075
+  type: 'test'
+  ...
+# Subtest: refreshes an existing ownership row for the same account
+ok 223 - refreshes an existing ownership row for the same account
+  ---
+  duration_ms: 0.91016
+  type: 'test'
+  ...
+# Subtest: rejects a subscription actively owned by another account
+ok 224 - rejects a subscription actively owned by another account
+  ---
+  duration_ms: 0.449902
+  type: 'test'
+  ...
+# Subtest: allows an explicitly released subscription to transfer accounts
+ok 225 - allows an explicitly released subscription to transfer accounts
+  ---
+  duration_ms: 0.322695
+  type: 'test'
+  ...
+# Subtest: rejects a disputed ownership row even for the same account
+ok 226 - rejects a disputed ownership row even for the same account
+  ---
+  duration_ms: 0.274955
+  type: 'test'
+  ...
+# Subtest: rejects malformed ownership input
+ok 227 - rejects malformed ownership input
+  ---
+  duration_ms: 0.260544
+  type: 'test'
+  ...
+# Subtest: serializes ownership claims before reading or inserting the ownership row
+ok 228 - serializes ownership claims before reading or inserting the ownership row
+  ---
+  duration_ms: 0.313611
+  type: 'test'
+  ...
+# Subtest: normalizes account authorization failures into ownership service errors
+ok 229 - normalizes account authorization failures into ownership service errors
+  ---
+  duration_ms: 0.283327
+  type: 'test'
+  ...
+# Subtest: first authenticated creator-code claim is locked to the account
+ok 230 - first authenticated creator-code claim is locked to the account
+  ---
+  duration_ms: 2.137887
+  type: 'test'
+  ...
+# Subtest: claiming the same creator code again is idempotent
+ok 231 - claiming the same creator code again is idempotent
+  ---
+  duration_ms: 0.38714
+  type: 'test'
+  ...
+# Subtest: later conflicting creator code never silently replaces the locked claim
+ok 232 - later conflicting creator code never silently replaces the locked claim
+  ---
+  duration_ms: 2.521563
+  type: 'test'
+  ...
+# Subtest: canonical selection is persisted by normalized creator code and audited
+ok 233 - canonical selection is persisted by normalized creator code and audited
+  ---
+  duration_ms: 1.224442
+  type: 'test'
+  ...
+# Subtest: ignoring a creator code is non-destructive and separately audited
+ok 234 - ignoring a creator code is non-destructive and separately audited
+  ---
+  duration_ms: 0.42102
+  type: 'test'
+  ...
+# Subtest: App Store Connect pricing identifies current, scheduled, and preserved U.S. prices
+ok 235 - App Store Connect pricing identifies current, scheduled, and preserved U.S. prices
+  ---
+  duration_ms: 18.831693
+  type: 'test'
+  ...
+# Subtest: preserved current Apple price remains current until the scheduled increase starts
+ok 236 - preserved current Apple price remains current until the scheduled increase starts
+  ---
+  duration_ms: 2.166129
+  type: 'test'
+  ...
+# Subtest: partner dashboard includes current pricing and active price-tier transparency
+ok 237 - partner dashboard includes current pricing and active price-tier transparency
+  ---
+  duration_ms: 1.933016
+  type: 'test'
+  ...
+# Subtest: affiliate dashboard service groups active paid chains by latest verified Apple transaction price
+ok 238 - affiliate dashboard service groups active paid chains by latest verified Apple transaction price
+  ---
+  duration_ms: 0.524272
+  type: 'test'
+  ...
+# Subtest: normalizes affiliate codes without fuzzy matching
+ok 239 - normalizes affiliate codes without fuzzy matching
+  ---
+  duration_ms: 1.246065
+  type: 'test'
+  ...
+# Subtest: builds the exact Apple custom-code redemption URL
+ok 240 - builds the exact Apple custom-code redemption URL
+  ---
+  duration_ms: 0.235297
+  type: 'test'
+  ...
+# Subtest: partner tokens are hashed deterministically
+ok 241 - partner tokens are hashed deterministically
+  ---
+  duration_ms: 0.577159
+  type: 'test'
+  ...
+# Subtest: dashboard supports explicit calendar-month accounting periods
+ok 242 - dashboard supports explicit calendar-month accounting periods
+  ---
+  duration_ms: 20.663531
+  type: 'test'
+  ...
+# Subtest: base-price commission rounds once at the monthly level
+ok 243 - base-price commission rounds once at the monthly level
+  ---
+  duration_ms: 0.514818
+  type: 'test'
+  ...
+# Subtest: fractional-cent commissions are not rounded per transaction
+ok 244 - fractional-cent commissions are not rounded per transaction
+  ---
+  duration_ms: 0.176881
+  type: 'test'
+  ...
+# Subtest: partner dashboard contains Overview and Breakdown tabs
+ok 245 - partner dashboard contains Overview and Breakdown tabs
+  ---
+  duration_ms: 0.989887
+  type: 'test'
+  ...
+# Subtest: partner dashboard uses one mutually exclusive current-state model
+ok 246 - partner dashboard uses one mutually exclusive current-state model
+  ---
+  duration_ms: 0.341253
+  type: 'test'
+  ...
+# Subtest: classifies only unambiguous Apple renewal/recovery metrics as automatic base-price commission
+ok 247 - classifies only unambiguous Apple renewal/recovery metrics as automatic base-price commission
+  ---
+  duration_ms: 1.092659
+  type: 'test'
+  ...
+# Subtest: processing-date comparison rejects older Apple instances
+ok 248 - processing-date comparison rejects older Apple instances
+  ---
+  duration_ms: 1.154159
+  type: 'test'
+  ...
+# Subtest: partner dashboard exposes the approved affiliate metrics without a creator-name browser
+ok 249 - partner dashboard exposes the approved affiliate metrics without a creator-name browser
+  ---
+  duration_ms: 0.479576
+  type: 'test'
+  ...
+# Subtest: dashboard service derives anonymous subscriber state from verified Apple subscription chains
+ok 250 - dashboard service derives anonymous subscriber state from verified Apple subscription chains
+  ---
+  duration_ms: 14.379334
+  type: 'test'
+  ...
+# Subtest: money-impacting ambiguous Apple events are explicitly classified for review
+ok 251 - money-impacting ambiguous Apple events are explicitly classified for review
+  ---
+  duration_ms: 0.367581
+  type: 'test'
+  ...
+# Subtest: service rejects string booleans instead of treating "false" as true
+ok 252 - service rejects string booleans instead of treating "false" as true
+  ---
+  duration_ms: 2.375076
+  type: 'test'
+  ...
+# Subtest: production affiliate creation requires an Apple offer reference name before database writes
+ok 253 - production affiliate creation requires an Apple offer reference name before database writes
+  ---
+  duration_ms: 0.731487
+  type: 'test'
+  ...
+# Subtest: affiliate audit-log queries explicitly type UUID parameters reused as text
+ok 254 - affiliate audit-log queries explicitly type UUID parameters reused as text
+  ---
+  duration_ms: 2.530005
+  type: 'test'
+  ...
+# Subtest: admin affiliate service exposes overview, alert, payout, and operational controls without changing attribution ownership
+ok 255 - admin affiliate service exposes overview, alert, payout, and operational controls without changing attribution ownership
+  ---
+  duration_ms: 1.81404
+  type: 'test'
+  ...
+# Subtest: admin can refresh a whole payout month without finalizing it
+ok 256 - admin can refresh a whole payout month without finalizing it
+  ---
+  duration_ms: 1.855943
+  type: 'test'
+  ...
+# Subtest: migration 023 adds auditable referral handoffs without rewriting prior migrations or payout history
+ok 257 - migration 023 adds auditable referral handoffs without rewriting prior migrations or payout history
+  ---
+  duration_ms: 1.350909
+  type: 'test'
+  ...
+# Subtest: migration 023 stores only a one-way token hash and preserves permanent subscription-chain ownership
+ok 258 - migration 023 stores only a one-way token hash and preserves permanent subscription-chain ownership
+  ---
+  duration_ms: 0.416954
+  type: 'test'
+  ...
+# Subtest: handoff rollout has a dedicated migration runner that applies only 023
+ok 259 - handoff rollout has a dedicated migration runner that applies only 023
+  ---
+  duration_ms: 1.300434
+  type: 'test'
+  ...
+# Subtest: public creator links use the branded theagoraphilosophy.app host during App Clip rollout
+ok 260 - public creator links use the branded theagoraphilosophy.app host during App Clip rollout
+  ---
+  duration_ms: 0.316967
+  type: 'test'
+  ...
+# Subtest: referral URL builder returns the branded URL only when App Clip rollout is enabled
+ok 261 - referral URL builder returns the branded URL only when App Clip rollout is enabled
+  ---
+  duration_ms: 0.593343
+  type: 'test'
+  ...
+# Subtest: Apple default App Clip creator URL builder remains available for direct/fallback invocation
+ok 262 - Apple default App Clip creator URL builder remains available for direct/fallback invocation
+  ---
+  duration_ms: 0.47485
+  type: 'test'
+  ...
+# Subtest: public rollout flag also makes exact referral handoff mandatory for new affiliate ownership
+ok 263 - public rollout flag also makes exact referral handoff mandatory for new affiliate ownership
+  ---
+  duration_ms: 0.399268
+  type: 'test'
+  ...
+# Subtest: URL builders preserve opaque handoff separately from the Apple custom creator code
+ok 264 - URL builders preserve opaque handoff separately from the Apple custom creator code
+  ---
+  duration_ms: 1.742355
+  type: 'test'
+  ...
+# Subtest: owner TestFlight handoff creation does not inflate referral-click analytics
+ok 265 - owner TestFlight handoff creation does not inflate referral-click analytics
+  ---
+  duration_ms: 2.161182
+  type: 'test'
+  ...
+# Subtest: referral creates a hashed pending handoff; open does not claim it; redeem-start then claim binds the installation/account
+ok 266 - referral creates a hashed pending handoff; open does not claim it; redeem-start then claim binds the installation/account
+  ---
+  duration_ms: 2.753644
+  type: 'test'
+  ...
+# Subtest: an already attributed handoff cannot restart Apple redemption
+ok 267 - an already attributed handoff cannot restart Apple redemption
+  ---
+  duration_ms: 0.69981
+  type: 'test'
+  ...
+# Subtest: reclaiming an attributed handoff can bind the same account without superseding a newer pending flow
+ok 268 - reclaiming an attributed handoff can bind the same account without superseding a newer pending flow
+  ---
+  duration_ms: 0.97107
+  type: 'test'
+  ...
+# Subtest: manual code redemption abandons a pending automatic handoff but never rewrites permanent attribution
+ok 269 - manual code redemption abandons a pending automatic handoff but never rewrites permanent attribution
+  ---
+  duration_ms: 2.680566
+  type: 'test'
+  ...
+# Subtest: admin affiliate creation keeps creator codes unique while allowing a shared Apple offer reference
+ok 270 - admin affiliate creation keeps creator codes unique while allowing a shared Apple offer reference
+  ---
+  duration_ms: 2.242141
+  type: 'test'
+  ...
+# Subtest: partner dashboard stays read-only and presents anonymous subscriber activity
+ok 271 - partner dashboard stays read-only and presents anonymous subscriber activity
+  ---
+  duration_ms: 0.6319
+  type: 'test'
+  ...
+# Subtest: performance breakdown stays cohort-focused and does not repeat lifetime financial totals
+ok 272 - performance breakdown stays cohort-focused and does not repeat lifetime financial totals
+  ---
+  duration_ms: 0.268635
+  type: 'test'
+  ...
+# Subtest: conversion and retention copy distinguishes historical conversion from current access
+ok 273 - conversion and retention copy distinguishes historical conversion from current access
+  ---
+  duration_ms: 0.231
+  type: 'test'
+  ...
+# Subtest: breakdown uses explicit calendar-month navigation with YTD and Lifetime shortcuts
+ok 274 - breakdown uses explicit calendar-month navigation with YTD and Lifetime shortcuts
+  ---
+  duration_ms: 0.406529
+  type: 'test'
+  ...
+# Subtest: owner affiliate admin dashboard is a locked shell backed by admin-only APIs
+ok 275 - owner affiliate admin dashboard is a locked shell backed by admin-only APIs
+  ---
+  duration_ms: 0.919724
+  type: 'test'
+  ...
+# Subtest: admin payout UI can build a month before payout rows already exist
+ok 276 - admin payout UI can build a month before payout rows already exist
+  ---
+  duration_ms: 0.423484
+  type: 'test'
+  ...
+# Subtest: admin dashboard exposes App Store Connect imports and sync controls
+ok 277 - admin dashboard exposes App Store Connect imports and sync controls
+  ---
+  duration_ms: 0.406829
+  type: 'test'
+  ...
+# Subtest: App Store Connect imports collapse duplicate creator-code resources and persist owner choices
+ok 278 - App Store Connect imports collapse duplicate creator-code resources and persist owner choices
+  ---
+  duration_ms: 0.85533
+  type: 'test'
+  ...
+# Subtest: shared Apple offers are explicitly supported and never shown as attribution blockers
+ok 279 - shared Apple offers are explicitly supported and never shown as attribution blockers
+  ---
+  duration_ms: 0.810934
+  type: 'test'
+  ...
+# Subtest: authenticated account creator-code claim routes exist and reconcile safely
+ok 280 - authenticated account creator-code claim routes exist and reconcile safely
+  ---
+  duration_ms: 0.521688
+  type: 'test'
+  ...
+# Subtest: App Clip referral handoffs have a safe rollout gate plus an owner-only TestFlight generator
+ok 281 - App Clip referral handoffs have a safe rollout gate plus an owner-only TestFlight generator
+  ---
+  duration_ms: 1.142181
+  type: 'test'
+  ...
+# Subtest: migration 022 removes one-offer-per-affiliate uniqueness without deleting affiliate history
+ok 282 - migration 022 removes one-offer-per-affiliate uniqueness without deleting affiliate history
+  ---
+  duration_ms: 1.115643
+  type: 'test'
+  ...
+# Subtest: migration 022 creates account creator-code evidence and keeps chain ownership keyed separately
+ok 283 - migration 022 creates account creator-code evidence and keeps chain ownership keyed separately
+  ---
+  duration_ms: 0.316526
+  type: 'test'
+  ...
+# Subtest: reconciliation scans verified offer-code transactions for known shared affiliate campaigns without assuming one affiliate per Apple offer
+ok 284 - reconciliation scans verified offer-code transactions for known shared affiliate campaigns without assuming one affiliate per Apple offer
+  ---
+  duration_ms: 1.285122
+  type: 'test'
+  ...
+# Subtest: reconciliation carries appAccountToken evidence forward so creator-code claims can resolve shared-offer attribution
+ok 285 - reconciliation carries appAccountToken evidence forward so creator-code claims can resolve shared-offer attribution
+  ---
+  duration_ms: 0.294734
+  type: 'test'
+  ...
+# Subtest: reconciliation canonicalizes legacy environment casing and remains idempotent
+ok 286 - reconciliation canonicalizes legacy environment casing and remains idempotent
+  ---
+  duration_ms: 1.628196
+  type: 'test'
+  ...
+# Subtest: reconciliation uses the shared attribution service and wraps each candidate atomically
+ok 287 - reconciliation uses the shared attribution service and wraps each candidate atomically
+  ---
+  duration_ms: 0.232312
+  type: 'test'
+  ...
+# Subtest: reconciliation avoids infinite retries when shared-offer rows are still waiting for creator-code evidence
+ok 288 - reconciliation avoids infinite retries when shared-offer rows are still waiting for creator-code evidence
+  ---
+  duration_ms: 0.246163
+  type: 'test'
+  ...
+# Subtest: reconciliation honors the public App Clip rollout gate and requires exact handoff evidence for new shared-offer ownership
+ok 289 - reconciliation honors the public App Clip rollout gate and requires exact handoff evidence for new shared-offer ownership
+  ---
+  duration_ms: 0.296546
+  type: 'test'
+  ...
+# Subtest: shared Apple offer plus MAXAGORA account claim attributes the chain to MAXAGORA
+ok 290 - shared Apple offer plus MAXAGORA account claim attributes the chain to MAXAGORA
+  ---
+  duration_ms: 2.658184
+  type: 'test'
+  ...
+# Subtest: same shared Apple offer can attribute another account to LEVI99
+ok 291 - same shared Apple offer can attribute another account to LEVI99
+  ---
+  duration_ms: 0.516571
+  type: 'test'
+  ...
+# Subtest: shared affiliate offer with no account creator-code claim stays unassigned and reviewable
+ok 292 - shared affiliate offer with no account creator-code claim stays unassigned and reviewable
+  ---
+  duration_ms: 0.390906
+  type: 'test'
+  ...
+# Subtest: automatic handoffs can only match purchases inside the handoff validity window
+ok 293 - automatic handoffs can only match purchases inside the handoff validity window
+  ---
+  duration_ms: 7.876956
+  type: 'test'
+  ...
+# Subtest: automatic handoffs require an active affiliate and active creator code at purchase time
+ok 294 - automatic handoffs require an active affiliate and active creator code at purchase time
+  ---
+  duration_ms: 0.494208
+  type: 'test'
+  ...
+# Subtest: claimed installation handoff takes priority and attributes without manual creator-code entry
+ok 295 - claimed installation handoff takes priority and attributes without manual creator-code entry
+  ---
+  duration_ms: 0.792496
+  type: 'test'
+  ...
+# Subtest: a handoff consumed by a same-affiliate attribution race is marked attributed and cannot be reused
+ok 296 - a handoff consumed by a same-affiliate attribution race is marked attributed and cannot be reused
+  ---
+  duration_ms: 0.698558
+  type: 'test'
+  ...
+# Subtest: a handoff that loses a different-affiliate attribution race is superseded and cannot be reused
+ok 297 - a handoff that loses a different-affiliate attribution race is superseded and cannot be reused
+  ---
+  duration_ms: 0.458024
+  type: 'test'
+  ...
+# Subtest: conflicting account-level handoffs are left unassigned for review instead of guessed
+ok 298 - conflicting account-level handoffs are left unassigned for review instead of guessed
+  ---
+  duration_ms: 0.587065
+  type: 'test'
+  ...
+# Subtest: non-affiliate Apple offer is ignored rather than guessed
+ok 299 - non-affiliate Apple offer is ignored rather than guessed
+  ---
+  duration_ms: 0.631991
+  type: 'test'
+  ...
+# Subtest: renewal without an offer inherits existing chain ownership
+ok 300 - renewal without an offer inherits existing chain ownership
+  ---
+  duration_ms: 0.302535
+  type: 'test'
+  ...
+# Subtest: production Apple transactions cannot be attributed to sandbox/test affiliate handoffs
+ok 301 - production Apple transactions cannot be attributed to sandbox/test affiliate handoffs
+  ---
+  duration_ms: 0.282917
+  type: 'test'
+  ...
+# Subtest: sandbox Apple transactions can use test affiliate handoffs but production handoffs are excluded
+ok 302 - sandbox Apple transactions can use test affiliate handoffs but production handoffs are excluded
+  ---
+  duration_ms: 0.29913
+  type: 'test'
+  ...
+# Subtest: legacy manual creator-code claims cannot cross production and sandbox environments
+ok 303 - legacy manual creator-code claims cannot cross production and sandbox environments
+  ---
+  duration_ms: 0.236959
+  type: 'test'
+  ...
+# Subtest: rolling deploy before migration 023 falls back to existing account-claim attribution instead of breaking entitlement-side processing
+ok 304 - rolling deploy before migration 023 falls back to existing account-claim attribution instead of breaking entitlement-side processing
+  ---
+  duration_ms: 0.908808
+  type: 'test'
+  ...
+# Subtest: public App Clip rollout refuses legacy account-claim-only ownership for new shared-offer purchases
+ok 305 - public App Clip rollout refuses legacy account-claim-only ownership for new shared-offer purchases
+  ---
+  duration_ms: 0.560706
+  type: 'test'
+  ...
+# Subtest: exact installation context never falls back to another device account handoff
+ok 306 - exact installation context never falls back to another device account handoff
+  ---
+  duration_ms: 0.314323
+  type: 'test'
+  ...
+# Subtest: public App Clip rollout never auto-attributes from account-only handoff evidence when installation context is unavailable
+ok 307 - public App Clip rollout never auto-attributes from account-only handoff evidence when installation context is unavailable
+  ---
+  duration_ms: 0.262296
+  type: 'test'
+  ...
+# Subtest: active Lifetime Pro is usable without an expiration date
+ok 308 - active Lifetime Pro is usable without an expiration date
+  ---
+  duration_ms: 0.768472
+  type: 'test'
+  ...
+# Subtest: revoked Lifetime Pro is not usable
+ok 309 - revoked Lifetime Pro is not usable
+  ---
+  duration_ms: 0.246183
+  type: 'test'
+  ...
+# Subtest: recurring Pro still requires a future expiration
+ok 310 - recurring Pro still requires a future expiration
+  ---
+  duration_ms: 0.180766
+  type: 'test'
+  ...
+# Subtest: ensureCustomCode creates 1,000 redemptions by default
+ok 311 - ensureCustomCode creates 1,000 redemptions by default
+  ---
+  duration_ms: 6.193658
+  type: 'test'
+  ...
+# Subtest: ensureCustomCode reuses an existing active code on the shared offer
+ok 312 - ensureCustomCode reuses an existing active code on the shared offer
+  ---
+  duration_ms: 1.549101
+  type: 'test'
+  ...
+# Subtest: ensureCustomCode rejects the same active code on a different offer
+ok 313 - ensureCustomCode rejects the same active code on a different offer
+  ---
+  duration_ms: 2.486781
+  type: 'test'
+  ...
+# Subtest: Affiliate Admin is wired for automatic provisioning and retry
+ok 314 - Affiliate Admin is wired for automatic provisioning and retry
+  ---
+  duration_ms: 1.720984
+  type: 'test'
+  ...
+# Subtest: groups duplicate Apple custom-code resources into one creator-code candidate
+ok 315 - groups duplicate Apple custom-code resources into one creator-code candidate
+  ---
+  duration_ms: 16.686695
+  type: 'test'
+  ...
+# Subtest: canonical selection can point MAXAGORA at the newer 500-code resource while preserving old history
+ok 316 - canonical selection can point MAXAGORA at the newer 500-code resource while preserving old history
+  ---
+  duration_ms: 2.204776
+  type: 'test'
+  ...
+# Subtest: shared Apple offer is expected and does not block creator-code imports
+ok 317 - shared Apple offer is expected and does not block creator-code imports
+  ---
+  duration_ms: 3.717553
+  type: 'test'
+  ...
+# Subtest: existing affiliate linking uses custom creator code, not the shared Apple offer name
+ok 318 - existing affiliate linking uses custom creator code, not the shared Apple offer name
+  ---
+  duration_ms: 1.801062
+  type: 'test'
+  ...
+# Subtest: subscription sync accepts an optional strict Bearer access token
+ok 319 - subscription sync accepts an optional strict Bearer access token
+  ---
+  duration_ms: 1.030867
+  type: 'test'
+  ...
+# Subtest: legacy clients can still sync without an account access token
+ok 320 - legacy clients can still sync without an account access token
+  ---
+  duration_ms: 0.327963
+  type: 'test'
+  ...
+# Subtest: authenticated sync uses the shared account authorization service
+ok 321 - authenticated sync uses the shared account authorization service
+  ---
+  duration_ms: 0.397455
+  type: 'test'
+  ...
+# Subtest: ownership is claimed inside the same transaction after verified entitlement persistence
+ok 322 - ownership is claimed inside the same transaction after verified entitlement persistence
+  ---
+  duration_ms: 0.283107
+  type: 'test'
+  ...
+# Subtest: legacy user_id resolution never promotes appAccountToken to installation identity
+ok 323 - legacy user_id resolution never promotes appAccountToken to installation identity
+  ---
+  duration_ms: 0.224
+  type: 'test'
+  ...
+# Subtest: legacy subscription installation links exclude the account UUID appAccountToken
+ok 324 - legacy subscription installation links exclude the account UUID appAccountToken
+  ---
+  duration_ms: 0.184171
+  type: 'test'
+  ...
+# Subtest: account ownership errors remain backward-compatible JSON errors
+ok 325 - account ownership errors remain backward-compatible JSON errors
+  ---
+  duration_ms: 0.358118
+  type: 'test'
+  ...
+# Subtest: ownership claims serialize first-time concurrent inserts with a PostgreSQL advisory transaction lock
+ok 326 - ownership claims serialize first-time concurrent inserts with a PostgreSQL advisory transaction lock
+  ---
+  duration_ms: 0.152544
+  type: 'test'
+  ...
+# Subtest: server constructs one shared account service and passes it to both route families
+ok 327 - server constructs one shared account service and passes it to both route families
+  ---
+  duration_ms: 0.454659
+  type: 'test'
+  ...
+# Subtest: App Store Server Notifications remain registered and do not require an Agora bearer token
+ok 328 - App Store Server Notifications remain registered and do not require an Agora bearer token
+  ---
+  duration_ms: 0.418175
+  type: 'test'
+  ...
+# Subtest: affiliate attribution is isolated by a savepoint so it cannot deny Apple-authoritative subscription access
+ok 329 - affiliate attribution is isolated by a savepoint so it cannot deny Apple-authoritative subscription access
+  ---
+  duration_ms: 0.329515
+  type: 'test'
+  ...
+# Subtest: server constructs, injects, and can emergency-disable affiliate subscription attribution
+ok 330 - server constructs, injects, and can emergency-disable affiliate subscription attribution
+  ---
+  duration_ms: 0.254695
+  type: 'test'
+  ...
+# Subtest: App Store subscription route no longer uses the legacy one-offer-per-affiliate tracker
+ok 331 - App Store subscription route no longer uses the legacy one-offer-per-affiliate tracker
+  ---
+  duration_ms: 1.303619
+  type: 'test'
+  ...
+# Subtest: client sync passes installation identity and optional account identity into shared-offer attribution
+ok 332 - client sync passes installation identity and optional account identity into shared-offer attribution
+  ---
+  duration_ms: 0.379318
+  type: 'test'
+  ...
+# Subtest: persistVerifiedSnapshot explicitly receives affiliate attribution dependencies instead of relying on undeclared variables
+ok 333 - persistVerifiedSnapshot explicitly receives affiliate attribution dependencies instead of relying on undeclared variables
+  ---
+  duration_ms: 0.389674
+  type: 'test'
+  ...
+# Subtest: affiliate attribution is isolated by a savepoint and cannot deny Apple subscription access
+ok 334 - affiliate attribution is isolated by a savepoint and cannot deny Apple subscription access
+  ---
+  duration_ms: 0.318759
+  type: 'test'
+  ...
+# Subtest: server injects one corrected attribution service into both affiliate and App Store routers
+ok 335 - server injects one corrected attribution service into both affiliate and App Store routers
+  ---
+  duration_ms: 0.36696
+  type: 'test'
+  ...
+# Subtest: parses Apple subscription event Vanity Code into the affiliate code
+ok 336 - parses Apple subscription event Vanity Code into the affiliate code
+  ---
+  duration_ms: 2.649901
+  type: 'test'
+  ...
+# Subtest: parses preserved-price renewals by creator code
+ok 337 - parses preserved-price renewals by creator code
+  ---
+  duration_ms: 0.546185
+  type: 'test'
+  ...
+# Subtest: parses active paid offers from the subscription state report
+ok 338 - parses active paid offers from the subscription state report
+  ---
+  duration_ms: 0.477092
+  type: 'test'
+  ...
+# Subtest: ignores rows that have no custom/vanity code
+ok 339 - ignores rows that have no custom/vanity code
+  ---
+  duration_ms: 0.996056
+  type: 'test'
+  ...
+# Subtest: generic TSV parser preserves report headers
+ok 340 - generic TSV parser preserves report headers
+  ---
+  duration_ms: 0.371257
+  type: 'test'
+  ...
+# Subtest: derives active, paid-plan, and canceling state totals from Apple state rows
+ok 341 - derives active, paid-plan, and canceling state totals from Apple state rows
+  ---
+  duration_ms: 0.315905
+  type: 'test'
+  ...
+# Subtest: derives total paid-offer conversions from Apple event rows
+ok 342 - derives total paid-offer conversions from Apple event rows
+  ---
+  duration_ms: 0.417956
+  type: 'test'
+  ...
+# Subtest: TSV parser handles quoted tabs, embedded newlines, and escaped quotes
+ok 343 - TSV parser handles quoted tabs, embedded newlines, and escaped quotes
+  ---
+  duration_ms: 0.233554
+  type: 'test'
+  ...
+# Subtest: grace period contributes to active access but not Active Plans
+ok 344 - grace period contributes to active access but not Active Plans
+  ---
+  duration_ms: 1.270911
+  type: 'test'
+  ...
+# Subtest: parses Apple commitment-based and contingent transition metrics without dropping them
+ok 345 - parses Apple commitment-based and contingent transition metrics without dropping them
+  ---
+  duration_ms: 0.853006
+  type: 'test'
+  ...
+# Subtest: rejects negative and fractional Apple Counts instead of corrupting affiliate totals
+ok 346 - rejects negative and fractional Apple Counts instead of corrupting affiliate totals
+  ---
+  duration_ms: 0.467719
+  type: 'test'
+  ...
+# Subtest: loads Apple configuration without exposing private-key material
+ok 347 - loads Apple configuration without exposing private-key material
+  ---
+  duration_ms: 4.934244
+  type: 'test'
+  ...
+# Subtest: rejects a non-EC Apple private key
+ok 348 - rejects a non-EC Apple private key
+  ---
+  duration_ms: 46.285811
+  type: 'test'
+  ...
+# Subtest: creates a correctly signed short-lived Apple client secret
+ok 349 - creates a correctly signed short-lived Apple client secret
+  ---
+  duration_ms: 2.864977
+  type: 'test'
+  ...
+# Subtest: limits Apple client-secret lifetime to one hour
+ok 350 - limits Apple client-secret lifetime to one hour
+  ---
+  duration_ms: 0.559805
+  type: 'test'
+  ...
+# Subtest: verifies a valid Apple identity token and normalizes claims
+ok 351 - verifies a valid Apple identity token and normalizes claims
+  ---
+  duration_ms: 80.889223
+  type: 'test'
+  ...
+# Subtest: accepts an audience array containing the native client ID
+ok 352 - accepts an audience array containing the native client ID
+  ---
+  duration_ms: 65.436824
+  type: 'test'
+  ...
+# Subtest: rejects an invalid Apple identity-token signature
+ok 353 - rejects an invalid Apple identity-token signature
+  ---
+  duration_ms: 78.397234
+  type: 'test'
+  ...
+# Subtest: rejects incorrect issuer, audience, expiration, and future issue time
+    # Subtest: issuer
+    ok 1 - issuer
+      ---
+      duration_ms: 2.281018
+      type: 'test'
+      ...
+    # Subtest: audience
+    ok 2 - audience
+      ---
+      duration_ms: 1.857995
+      type: 'test'
+      ...
+    # Subtest: expiration
+    ok 3 - expiration
+      ---
+      duration_ms: 1.533998
+      type: 'test'
+      ...
+    # Subtest: future iat
+    ok 4 - future iat
+      ---
+      duration_ms: 1.596059
+      type: 'test'
+      ...
+    1..4
+ok 354 - rejects incorrect issuer, audience, expiration, and future issue time
+  ---
+  duration_ms: 59.707159
+  type: 'test'
+  ...
+# Subtest: rejects nonce and subject mismatches
+    # Subtest: nonce
+    ok 1 - nonce
+      ---
+      duration_ms: 2.400434
+      type: 'test'
+      ...
+    # Subtest: subject
+    ok 2 - subject
+      ---
+      duration_ms: 2.85915
+      type: 'test'
+      ...
+    1..2
+ok 355 - rejects nonce and subject mismatches
+  ---
+  duration_ms: 36.515997
+  type: 'test'
+  ...
+# Subtest: rejects malformed Apple-controlled subject, nonce, email, and boolean claims
+    # Subtest: subject
+    ok 1 - subject
+      ---
+      duration_ms: 2.847832
+      type: 'test'
+      ...
+    # Subtest: nonce
+    ok 2 - nonce
+      ---
+      duration_ms: 1.870684
+      type: 'test'
+      ...
+    # Subtest: email
+    ok 3 - email
+      ---
+      duration_ms: 1.873248
+      type: 'test'
+      ...
+    # Subtest: email_verified
+    ok 4 - email_verified
+      ---
+      duration_ms: 1.645222
+      type: 'test'
+      ...
+    1..4
+ok 356 - rejects malformed Apple-controlled subject, nonce, email, and boolean claims
+  ---
+  duration_ms: 77.565039
+  type: 'test'
+  ...
+# Subtest: rejects Apple JWKs that are not signing keys
+ok 357 - rejects Apple JWKs that are not signing keys
+  ---
+  duration_ms: 59.042671
+  type: 'test'
+  ...
+# Subtest: caches Apple JWKS and refreshes once for an unknown key ID
+ok 358 - caches Apple JWKS and refreshes once for an unknown key ID
+  ---
+  duration_ms: 108.461003
+  type: 'test'
+  ...
+# Subtest: shares one in-flight JWKS request across concurrent verifications
+ok 359 - shares one in-flight JWKS request across concurrent verifications
+  ---
+  duration_ms: 65.400891
+  type: 'test'
+  ...
+# Subtest: uses a bounded stale cached Apple key during a temporary JWKS outage
+ok 360 - uses a bounded stale cached Apple key during a temporary JWKS outage
+  ---
+  duration_ms: 31.100455
+  type: 'test'
+  ...
+# Subtest: exchanges an Apple authorization code using the native client ID
+ok 361 - exchanges an Apple authorization code using the native client ID
+  ---
+  duration_ms: 1.780441
+  type: 'test'
+  ...
+# Subtest: rejects incomplete initial Apple authorization responses
+    # Subtest: refresh_token
+    ok 1 - refresh_token
+      ---
+      duration_ms: 0.561877
+      type: 'test'
+      ...
+    # Subtest: id_token
+    ok 2 - id_token
+      ---
+      duration_ms: 1.52809
+      type: 'test'
+      ...
+    # Subtest: token_type
+    ok 3 - token_type
+      ---
+      duration_ms: 0.372228
+      type: 'test'
+      ...
+    # Subtest: expires_in
+    ok 4 - expires_in
+      ---
+      duration_ms: 0.413649
+      type: 'test'
+      ...
+    1..4
+ok 362 - rejects incomplete initial Apple authorization responses
+  ---
+  duration_ms: 3.661921
+  type: 'test'
+  ...
+# Subtest: validates an Apple refresh token without requiring a replacement refresh token
+ok 363 - validates an Apple refresh token without requiring a replacement refresh token
+  ---
+  duration_ms: 0.799557
+  type: 'test'
+  ...
+# Subtest: revokes an Apple refresh token
+ok 364 - revokes an Apple refresh token
+  ---
+  duration_ms: 0.782392
+  type: 'test'
+  ...
+# Subtest: classifies Apple OAuth failures without exposing credentials
+    # Subtest: invalid_grant
+    ok 1 - invalid_grant
+      ---
+      duration_ms: 3.293779
+      type: 'test'
+      ...
+    # Subtest: invalid_request
+    ok 2 - invalid_request
+      ---
+      duration_ms: 0.480858
+      type: 'test'
+      ...
+    # Subtest: invalid_client
+    ok 3 - invalid_client
+      ---
+      duration_ms: 0.567085
+      type: 'test'
+      ...
+    # Subtest: rate_limit
+    ok 4 - rate_limit
+      ---
+      duration_ms: 0.460027
+      type: 'test'
+      ...
+    # Subtest: server_error
+    ok 5 - server_error
+      ---
+      duration_ms: 3.547032
+      type: 'test'
+      ...
+    1..5
+ok 365 - classifies Apple OAuth failures without exposing credentials
+  ---
+  duration_ms: 9.098735
+  type: 'test'
+  ...
+# Subtest: reports Apple request timeouts as retryable service failures
+ok 366 - reports Apple request timeouts as retryable service failures
+  ---
+  duration_ms: 10.360522
+  type: 'test'
+  ...
+# Subtest: rejects invalid JSON returned by Apple
+ok 367 - rejects invalid JSON returned by Apple
+  ---
+  duration_ms: 0.994333
+  type: 'test'
+  ...
+# Subtest: createAffiliate treats --test as a presence-only flag instead of coercing the string "false" to true
+ok 368 - createAffiliate treats --test as a presence-only flag instead of coercing the string "false" to true
+  ---
+  duration_ms: 91.360238
+  type: 'test'
+  ...
+# Subtest: verifies a Google ID token and returns the stable sub identity
+ok 369 - verifies a Google ID token and returns the stable sub identity
+  ---
+  duration_ms: 86.543807
+  type: 'test'
+  ...
+# Subtest: rejects a token issued for a different OAuth audience
+ok 370 - rejects a token issued for a different OAuth audience
+  ---
+  duration_ms: 83.520146
+  type: 'test'
+  ...
+# Subtest: rejects a token whose nonce does not belong to this sign-in attempt
+ok 371 - rejects a token whose nonce does not belong to this sign-in attempt
+  ---
+  duration_ms: 31.109338
+  type: 'test'
+  ...
+# Subtest: rejects an expired Google ID token
+ok 372 - rejects an expired Google ID token
+  ---
+  duration_ms: 77.827415
+  type: 'test'
+  ...
+# Subtest: rejects a token with a tampered signature
+ok 373 - rejects a token with a tampered signature
+  ---
+  duration_ms: 107.284321
+  type: 'test'
+  ...
+# Subtest: parses and normalizes valid iOS versions
+ok 374 - parses and normalizes valid iOS versions
+  ---
+  duration_ms: 2.37054
+  type: 'test'
+  ...
+# Subtest: rejects malformed iOS versions
+ok 375 - rejects malformed iOS versions
+  ---
+  duration_ms: 0.240775
+  type: 'test'
+  ...
+# Subtest: parses only safe positive integers
+ok 376 - parses only safe positive integers
+  ---
+  duration_ms: 0.245492
+  type: 'test'
+  ...
+# Subtest: compares marketing versions numerically
+ok 377 - compares marketing versions numerically
+  ---
+  duration_ms: 0.357736
+  type: 'test'
+  ...
+# Subtest: blocks 3.7 build 15
+ok 378 - blocks 3.7 build 15
+  ---
+  duration_ms: 0.453858
+  type: 'test'
+  ...
+# Subtest: allows 3.7 build 16
+ok 379 - allows 3.7 build 16
+  ---
+  duration_ms: 0.209459
+  type: 'test'
+  ...
+# Subtest: allows 3.7 build 22
+ok 380 - allows 3.7 build 22
+  ---
+  duration_ms: 0.246443
+  type: 'test'
+  ...
+# Subtest: allows newer version 3.8 build 1
+ok 381 - allows newer version 3.8 build 1
+  ---
+  duration_ms: 0.170291
+  type: 'test'
+  ...
+# Subtest: blocks older version even with a higher build number
+ok 382 - blocks older version even with a higher build number
+  ---
+  duration_ms: 0.563109
+  type: 'test'
+  ...
+# Subtest: allows a legacy client at the explicit legacy threshold
+ok 383 - allows a legacy client at the explicit legacy threshold
+  ---
+  duration_ms: 0.510421
+  type: 'test'
+  ...
+# Subtest: blocks a legacy client below the explicit legacy threshold
+ok 384 - blocks a legacy client below the explicit legacy threshold
+  ---
+  duration_ms: 0.251009
+  type: 'test'
+  ...
+# Subtest: blocks legacy clients when no legacy threshold is configured
+ok 385 - blocks legacy clients when no legacy threshold is configured
+  ---
+  duration_ms: 0.156801
+  type: 'test'
+  ...
+# Subtest: supports existing build-only release rows
+ok 386 - supports existing build-only release rows
+  ---
+  duration_ms: 0.151964
+  type: 'test'
+  ...
+# Subtest: allows releases with no minimum requirement
+ok 387 - allows releases with no minimum requirement
+  ---
+  duration_ms: 0.112896
+  type: 'test'
+  ...
+# Subtest: fails closed for malformed client metadata
+ok 388 - fails closed for malformed client metadata
+  ---
+  duration_ms: 0.259722
+  type: 'test'
+  ...
+# Subtest: fails closed for invalid minimum configuration
+ok 389 - fails closed for invalid minimum configuration
+  ---
+  duration_ms: 0.144092
+  type: 'test'
+  ...
+# Subtest: rejects a malformed build even when the marketing version is newer
+ok 390 - rejects a malformed build even when the marketing version is newer
+  ---
+  duration_ms: 0.120227
+  type: 'test'
+  ...
+# Subtest: Kierkegaard becomes unlimited free access during an open weekend
+ok 391 - Kierkegaard becomes unlimited free access during an open weekend
+  ---
+  duration_ms: 3.030882
+  type: 'test'
+  ...
+# Subtest: migration 016 is retired and cannot mutate release or Ranked state
+ok 392 - migration 016 is retired and cannot mutate release or Ranked state
+  ---
+  duration_ms: 0.84259
+  type: 'test'
+  ...
+# Subtest: retired Kierkegaard migrations 016 and 017 are intentionally inert
+ok 393 - retired Kierkegaard migrations 016 and 017 are intentionally inert
+  ---
+  duration_ms: 1.823755
+  type: 'test'
+  ...
+# Subtest: Agora Pro product model distinguishes recurring and Lifetime access
+ok 394 - Agora Pro product model distinguishes recurring and Lifetime access
+  ---
+  duration_ms: 1.339452
+  type: 'test'
+  ...
+# Subtest: Lifetime Pro grants permanent account access without an expiration date
+ok 395 - Lifetime Pro grants permanent account access without an expiration date
+  ---
+  duration_ms: 0.876951
+  type: 'test'
+  ...
+# Subtest: revoked Lifetime Pro does not grant account access
+ok 396 - revoked Lifetime Pro does not grant account access
+  ---
+  duration_ms: 0.609928
+  type: 'test'
+  ...
+# Subtest: PostgreSQL account access query includes permanent Lifetime Pro and prioritizes it
+ok 397 - PostgreSQL account access query includes permanent Lifetime Pro and prioritizes it
+  ---
+  duration_ms: 0.392918
+  type: 'test'
+  ...
+# Subtest: exports the approved Ranked mode limits
+ok 398 - exports the approved Ranked mode limits
+  ---
+  duration_ms: 1.895511
+  type: 'test'
+  ...
+# Subtest: Guided accepts an under-90-word two-paragraph reply with one final question and no early score
+ok 399 - Guided accepts an under-90-word two-paragraph reply with one final question and no early score
+  ---
+  duration_ms: 4.315663
+  type: 'test'
+  ...
+# Subtest: Guided rejects an oversized first attempt and regenerates from the correction prompt
+ok 400 - Guided rejects an oversized first attempt and regenerates from the correction prompt
+  ---
+  duration_ms: 1.079178
+  type: 'test'
+  ...
+# Subtest: Guided rejects a reply that does not end with exactly one question
+ok 401 - Guided rejects a reply that does not end with exactly one question
+  ---
+  duration_ms: 0.616547
+  type: 'test'
+  ...
+# Subtest: Balanced rejects an undersized reply and accepts a 100-word two-paragraph correction
+ok 402 - Balanced rejects an undersized reply and accepts a 100-word two-paragraph correction
+  ---
+  duration_ms: 0.653842
+  type: 'test'
+  ...
+# Subtest: the required score line is excluded from Balanced word and paragraph validation
+ok 403 - the required score line is excluded from Balanced word and paragraph validation
+  ---
+  duration_ms: 0.578101
+  type: 'test'
+  ...
+# Subtest: Relentless rejects more than four response-body paragraphs and regenerates
+ok 404 - Relentless rejects more than four response-body paragraphs and regenerates
+  ---
+  duration_ms: 0.812346
+  type: 'test'
+  ...
+# Subtest: legacy generated openings use the same Guided contract and never include a score
+ok 405 - legacy generated openings use the same Guided contract and never include a score
+  ---
+  duration_ms: 0.538092
+  type: 'test'
+  ...
+# Subtest: the first Ranked reply still rejects an early score and regenerates without one
+ok 406 - the first Ranked reply still rejects an early score and regenerates without one
+  ---
+  duration_ms: 1.866308
+  type: 'test'
+  ...
+# Subtest: the second Ranked reply still requires exactly one final score line
+ok 407 - the second Ranked reply still requires exactly one final score line
+  ---
+  duration_ms: 1.004028
+  type: 'test'
+  ...
+# Subtest: existing debates keep their stored legacy mode behavior after the v3 deployment
+ok 408 - existing debates keep their stored legacy mode behavior after the v3 deployment
+  ---
+  duration_ms: 0.534557
+  type: 'test'
+  ...
+# Subtest: uses smaller mode-specific token budgets for new v3 debates
+ok 409 - uses smaller mode-specific token budgets for new v3 debates
+  ---
+  duration_ms: 0.542408
+  type: 'test'
+  ...
+# Subtest: returns the closest structurally valid Guided response instead of failing the debate when both style retries miss
+ok 410 - returns the closest structurally valid Guided response instead of failing the debate when both style retries miss
+  ---
+  duration_ms: 0.55709
+  type: 'test'
+  ...
+# Subtest: still fails safely when every scored attempt omits the required score line
+ok 411 - still fails safely when every scored attempt omits the required score line
+  ---
+  duration_ms: 0.809291
+  type: 'test'
+  ...
+# Subtest: a valid scored candidate survives when a later retry has a critical score-format failure
+ok 412 - a valid scored candidate survives when a later retry has a critical score-format failure
+  ---
+  duration_ms: 0.365288
+  type: 'test'
+  ...
+# Subtest: a later provider failure cannot discard an already valid scored fallback candidate
+ok 413 - a later provider failure cannot discard an already valid scored fallback candidate
+  ---
+  duration_ms: 0.614645
+  type: 'test'
+  ...
+# Subtest: contains the nine canonical Ranked philosophers
+ok 414 - contains the nine canonical Ranked philosophers
+  ---
+  duration_ms: 2.084219
+  type: 'test'
+  ...
+# Subtest: resolves canonical IDs without accepting display-name aliases
+ok 415 - resolves canonical IDs without accepting display-name aliases
+  ---
+  duration_ms: 1.345401
+  type: 'test'
+  ...
+# Subtest: uses the server eligibility allowlist for new Ranked starts
+ok 416 - uses the server eligibility allowlist for new Ranked starts
+  ---
+  duration_ms: 0.255035
+  type: 'test'
+  ...
+# Subtest: keeps Kierkegaard canonical while release-gating new Ranked starts until August 12
+ok 417 - keeps Kierkegaard canonical while release-gating new Ranked starts until August 12
+  ---
+  duration_ms: 0.21735
+  type: 'test'
+  ...
+# Subtest: Kierkegaard carries a server-owned identity and scoring lens
+ok 418 - Kierkegaard carries a server-owned identity and scoring lens
+  ---
+  duration_ms: 1.005541
+  type: 'test'
+  ...
+# Subtest: requires a valid Ranked philosopher
+ok 419 - requires a valid Ranked philosopher
+  ---
+  duration_ms: 0.451685
+  type: 'test'
+  ...
+# Subtest: returns immutable catalog entries
+ok 420 - returns immutable catalog entries
+  ---
+  duration_ms: 0.191673
+  type: 'test'
+  ...
+# Subtest: placement protection prevents a division demotion at 0 RP
+ok 421 - placement protection prevents a division demotion at 0 RP
+  ---
+  duration_ms: 1.783796
+  type: 'test'
+  ...
+# Subtest: protected debate still loses RP inside the current division
+ok 422 - protected debate still loses RP inside the current division
+  ---
+  duration_ms: 0.256037
+  type: 'test'
+  ...
+# Subtest: protected debate stops at 0 RP when a loss crosses a division
+ok 423 - protected debate stops at 0 RP when a loss crosses a division
+  ---
+  duration_ms: 0.209088
+  type: 'test'
+  ...
+# Subtest: deliberate forfeit bypasses protection
+ok 424 - deliberate forfeit bypasses protection
+  ---
+  duration_ms: 0.358087
+  type: 'test'
+  ...
+# Subtest: uses the Kierkegaard topic bundle version by default
+ok 425 - uses the Kierkegaard topic bundle version by default
+  ---
+  duration_ms: 1.418078
+  type: 'test'
+  ...
+# Subtest: generates one canonical Ranked topic with deterministic metadata
+ok 426 - generates one canonical Ranked topic with deterministic metadata
+  ---
+  duration_ms: 2.526289
+  type: 'test'
+  ...
+# Subtest: requires an eligible canonical philosopher id and release-gates Kierkegaard
+ok 427 - requires an eligible canonical philosopher id and release-gates Kierkegaard
+  ---
+  duration_ms: 1.253125
+  type: 'test'
+  ...
+# Subtest: rejects invalid Ranked debate modes
+ok 428 - rejects invalid Ranked debate modes
+  ---
+  duration_ms: 0.314843
+  type: 'test'
+  ...
+# Subtest: retries a temporary network failure
+ok 429 - retries a temporary network failure
+  ---
+  duration_ms: 1.304039
+  type: 'test'
+  ...
+# Subtest: regenerates after invalid model output
+ok 430 - regenerates after invalid model output
+  ---
+  duration_ms: 0.377515
+  type: 'test'
+  ...
+# Subtest: regenerates when the model omits the philosopher opening question
+ok 431 - regenerates when the model omits the philosopher opening question
+  ---
+  duration_ms: 0.671379
+  type: 'test'
+  ...
+# Subtest: rejects repeated or closely paraphrased topics
+ok 432 - rejects repeated or closely paraphrased topics
+  ---
+  duration_ms: 0.734742
+  type: 'test'
+  ...
+# Subtest: accepts JSON inside a fenced model response
+ok 433 - accepts JSON inside a fenced model response
+  ---
+  duration_ms: 0.615556
+  type: 'test'
+  ...
+# Subtest: produces the same fingerprint for the same normalized topic
+ok 434 - produces the same fingerprint for the same normalized topic
+  ---
+  duration_ms: 0.820638
+  type: 'test'
+  ...
+# Subtest: classifies an initial free trial as a trial-start milestone
+ok 435 - classifies an initial free trial as a trial-start milestone
+  ---
+  duration_ms: 0.768311
+  type: 'test'
+  ...
+# Subtest: classifies an initial paid purchase as a paid-subscriber milestone
+ok 436 - classifies an initial paid purchase as a paid-subscriber milestone
+  ---
+  duration_ms: 0.969578
+  type: 'test'
+  ...
+# Subtest: classifies the first paid DID_RENEW after a trial as a conversion
+ok 437 - classifies the first paid DID_RENEW after a trial as a conversion
+  ---
+  duration_ms: 0.196939
+  type: 'test'
+  ...
+# Subtest: does not classify later paid renewals as trial conversions
+ok 438 - does not classify later paid renewals as trial conversions
+  ---
+  duration_ms: 0.147678
+  type: 'test'
+  ...
+# Subtest: does not classify a zero-price DID_RENEW as a paid conversion
+ok 439 - does not classify a zero-price DID_RENEW as a paid conversion
+  ---
+  duration_ms: 0.151603
+  type: 'test'
+  ...
+# Subtest: classifies a V2 initial subscription as a new subscriber alert
+ok 440 - classifies a V2 initial subscription as a new subscriber alert
+  ---
+  duration_ms: 0.933093
+  type: 'test'
+  ...
+# Subtest: classifies auto-renew disabled separately from expiration
+ok 441 - classifies auto-renew disabled separately from expiration
+  ---
+  duration_ms: 0.131103
+  type: 'test'
+  ...
+# Subtest: renewals are quiet by default and can be enabled explicitly
+ok 442 - renewals are quiet by default and can be enabled explicitly
+  ---
+  duration_ms: 0.117052
+  type: 'test'
+  ...
+# Subtest: formats Apple JWS price milliunits for display
+ok 443 - formats Apple JWS price milliunits for display
+  ---
+  duration_ms: 16.68288
+  type: 'test'
+  ...
+# Subtest: builds a production new-subscriber notification with masked IDs
+ok 444 - builds a production new-subscriber notification with masked IDs
+  ---
+  duration_ms: 1.154589
+  type: 'test'
+  ...
+# Subtest: ignores App Store events that are not owner-alert events
+ok 445 - ignores App Store events that are not owner-alert events
+  ---
+  duration_ms: 0.13587
+  type: 'test'
+  ...
+1..445
+# tests 477
+# suites 0
+# pass 477
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2416.291308
+full_test_exit=0
