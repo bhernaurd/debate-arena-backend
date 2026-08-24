@@ -39,28 +39,23 @@ jobs:
                   raise SystemExit('Overview enhancer import anchor not found')
               text = text.replace(import_anchor, revenue_import, 1)
 
-          old = """          ? enhanceSubscriptionAdminOverviewHtml(
-              enhanceSubscriptionAdminPayoutHtml(
-                enhanceSubscriptionAdminHistoryHtml(
-                  enhanceDashboardHtml(body)
-                )
-              )
-            )
-          : body;"""
-          new = """          ? enhanceSubscriptionAdminRevenueHtml(
-              enhanceSubscriptionAdminOverviewHtml(
-                enhanceSubscriptionAdminPayoutHtml(
-                  enhanceSubscriptionAdminHistoryHtml(
-                    enhanceDashboardHtml(body)
-                  )
-                )
-              )
-            )
-          : body;"""
           if "? enhanceSubscriptionAdminRevenueHtml(" not in text:
-              if old not in text:
-                  raise SystemExit('Dashboard enhancement composition anchor not found')
-              text = text.replace(old, new, 1)
+              opening = "? enhanceSubscriptionAdminOverviewHtml("
+              if opening not in text:
+                  raise SystemExit('Overview composition call not found')
+              text = text.replace(
+                  opening,
+                  "? enhanceSubscriptionAdminRevenueHtml(\n              enhanceSubscriptionAdminOverviewHtml(",
+                  1,
+              )
+              start = text.index("? enhanceSubscriptionAdminRevenueHtml(")
+              end = text.index(": body;", start)
+              block = text[start:end]
+              closing = "\n            )\n          "
+              if closing not in block:
+                  raise SystemExit('Overview composition closing not found')
+              block = block.rsplit(closing, 1)[0] + "\n            )\n          )\n          " + block.rsplit(closing, 1)[1]
+              text = text[:start] + block + text[end:]
 
           path.write_text(text)
           PY
