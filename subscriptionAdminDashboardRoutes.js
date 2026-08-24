@@ -20,7 +20,7 @@ function enhanceDashboardHtml(html) {
     )
     .replace(
       `const statusPill = (row) => {\n    const status=String(row.status||row.status_after||'unknown');\n    const cls = row.has_pro_access || ['active','trial','grace_period'].includes(status) ? 'good' : (status==='billing_retry' ? 'warn' : (['revoked','expired'].includes(status) ? 'bad' : ''));\n    return '<span class="pill '+cls+'">'+esc(titleCase(status))+'</span>';\n  };`,
-      `const statusPill = (row) => {\n    const status=String(row.status||row.status_after||'unknown');\n    const eventType=String(row.event_type||'').toUpperCase();\n    const isPaidEvent=row.status_after==='active' && row.is_trial===false && ['SUBSCRIBED','DID_RENEW'].includes(eventType);\n    if(isPaidEvent) return '<span class="pill paid">PAID</span>';\n    const cls = row.has_pro_access || ['active','trial','grace_period'].includes(status) ? 'good' : (status==='billing_retry' ? 'warn' : (['revoked','expired'].includes(status) ? 'bad' : ''));\n    return '<span class="pill '+cls+'">'+esc(titleCase(status))+'</span>';\n  };`
+      `const statusPill = (row) => {\n    const status=String(row.status||row.status_after||'unknown');\n    const eventType=String(row.event_type||'').toUpperCase();\n    const isPaidEvent=row.status_after==='active' && row.is_trial===false && ['SUBSCRIBED','DID_RENEW'].includes(eventType);\n    if(isPaidEvent) return '<span class="pill paid">PAID</span>';\n    const isIssue=['billing_retry','grace_period','revoked','expired'].includes(status);\n    const cls = isIssue ? 'bad' : (row.has_pro_access || ['active','trial'].includes(status) ? 'good' : '');\n    return '<span class="pill '+cls+'">'+esc(titleCase(status))+'</span>';\n  };`
     );
 }
 
