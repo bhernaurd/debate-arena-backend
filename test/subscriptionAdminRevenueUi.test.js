@@ -69,14 +69,16 @@ test('Revenue keeps four financial KPIs and removes subscriber KPIs', () => {
 test('Revenue includes trend graph and simplified monthly financial table', () => {
   const html = renderFinalDashboard();
   const revenue = html.match(/<section id="view-history"[^>]*>([\s\S]*?)<section id="view-events"/i)?.[1] || '';
+  const historyTableFn = html.match(/function historyTableHtml\(months,currentMonth\)\{([\s\S]*?)function financialPeriodsHtml/i)?.[1] || '';
 
   assert.ok(revenue, 'Revenue section not found');
   assert.match(revenue, /<h2>Revenue trend<\/h2>/);
   assert.match(revenue, /id="revenueTrendChart"/);
   assert.match(revenue, /<h2>Monthly financial history<\/h2>/);
   assert.match(html, /function renderRevenueTrend\(selected='all'\)/);
-  assert.match(html, /Gross sales<\/th><th>Apple proceeds est\.<\/th><th>Fees \+ tax est\.<\/th><th>Refunds<\/th><th>Final proceeds<\/th>/);
-  assert.doesNotMatch(html, /<th>New paid<\/th><th>Trials<\/th><th>Trial → Paid<\/th>/);
+  assert.ok(historyTableFn, 'historyTableHtml not found');
+  assert.match(historyTableFn, /Gross sales<\/th><th>Apple proceeds est\.<\/th><th>Fees \+ tax est\.<\/th><th>Refunds<\/th><th>Final proceeds<\/th>/);
+  assert.doesNotMatch(historyTableFn, /<th>New paid<\/th>|<th>Trials<\/th>|<th>Trial → Paid<\/th>|<th>Cancels<\/th>|<th>Ended<\/th>/);
 });
 
 test('Final Apple settlements are collapsed by default', () => {
@@ -87,4 +89,13 @@ test('Final Apple settlements are collapsed by default', () => {
   assert.doesNotMatch(revenue, /<details class="section revenue-settlements"[^>]*\sopen(?:\s|>)/);
   assert.match(revenue, /View settlements/);
   assert.match(revenue, /id="financialHistoryTable"/);
+});
+
+test('Revenue enhancer leaves the rendered client script syntactically valid', () => {
+  const html = renderFinalDashboard();
+  const script = html.match(/<script>([\s\S]*?)<\/script>/i)?.[1] || '';
+
+  assert.ok(script, 'dashboard script not found');
+  assert.doesNotMatch(script, /<\/html>/i);
+  assert.doesNotThrow(() => new Function(script));
 });
