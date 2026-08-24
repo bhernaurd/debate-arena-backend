@@ -2320,9 +2320,9 @@ function renderAffiliateAdminDashboardPage() {
           : 'This creates the Agora affiliate and automatically creates its creator code in the shared App Store Connect offer. New production creator codes default to 1,000 redemptions. If the code already exists in that Apple offer, Agora links it without creating a duplicate.') +
         '</div>' +
         '<div class="form-grid">' +
-          '<div class="form-group"><label>Display Name</label><input id="newDisplayName" class="field" placeholder="Max Agora" value="" /></div>' +
-          '<div class="form-group"><label>Creator Code</label><input id="newCode" class="field" placeholder="MAXAGORA" value="' + html(prefill?.customCode || '') + '" /></div>' +
-          '<div class="form-group full"><label>Shared Apple Offer Reference Name</label><input id="newOfferRef" class="field" placeholder="Affiliate First Month $0.99" value="' + html(prefill?.canonical?.offerName || '') + '" /><div class="muted tiny" style="margin-top:5px">Production affiliates may intentionally share this Apple offer. The creator code identifies the affiliate inside Agora.</div></div>' +
+          '<div class="form-group"><label>Display Name</label><input id="newDisplayName" class="field" value="" /></div>' +
+          '<div class="form-group"><label>Creator Code</label><input id="newCode" class="field" value="" /></div>' +
+          '<div class="form-group full"><label>Shared Apple Offer Reference Name</label><input id="newOfferRef" class="field" value="Affiliate First Month $0.99" /><div class="muted tiny" style="margin-top:5px">Production affiliates may intentionally share this Apple offer. The creator code identifies the affiliate inside Agora.</div></div>' +
           '<div class="form-group"><label>Affiliate Since</label><input id="newSince" class="field" type="date" value="' + localDate + '" /></div>' +
           '<div class="form-group"><label>Commission</label><input id="newRate" class="field" type="number" min="0" max="100" step="0.1" value="50" /></div>' +
           '<div class="form-group"><label>Commission Basis</label><select id="newBasis" class="select"><option value="base_price">Base Price</option><option value="net_proceeds">Apple Net Proceeds</option></select></div>' +
