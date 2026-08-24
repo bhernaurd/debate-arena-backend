@@ -1,0 +1,43 @@
+name: Temporary affiliate delete patch diagnostic
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write
+
+jobs:
+  debug:
+    if: github.event.issue.title == '[automation] debug affiliate delete patch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Run patch and capture result
+        shell: bash
+        run: |
+          python3 <<'PY2'
+          from pathlib import Path
+          import textwrap, traceback
+          source = Path('.github/workflows/one-time-affiliate-delete.yml').read_text()
+          marker = "          python3 <<'PY'\n"
+          start = source.index(marker) + len(marker)
+          end = source.index("\n          PY\n", start)
+          script = textwrap.dedent(source[start:end])
+          try:
+              exec(compile(script, 'affiliate-delete-patch.py', 'exec'), {'__name__': '__main__'})
+              result = 'patch_exit=0\n'
+          except BaseException:
+              result = 'patch_exit=1\n' + traceback.format_exc()
+          Path('.affiliate-delete-debug.log').write_text(result)
+          PY2
+      - name: Push diagnostic branch
+        run: |
+          git config user.name "Agora Automation"
+          git config user.email "actions@users.noreply.github.com"
+          git checkout -B automation/affiliate-delete-debug
+          git add -A
+          git commit -m "Debug affiliate delete patch"
+          git push --force origin HEAD:refs/heads/automation/affiliate-delete-debug
