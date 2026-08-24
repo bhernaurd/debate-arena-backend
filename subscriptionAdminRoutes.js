@@ -289,6 +289,7 @@ export function createSubscriptionAdminRouter(
               price_milliunits,
               updated_at
             FROM subscription_admin_customers_v1
+            WHERE environment = 'Production'
             ORDER BY
               COALESCE(latest_transaction_signed_date, updated_at) DESC NULLS LAST,
               customer_key ASC
