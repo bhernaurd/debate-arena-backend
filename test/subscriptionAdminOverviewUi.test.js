@@ -50,7 +50,7 @@ test('Overview keeps four primary KPIs and moves subscriber detail to Breakdown'
   assert.ok(overview, 'Overview section not found');
   assert.doesNotMatch(overview, /<h2>Access source<\/h2>/);
   assert.doesNotMatch(overview, /<h2>Status<\/h2>/);
-  assert.match(overview, /Apple payout periods/);
+  assert.match(overview, /<h2>Apple payouts<\/h2>/);
   assert.match(overview, /Recent customers/);
 
   const loadOverview = html.match(/async function loadOverview\(\)\{([\s\S]*?)async function loadBreakdown/i)?.[1] || '';
@@ -71,4 +71,23 @@ test('Overview keeps four primary KPIs and moves subscriber detail to Breakdown'
   assert.match(html, /metric\('Annual'/);
   assert.match(html, /metric\('Lifetime'/);
   assert.match(html, /metric\('Canceling'/);
+});
+
+test('Apple payout schedule is collapsed by default and emphasizes current information', () => {
+  const html = applyDashboardEnhancements(renderBaseDashboard());
+  const payoutSection = html.match(/<div class="section apple-payout-section">([\s\S]*?)<div class="section"><div class="sectionhead"><h2>Recent customers/i)?.[1] || '';
+
+  assert.ok(payoutSection, 'Apple payout section not found');
+  assert.match(payoutSection, /id="applePayoutSummary"/);
+  assert.match(payoutSection, /<details class="apple-payout-details">/);
+  assert.doesNotMatch(payoutSection, /<details class="apple-payout-details"[^>]*\sopen(?:\s|>)/);
+  assert.match(payoutSection, /View full payout schedule/);
+  assert.match(payoutSection, /Past and future fiscal periods/);
+  assert.match(payoutSection, /id="applePayoutCalendar"/);
+
+  const renderPayout = html.match(/function renderApplePayoutCalendar\(h\)\{([\s\S]*?)function eventParams/i)?.[1] || '';
+  assert.ok(renderPayout, 'renderApplePayoutCalendar function not found');
+  assert.match(renderPayout, /Next expected payout/);
+  assert.match(renderPayout, /Current Apple fiscal period/);
+  assert.doesNotMatch(renderPayout, /<div class="label">Apple payment rule<\/div>/);
 });
