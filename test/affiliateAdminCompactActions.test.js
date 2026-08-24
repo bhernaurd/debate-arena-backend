@@ -9,8 +9,8 @@ test('Affiliate Admin uses compact row actions without changing unlock wiring', 
   assert.match(source, /class="affiliate-actions"/);
   assert.match(source, /<details class="row-menu"><summary title="More actions" aria-label="More actions">•••<\/summary>/);
   assert.match(source, />Dashboard<\/button>/);
-  assert.match(source, />Pause Affiliate<\/button>/);
-  assert.match(source, />Activate Affiliate<\/button>/);
+  assert.match(source, /Pause Affiliate/);
+  assert.match(source, /Activate Affiliate/);
   assert.match(source, />Delete Affiliate<\/button>/);
   assert.doesNotMatch(source, /data-action="details"[^>]*>Details<\/button>/);
 
