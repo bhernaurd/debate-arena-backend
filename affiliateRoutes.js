@@ -2376,18 +2376,18 @@ function renderAffiliateAdminDashboardPage() {
         const appleProvisioning = payload.appleProvisioning || {};
         const appleConnected = ['created','already_exists'].includes(appleProvisioning.status);
         const appleMessage = isTest
-? 'Sandbox/test affiliate created. Automatic production Apple provisioning was skipped.'
-: appleConnected
-  ? (appleProvisioning.status === 'created'
-      ? 'Apple creator code created automatically with ' + number(appleProvisioning.numberOfCodes || 1000) + ' redemptions.'
-      : 'Apple creator code already existed in the shared offer and is linked.')
-  : 'Affiliate created, but the Apple creator code still needs attention: ' + String(appleProvisioning.message || 'Apple provisioning failed.');
+          ? 'Sandbox/test affiliate created. Automatic production Apple provisioning was skipped.'
+          : appleConnected
+            ? (appleProvisioning.status === 'created'
+                ? 'Apple creator code created automatically with ' + number(appleProvisioning.numberOfCodes || 1000) + ' redemptions.'
+                : 'Apple creator code already existed in the shared offer and is linked.')
+            : 'Affiliate created, but the Apple creator code still needs attention: ' + String(appleProvisioning.message || 'Apple provisioning failed.');
         $('modal').innerHTML = '<h2>Affiliate Created</h2><div class="modal-sub">Copy these links now. The private dashboard link can also be recovered later from this admin dashboard when encrypted token storage is configured.</div>' +
-'<div class="result-box">' + resultLine('Referral Link', payload.referralUrl) + resultLine('Private Dashboard', payload.dashboardUrl) + resultLine('Apple Redemption', payload.appleRedemptionUrl) + '</div>' +
-'<div class="' + (appleConnected || isTest ? 'result-box' : 'notice danger') + '" style="margin-top:12px">' + html(appleMessage) + '</div>' +
-'<div class="modal-actions">' +
-  (!isTest && !appleConnected && payload.affiliate?.id ? '<button class="button" data-modal-action="retry-apple" data-affiliate-id="' + html(payload.affiliate.id) + '">Retry Apple Connection</button>' : '') +
-  '<button class="button gold" data-modal-action="close-refresh">Done</button></div>';
+          '<div class="result-box">' + resultLine('Referral Link', payload.referralUrl) + resultLine('Private Dashboard', payload.dashboardUrl) + resultLine('Apple Redemption', payload.appleRedemptionUrl) + '</div>' +
+          '<div class="' + (appleConnected || isTest ? 'result-box' : 'notice danger') + '" style="margin-top:12px">' + html(appleMessage) + '</div>' +
+          '<div class="modal-actions">' +
+            (!isTest && !appleConnected && payload.affiliate?.id ? '<button class="button" data-modal-action="retry-apple" data-affiliate-id="' + html(payload.affiliate.id) + '">Retry Apple Connection</button>' : '') +
+            '<button class="button gold" data-modal-action="close-refresh">Done</button></div>';
         await Promise.all([loadAffiliates(false), loadAppleImports(false)]);
       } catch (error) { $('createAffiliateError').textContent = error.message; }
     }
@@ -2395,12 +2395,12 @@ function renderAffiliateAdminDashboardPage() {
     async function retryAppleConnection(affiliateId) {
       try {
         const payload = await adminFetch('/api/admin/affiliates/' + encodeURIComponent(affiliateId) + '/app-store-connect-code', {
-method:'POST', body:{ numberOfCodes:1000 }
+          method:'POST', body:{ numberOfCodes:1000 }
         });
         const provisioning = payload.appleProvisioning || {};
         toast(provisioning.status === 'created'
-? 'Apple creator code created with 1,000 redemptions.'
-: 'Apple creator code is connected.');
+          ? 'Apple creator code created with 1,000 redemptions.'
+          : 'Apple creator code is connected.');
         closeModal();
         await Promise.all([loadAffiliates(false), loadAppleImports(false)]);
       } catch (error) { toast(error.message, true); }
@@ -3317,23 +3317,23 @@ export function createAffiliateRouter(pool, options = {}) {
 
       if (created?.affiliate?.is_test !== true) {
         try {
-appleProvisioning = await provisionAffiliateAppleCode(
-  created.affiliate,
-  req.body?.appleCustomCodeCount ?? 1000
-);
+          appleProvisioning = await provisionAffiliateAppleCode(
+            created.affiliate,
+            req.body?.appleCustomCodeCount ?? 1000
+          );
         } catch (appleError) {
-console.error('[affiliate] automatic App Store Connect creator-code provisioning:', {
-  code: appleError?.code || 'app_store_connect_custom_code_provisioning_failed',
-  message: appleError?.message || String(appleError),
-  affiliateId: created?.affiliate?.id || null,
-  customCode: created?.affiliate?.normalized_code || null,
-});
-appleProvisioning = {
-  created: false,
-  status: 'failed',
-  code: appleError?.code || 'app_store_connect_custom_code_provisioning_failed',
-  message: appleError?.message || 'App Store Connect creator-code provisioning failed.',
-};
+          console.error('[affiliate] automatic App Store Connect creator-code provisioning:', {
+            code: appleError?.code || 'app_store_connect_custom_code_provisioning_failed',
+            message: appleError?.message || String(appleError),
+            affiliateId: created?.affiliate?.id || null,
+            customCode: created?.affiliate?.normalized_code || null,
+          });
+          appleProvisioning = {
+            created: false,
+            status: 'failed',
+            code: appleError?.code || 'app_store_connect_custom_code_provisioning_failed',
+            message: appleError?.message || 'App Store Connect creator-code provisioning failed.',
+          };
         }
       }
 
