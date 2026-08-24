@@ -1,0 +1,6 @@
+patch_exit=1
+Traceback (most recent call last):
+  File "<stdin>", line 9, in <module>
+  File "affiliate-delete-patch.py", line 1
+    from pathlib import Path
+IndentationError: unexpected indent
