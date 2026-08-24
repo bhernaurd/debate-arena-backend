@@ -43,8 +43,8 @@ async function main() {
   try {
     const service = createAppleProceedsSyncService({ pool, reportsService });
     const financeMonth = argumentValue('--finance-month');
-    const region = argumentValue('--region') || 'US';
-    const financeType = argumentValue('--finance-type') || 'FINANCE_DETAIL';
+    const region = argumentValue('--region') || 'ZZ';
+    const financeType = argumentValue('--finance-type') || 'FINANCIAL';
     const singleDate = argumentValue('--date');
     const days = Number(argumentValue('--days') || 90);
 
