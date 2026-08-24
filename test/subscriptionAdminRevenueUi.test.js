@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import vm from 'node:vm';
 
 import { enhanceSubscriptionAdminHistoryHtml } from '../lib/subscriptionAdminHistoryUi.js';
 import { enhanceSubscriptionAdminOverviewHtml } from '../lib/subscriptionAdminOverviewUi.js';
@@ -97,5 +98,5 @@ test('Revenue enhancer leaves the rendered client script syntactically valid', (
 
   assert.ok(script, 'dashboard script not found');
   assert.doesNotMatch(script, /<\/html>/i);
-  assert.doesNotThrow(() => new Function(script));
+  assert.doesNotThrow(() => new vm.Script(script, { filename: 'subscription-admin-client.js' }));
 });
