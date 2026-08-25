@@ -9,6 +9,7 @@ on:
 permissions:
   contents: write
 
+# Retry after tightening the regression assertion.
 jobs:
   patch:
     runs-on: ubuntu-latest
