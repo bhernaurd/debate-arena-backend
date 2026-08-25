@@ -73,7 +73,9 @@ test('dashboard shows compact data freshness context', () => {
   assert.match(html, /id="dataFreshness"/);
   assert.match(html, /function renderDataFreshness\(h\)/);
   assert.match(html, /Subscription data:<\/b> Live/);
-  assert.match(html, /Apple sales:<\/b>/);
+  assert.match(html, /Apple reporting:<\/b>/);
+  assert.match(html, /Delayed · last checked/);
+  assert.match(html, /Current · through/);
   assert.match(html, /Financial settlements:<\/b>/);
   assert.match(html, /renderDataFreshness\(historyData\)/);
   assert.match(html, /renderDataFreshness\(history\)/);

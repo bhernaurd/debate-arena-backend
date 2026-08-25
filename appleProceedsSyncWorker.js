@@ -18,6 +18,18 @@ function cleanText(value, maxLength = 200) {
   return String(value).trim().slice(0, maxLength);
 }
 
+function dateKey(date) {
+  const value = date instanceof Date ? date : new Date(date);
+  if (Number.isNaN(value.getTime())) return null;
+  return value.toISOString().slice(0, 10);
+}
+
+function addDays(date, amount) {
+  const value = date instanceof Date ? new Date(date.getTime()) : new Date(date);
+  value.setUTCDate(value.getUTCDate() + amount);
+  return value;
+}
+
 function monthKey(date) {
   return date.toISOString().slice(0, 7);
 }
@@ -36,7 +48,7 @@ function financeRegions() {
   return [...new Set(values.length ? values : ['ZZ'])];
 }
 
-const enabled = booleanEnvironment('APP_STORE_CONNECT_REPORTS_ENABLED', false);
+const enabled = booleanEnvironment('APP_STORE_CONNECT_REPORTS_ENABLED', true);
 
 if (enabled) {
   const connectionString = process.env.DATABASE_URL?.trim();
@@ -63,6 +75,45 @@ if (enabled) {
       console.error('[AppleProceedsWorker] Postgres pool error:', error?.message || error);
     });
 
+    async function startupSalesLookbackDays(reason) {
+      if (reason !== 'startup') return 7;
+
+      try {
+        const result = await pool.query(`
+          SELECT MAX(report_date) AS imported_through
+          FROM app_store_sales_report_imports
+          WHERE report_type = 'SALES'
+            AND report_subtype = 'SUMMARY'
+            AND frequency = 'DAILY'
+        `);
+        const lastKey = dateKey(result.rows[0]?.imported_through);
+        if (!lastKey) return 90;
+
+        const last = new Date(`${lastKey}T00:00:00Z`);
+        const through = addDays(new Date(), -1);
+        const gapDays = Math.floor((through.getTime() - last.getTime()) / 86_400_000) + 1;
+        return Math.max(7, Math.min(365, gapDays));
+      } catch (error) {
+        console.warn('[AppleProceedsWorker] Could not determine Sales & Trends catch-up window.', error?.message || error);
+        return 90;
+      }
+    }
+
+    async function recordNoReportChecks(results) {
+      const noReports = (results || []).filter((row) => row.status === 'not_available' && row.reportDate);
+      for (const row of noReports) {
+        await pool.query(`
+          INSERT INTO app_store_sales_report_imports (
+            report_date, vendor_number, report_type, report_subtype, frequency,
+            source_sha256, row_count, imported_at
+          )
+          VALUES ($1,$2,'SALES','SUMMARY','DAILY',NULL,0,NOW())
+          ON CONFLICT (report_date, vendor_number, report_type, report_subtype, frequency)
+          DO UPDATE SET source_sha256 = NULL, row_count = 0, imported_at = NOW()
+        `, [row.reportDate, reportsService.vendorNumber]);
+      }
+    }
+
     async function runSalesSync(reason = 'scheduled') {
       if (running) {
         console.log('[AppleProceedsWorker] Skipping overlapping sales sync.');
@@ -70,10 +121,14 @@ if (enabled) {
       }
       running = true;
       try {
-        const results = await service.syncRecentSales({ days: 7 });
+        const days = await startupSalesLookbackDays(reason);
+        const results = await service.syncRecentSales({ days });
+        await recordNoReportChecks(results);
         const imported = results.filter((row) => row.status === 'imported');
         console.log('[AppleProceedsWorker] Sales reports synced.', {
           reason,
+          checkedDays: results.length,
+          lookbackDays: days,
           reportDays: imported.length,
           importedRows: imported.reduce((sum, row) => sum + Number(row.importedRows || 0), 0),
         });
