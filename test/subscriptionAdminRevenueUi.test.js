@@ -53,6 +53,33 @@ test('navigation names clearly separate subscriber analytics from revenue', () =
   assert.match(html, /history:\['Revenue','Sales, Apple proceeds, fees and refunds over time'\]/);
 });
 
+test('Subscriber Analytics uses clear trial and Active Pro terminology', () => {
+  const html = renderFinalDashboard();
+  const breakdown = html.match(/<section id="view-breakdown"[^>]*>([\s\S]*?)<section id="view-customers"/i)?.[1] || '';
+
+  assert.ok(breakdown, 'Subscriber Analytics section not found');
+  assert.match(breakdown, /<h2>Active Pro growth<\/h2>/);
+  assert.match(breakdown, /id="breakdownChartSummary">Active Pro over time<\/span>/);
+  assert.match(html, /metric\('Free trials',m\.active_trials/);
+  assert.match(html, /metric\('Free trial starts',row\.trialStarts/);
+  assert.match(html, /<th>Free trial starts<\/th>/);
+  assert.doesNotMatch(html, /metric\('Free period'/);
+  assert.doesNotMatch(html, /<th>Free period starts<\/th>/);
+});
+
+test('dashboard shows compact data freshness context', () => {
+  const html = renderFinalDashboard();
+
+  assert.match(html, /id="dataFreshness"/);
+  assert.match(html, /function renderDataFreshness\(h\)/);
+  assert.match(html, /Subscription data:<\/b> Live/);
+  assert.match(html, /Apple sales:<\/b>/);
+  assert.match(html, /Financial settlements:<\/b>/);
+  assert.match(html, /renderDataFreshness\(historyData\)/);
+  assert.match(html, /renderDataFreshness\(history\)/);
+  assert.match(html, /renderDataFreshness\(h\)/);
+});
+
 test('Revenue keeps four financial KPIs and removes subscriber KPIs', () => {
   const html = renderFinalDashboard();
   const metricSet = html.match(/function historyMetricSet\(summary,isAllTime\)\{([\s\S]*?)function monthlyAppleCell/i)?.[1] || '';
@@ -67,7 +94,7 @@ test('Revenue keeps four financial KPIs and removes subscriber KPIs', () => {
   assert.doesNotMatch(metricSet, /Paid customers|New paid|Trial starts|Trial → Paid|Cancellation requests|Subscriptions ended/);
 });
 
-test('Revenue includes a gross-sales-only trend graph and simplified monthly financial table', () => {
+test('Revenue includes a gross-sales-only trend graph and calendar-month financial table', () => {
   const html = renderFinalDashboard();
   const revenue = html.match(/<section id="view-history"[^>]*>([\s\S]*?)<section id="view-events"/i)?.[1] || '';
   const trendFn = html.match(/function renderRevenueTrend\(selected='all'\)\{([\s\S]*?)function historyTableHtml/i)?.[1] || '';
@@ -81,7 +108,9 @@ test('Revenue includes a gross-sales-only trend graph and simplified monthly fin
   assert.match(trendFn, /Gross sales by month/);
   assert.doesNotMatch(trendFn, /proceeds|Apple proceeds/i);
   assert.ok(historyTableFn, 'historyTableHtml not found');
-  assert.match(historyTableFn, /Gross sales<\/th><th>Apple proceeds est\.<\/th><th>Fees \+ tax est\.<\/th><th>Refunds<\/th><th>Final proceeds<\/th>/);
+  assert.match(historyTableFn, /Gross sales<\/th><th>Apple proceeds est\.<\/th><th>Fees \+ tax est\.<\/th><th>Refunds<\/th>/);
+  assert.doesNotMatch(historyTableFn, /Final proceeds/);
+  assert.doesNotMatch(historyTableFn, /monthlyFinalProceedsCell/);
   assert.doesNotMatch(historyTableFn, /<th>New paid<\/th>|<th>Trials<\/th>|<th>Trial → Paid<\/th>|<th>Cancels<\/th>|<th>Ended<\/th>/);
 });
 
@@ -92,6 +121,7 @@ test('Final Apple settlements are collapsed by default', () => {
   assert.match(revenue, /<details class="section revenue-settlements">/);
   assert.doesNotMatch(revenue, /<details class="section revenue-settlements"[^>]*\sopen(?:\s|>)/);
   assert.match(revenue, /View settlements/);
+  assert.match(revenue, /final proceeds/i);
   assert.match(revenue, /id="financialHistoryTable"/);
 });
 
