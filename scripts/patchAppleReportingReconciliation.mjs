@@ -32,7 +32,7 @@ const testPath = 'test/subscriptionAdminRevenueUi.test.js';
 let test = fs.readFileSync(testPath, 'utf8');
 test = test
   .replace(`  assert.match(html, /Delayed · last checked/);\n  assert.match(html, /Current · through/);`, `  assert.match(html, /Reconciled/);\n  assert.match(html, /Pending reconciliation/);\n  assert.doesNotMatch(html, /Delayed · last checked/);`)
-  .replace(`  assert.match(html, /Financial settlements:<\\/b>/);`, `  assert.match(html, /Financial settlements:<\\/b>/);\n  assert.match(html, /const appleProceedsHint=appleConnected?'Apple Sales & Trends estimate'/);\n  assert.doesNotMatch(html, /appleProceedsHint=appleConnected\\?\\(h\\?\\.reporting\\?\\.salesAndTrends\\?\\.importedThrough/);`);
+  .replace(`  assert.match(html, /Financial settlements:<\\/b>/);`, `  assert.match(html, /Financial settlements:<\\/b>/);\n  assert.ok(html.includes(\"const appleProceedsHint=appleConnected?'Apple Sales & Trends estimate'\"));\n  assert.doesNotMatch(html, /appleProceedsHint=appleConnected\\?\\(h\\?\\.reporting\\?\\.salesAndTrends\\?\\.importedThrough/);`);
 fs.writeFileSync(testPath, test);
 
 console.log('Apple reporting reconciliation patch applied.');
