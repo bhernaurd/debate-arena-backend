@@ -38,3 +38,4 @@ jobs:
           git add -A
           git commit -m "Fix Apple reporting freshness sync"
           git push
+# retry 2
