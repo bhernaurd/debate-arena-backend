@@ -54,9 +54,15 @@ const revenuePath = 'lib/subscriptionAdminRevenueUi.js';
 let revenue = fs.readFileSync(revenuePath, 'utf8');
 revenue = replaceOrThrow(
   revenue,
-  `    const sales=salesThrough?formatDateOnly(salesThrough):'Not imported';\n    const settlements=finance?.periodEnd?'through '+formatDateOnly(finance.periodEnd):(h?.reporting?.finance?.hasImportedReports?'Imported':'Pending');\n    el.innerHTML='<span><b>Subscription data:</b> Live</span><span><b>Apple sales:</b> '+esc(sales)+'</span><span><b>Financial settlements:</b> '+esc(settlements)+'</span>';`,
-  `    const salesDate=salesThrough?new Date(String(salesThrough).slice(0,10)+'T00:00:00Z'):null;\n    const salesAgeDays=salesDate&&!Number.isNaN(salesDate.getTime())?Math.floor((Date.now()-salesDate.getTime())/86400000):null;\n    const sales=salesThrough?(salesAgeDays!=null&&salesAgeDays>3?'Delayed · last checked '+formatDateOnly(salesThrough):'Current · through '+formatDateOnly(salesThrough)):'Not imported';\n    const settlements=finance?.periodEnd?'through '+formatDateOnly(finance.periodEnd):(h?.reporting?.finance?.hasImportedReports?'Imported':'Pending');\n    el.innerHTML='<span><b>Subscription data:</b> Live</span><span><b>Apple reporting:</b> '+esc(sales)+'</span><span><b>Financial settlements:</b> '+esc(settlements)+'</span>';`,
-  'freshness wording'
+  "const sales=salesThrough?formatDateOnly(salesThrough):'Not imported';",
+  "const salesDate=salesThrough?new Date(String(salesThrough).slice(0,10)+'T00:00:00Z'):null;\\n    const salesAgeDays=salesDate&&!Number.isNaN(salesDate.getTime())?Math.floor((Date.now()-salesDate.getTime())/86400000):null;\\n    const sales=salesThrough?(salesAgeDays!=null&&salesAgeDays>3?'Delayed · last checked '+formatDateOnly(salesThrough):'Current · through '+formatDateOnly(salesThrough)):'Not imported';",
+  'freshness status logic'
+);
+revenue = replaceOrThrow(
+  revenue,
+  'Apple sales:</b>',
+  'Apple reporting:</b>',
+  'freshness label'
 );
 fs.writeFileSync(revenuePath, revenue);
 
