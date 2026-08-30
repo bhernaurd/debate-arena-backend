@@ -1,0 +1,135 @@
+diff --git a/pushScheduler.js b/pushScheduler.js
+index 3e3d6f7..995ff39 100644
+--- a/pushScheduler.js
++++ b/pushScheduler.js
+@@ -8,6 +8,8 @@ import cron from 'node-cron';
+ import pg from 'pg';
+ import { DateTime } from 'luxon';
+ import { sendPush } from './apnsService.js';
++import { localizeDailyChallenge } from './lib/dailyChallengeLocalizationService.js';
++import { localizedPushTitle, normalizeLanguageCode } from './lib/languageSupport.js';
+ 
+ const { Pool } = pg;
+ 
+@@ -151,11 +153,12 @@ function titleFor(timeOfDay, philosopherName) {
+ }
+ 
+ function bodyKeyFor(timeOfDay) {
+-    if (timeOfDay === 'morning') return 'morning_notification';
+-    if (timeOfDay === 'afternoon') return 'afternoon_notification';
+-    return 'evening_notification';
++    if (timeOfDay === 'morning') return 'morningNotification';
++    if (timeOfDay === 'afternoon') return 'afternoonNotification';
++    return 'eveningNotification';
+ }
+ 
++
+ // ─── Target key helpers ───────────────────────────────────────────────────────
+ // This is the main duplicate fix.
+ // Old logic treated each APNs token as a separate target.
+@@ -292,6 +295,8 @@ async function getEnabledPushTokens() {
+             app_version,
+             build_number,
+             apns_environment,
++            language_code,
++            language_preference,
+             last_registered_at
+          FROM push_tokens
+          WHERE notifications_enabled = true
+@@ -316,20 +321,15 @@ async function getEnabledPushTokens() {
+         appVersion: row.app_version || null,
+         buildNumber: row.build_number || null,
+         apnsEnvironment: row.apns_environment || null,
++        language: normalizeLanguageCode(row.language_code),
++        languagePreference: row.language_preference || 'system',
+         lastRegisteredAt: row.last_registered_at || null,
+     }));
+ }
+ 
+ async function getChallengeByDate(challengeDate) {
+     const result = await pool.query(
+-        `SELECT
+-            challenge_date,
+-            id,
+-            philosopher_id,
+-            philosopher_name,
+-            morning_notification,
+-            afternoon_notification,
+-            evening_notification
++        `SELECT *
+          FROM daily_challenges
+          WHERE challenge_date = $1::date
+          LIMIT 1`,
+@@ -345,9 +345,16 @@ async function getChallengeByDate(challengeDate) {
+         id: row.id,
+         philosopherId: row.philosopher_id,
+         philosopherName: row.philosopher_name || philosopherDisplayName(row.philosopher_id),
+-        morning_notification: row.morning_notification,
+-        afternoon_notification: row.afternoon_notification,
+-        evening_notification: row.evening_notification,
++        theme: row.theme,
++        title: row.title,
++        challengeQuestion: row.challenge_question,
++        userPositionPrompt: row.user_position_prompt,
++        opposingAngle: row.opposing_angle,
++        shareHook: row.share_hook,
++        educationalNote: row.educational_note,
++        morningNotification: row.morning_notification,
++        afternoonNotification: row.afternoon_notification,
++        eveningNotification: row.evening_notification,
+     };
+ }
+ 
+@@ -592,6 +599,7 @@ async function sendDueLocalPushes() {
+     console.log('──────────────────────────────────────────────');
+ 
+     const challengeCache = new Map();
++    const localizedChallengeCache = new Map();
+ 
+     let sent = 0;
+     let skippedCompleted = 0;
+@@ -631,8 +639,17 @@ async function sendDueLocalPushes() {
+             continue;
+         }
+ 
++        const languageCode = normalizeLanguageCode(record.language);
++        const localizedCacheKey = `${record.challengeDate}:${languageCode}`;
++        let localizedChallenge = localizedChallengeCache.get(localizedCacheKey);
++
++        if (!localizedChallenge) {
++            localizedChallenge = await localizeDailyChallenge(pool, challenge, languageCode);
++            localizedChallengeCache.set(localizedCacheKey, localizedChallenge);
++        }
++
+         const bodyKey = bodyKeyFor(record.timeOfDay);
+-        const body = String(challenge[bodyKey] || '').trim();
++        const body = String(localizedChallenge[bodyKey] || '').trim();
+ 
+         if (!body) {
+             skippedMissingChallenge++;
+@@ -649,7 +666,7 @@ async function sendDueLocalPushes() {
+             challenge.philosopherName ||
+             philosopherDisplayName(challenge.philosopherId);
+ 
+-        const title = titleFor(record.timeOfDay, philosopherName);
++        const title = localizedPushTitle(record.timeOfDay, philosopherName, languageCode);
+ 
+         const claimed = await claimDelivery({
+             targetKey: record.targetKey,
+@@ -677,6 +694,7 @@ async function sendDueLocalPushes() {
+             philosopherId: challenge.philosopherId,
+             philosopher: philosopherName,
+             timeOfDay: record.timeOfDay,
++            language: languageCode,
+         };
+ 
+         console.log(
+@@ -684,7 +702,7 @@ async function sendDueLocalPushes() {
+             `(target=${record.targetKey}, timezone=${record.timezone}, local=${record.localTime}, ` +
+             `challenge=${challenge.id}, installId=${record.installId || 'unknown'}, ` +
+             `userId=${record.userId || 'unknown'}, appVersion=${record.appVersion || 'unknown'}, ` +
+-            `build=${record.buildNumber || 'unknown'}, env=${record.apnsEnvironment || env})`
++            `build=${record.buildNumber || 'unknown'}, language=${languageCode}, env=${record.apnsEnvironment || env})`
+         );
+ 
+         const outcome = await sendPush(
