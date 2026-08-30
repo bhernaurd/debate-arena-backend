@@ -1,0 +1,210 @@
+diff --git a/lib/accountRankedProfileService.js b/lib/accountRankedProfileService.js
+index 1ddb3be..aa2985a 100644
+--- a/lib/accountRankedProfileService.js
++++ b/lib/accountRankedProfileService.js
+@@ -1,3 +1,5 @@
++import { normalizeLanguageCode } from './languageSupport.js';
++
+ const INSTALLATION_ID_RE = /^[A-Za-z0-9-]{8,128}$/;
+ 
+ const RANKED_PROFILE_SCHEMA_VERSION = 1;
+@@ -976,8 +978,11 @@ function normalizeActiveDebate(row, expectedAccountId) {
+             'debate_mode',
+             'debateMode'
+         ),
++        language: normalizeLanguageCode(
++            rowValue(row, 'language_code', 'languageCode')
++        ),
+         topic: normalizeOptionalText(
+-            rowValue(row, 'topic', 'topic'),
++            rowValue(row, 'display_topic', 'displayTopic') ?? rowValue(row, 'topic', 'topic'),
+             'activeDebate.topic',
+             4_000
+         ),
+@@ -1330,7 +1335,9 @@ export function createPostgresAccountRankedProfileRepository(pool) {
+                         philosopher_id,
+                         philosopher_name,
+                         debate_mode,
++                        language_code,
+                         topic,
++                        display_topic,
+                         current_score_text,
+                         current_score_value,
+                         round_count,
+diff --git a/lib/accountRankedUnifiedDebateService.js b/lib/accountRankedUnifiedDebateService.js
+index 2bf64fc..8d31c2e 100644
+--- a/lib/accountRankedUnifiedDebateService.js
++++ b/lib/accountRankedUnifiedDebateService.js
+@@ -1,6 +1,7 @@
+ import {
+     AccountRankedDebateError,
+ } from './accountRankedDebateService.js';
++import { normalizeLanguageCode } from './languageSupport.js';
+ 
+ const UUID_RE =
+     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+@@ -538,7 +539,15 @@ function normalizeLadderDebate(row, expectedAccountId) {
+             'debate.debateMode',
+             20
+         ),
++        languageCode: normalizeLanguageCode(
++            rowValue(row, 'language_code', 'languageCode')
++        ),
+         topic: textValue(rowValue(row, 'topic', 'topic'), 'debate.topic', 4_000),
++        displayTopic: textValue(
++            rowValue(row, 'display_topic', 'displayTopic') ?? rowValue(row, 'topic', 'topic'),
++            'debate.displayTopic',
++            4_000
++        ),
+         topicFingerprint: textValue(
+             rowValue(row, 'topic_fingerprint', 'topicFingerprint'),
+             'debate.topicFingerprint',
+@@ -719,7 +728,8 @@ function publicDebate(debate) {
+         philosopherId: debate.philosopherId,
+         philosopherName: debate.philosopherName,
+         debateMode: debate.debateMode,
+-        topic: debate.topic,
++        language: debate.languageCode,
++        topic: debate.displayTopic,
+         topicFingerprint: debate.topicFingerprint,
+         topicTheme: debate.topicTheme,
+         topicModelProvider: debate.topicModelProvider,
+@@ -1075,7 +1085,9 @@ export function createPostgresAccountRankedUnifiedRepository(pool) {
+         philosopher_id,
+         philosopher_name,
+         debate_mode,
++        language_code,
+         topic,
++        display_topic,
+         topic_fingerprint,
+         topic_theme,
+         topic_model_provider,
+diff --git a/lib/rankedDebateEngineService.js b/lib/rankedDebateEngineService.js
+index 76511f1..50fa400 100644
+--- a/lib/rankedDebateEngineService.js
++++ b/lib/rankedDebateEngineService.js
+@@ -4,6 +4,13 @@ import {
+     rankedSharedBasePrompt,
+     requireRankedPhilosopherPrompt,
+ } from './rankedPhilosopherPrompts.js';
++import {
++    countQuestionMarks,
++    endsWithQuestionMark,
++    normalizeLanguageCode,
++    userVisibleLanguageContract,
++    usesCjkCharacterCounting,
++} from './languageSupport.js';
+ 
+ const UUID_RE =
+     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+@@ -125,7 +132,7 @@ Give a Guided Mode opening statement as the philosopher.
+ Hard rules for this opening:
+ - Keep it under 90 words.
+ - Use 2 to 3 short paragraphs maximum.
+-- Use plain English.
++- Use plain, accessible language appropriate to the selected user experience language.
+ - Focus on one simple idea only.
+ - Do not use dense philosophical terms.
+ - Do not mention books, historical figures, technical vocabulary, or complex background unless absolutely necessary.
+@@ -206,7 +213,7 @@ RESPONSE RULES:
+ - Use 2 to 3 short paragraphs.
+ - Focus on exactly one central idea, weakness, or distinction.
+ - If the user gives a long or multi-part argument, do not answer every point. Choose the single most important issue and guide the user through it.
+-- Use short, natural sentences and plain English.
++- Use short, natural sentences in the selected user experience language.
+ - Do not use dense philosophical terminology.
+ - Use a difficult philosophical term only when absolutely necessary, and define it immediately in simple everyday language.
+ - Do not stack multiple concepts, objections, consequences, diagnoses, examples, or historical references.
+@@ -640,6 +647,7 @@ function normalizeContext(value) {
+         proEmphasisAddendum:
+             prompt.proEmphasisAddendum,
+         debateMode,
++        language: normalizeLanguageCode(value.language),
+         topic:
+             requireString(
+                 value.topic,
+@@ -975,6 +983,17 @@ Use only the official topic, the visible transcript, and the argument actually a
+ `.trim();
+ }
+ 
++function languageLengthContract(context) {
++    if (!usesCjkCharacterCounting(context.language)) {
++        return '';
++    }
++
++    return `
++LOCALIZED LENGTH OVERRIDE:
++The selected language is ${context.language}. For Japanese or Simplified Chinese, ignore any word-count requirement elsewhere in the mode contract because whitespace-delimited English word counts do not apply naturally. Preserve the same relative brevity, paragraph limits, intellectual depth, and phone-screen readability instead.
++`.trim();
++}
++
+ function buildSystemPrompt({
+     context,
+     opening,
+@@ -995,6 +1014,8 @@ function buildSystemPrompt({
+         modePromptForContext(
+             context
+         ),
++        userVisibleLanguageContract(context.language),
++        languageLengthContract(context),
+         RESPONSE_FORMAT_PROMPT,
+         scoreTimingPrompt({
+             opening,
+@@ -1242,7 +1263,8 @@ function responseParagraphs(text) {
+ 
+ function modeOutputAssessment(
+     text,
+-    debateMode
++    debateMode,
++    languageCode = 'en'
+ ) {
+     const limits =
+         MODE_OUTPUT_LIMITS[
+@@ -1264,6 +1286,7 @@ function modeOutputAssessment(
+         countResponseWords(
+             text
+         );
++    const enforceWordLimits = !usesCjkCharacterCounting(languageCode);
+     const paragraphs =
+         responseParagraphs(
+             text
+@@ -1274,6 +1297,7 @@ function modeOutputAssessment(
+     let penalty = 0;
+ 
+     if (
++        enforceWordLimits &&
+         wordCount <
+             limits.minimumWords
+     ) {
+@@ -1290,6 +1314,7 @@ function modeOutputAssessment(
+     }
+ 
+     if (
++        enforceWordLimits &&
+         limits.maximumWords != null &&
+         wordCount >
+             limits.maximumWords
+@@ -1341,11 +1366,8 @@ function modeOutputAssessment(
+     if (
+         limits.requireSingleFinalQuestion
+     ) {
+-        const questionMarks =
+-            (text.match(/\?/gu) ?? [])
+-                .length;
+-        const endsWithQuestion =
+-            text.trim().endsWith('?');
++        const questionMarks = countQuestionMarks(text);
++        const endsWithQuestion = endsWithQuestionMark(text);
+ 
+         if (
+             questionMarks !== 1 ||
+@@ -2178,7 +2200,8 @@ async function generateValidated({
+         const assessment =
+             modeOutputAssessment(
+                 parsed.text,
+-                context.debateMode
++                context.debateMode,
++                context.language
+             );
+ 
+         if (
