@@ -1,0 +1,64 @@
+diff --git a/pushRoutes.js b/pushRoutes.js
+index bce9989..451acb8 100644
+--- a/pushRoutes.js
++++ b/pushRoutes.js
+@@ -358,10 +379,14 @@ async function markCompleted(pool, {
+     userId,
+     installId,
+     apnsEnvironment,
++    language,
++    languagePreference,
+ }) {
+     const normalizedUserId = normalizeText(userId);
+     const normalizedInstallId = normalizeText(installId);
+     const normalizedEnvironment = normalizeApnsEnvironment(apnsEnvironment);
++    const normalizedLanguage = normalizeLanguageCode(language);
++    const normalizedLanguagePreference = normalizeLanguagePreference(languagePreference);
+ 
+     const existing = await pool.query(
+         `SELECT user_id, install_id, apns_environment
+@@ -372,7 +397,6 @@ async function markCompleted(pool, {
+     );
+ 
+     const existingRow = existing.rows[0];
+-
+     const finalUserId = normalizedUserId || existingRow?.user_id || null;
+     const finalInstallId = normalizedInstallId || existingRow?.install_id || null;
+     const finalEnvironment = normalizeApnsEnvironment(
+@@ -383,23 +407,21 @@ async function markCompleted(pool, {
+         deviceToken,
+         challengeId,
+         challengeDate,
++        normalizedLanguage,
++        normalizedLanguagePreference,
+     ];
+ 
+     const conditions = [`device_token = $1`];
+ 
+     if (finalUserId) {
+-        values.push(finalUserId);
+-        values.push(finalEnvironment);
+-
++        values.push(finalUserId, finalEnvironment);
+         conditions.push(
+             `(user_id = $${values.length - 1} AND apns_environment = $${values.length})`
+         );
+     }
+ 
+     if (finalInstallId) {
+-        values.push(finalInstallId);
+-        values.push(finalEnvironment);
+-
++        values.push(finalInstallId, finalEnvironment);
+         conditions.push(
+             `(install_id = $${values.length - 1} AND apns_environment = $${values.length})`
+         );
+@@ -410,6 +432,8 @@ async function markCompleted(pool, {
+          SET
+             last_completed_challenge_id = $2,
+             last_completed_challenge_date = COALESCE($3::date, last_completed_challenge_date),
++            language_code = $4,
++            language_preference = $5,
+             updated_at = now()
+          WHERE ${conditions.join(' OR ')}
+          RETURNING *`,
