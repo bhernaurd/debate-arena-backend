@@ -1,4 +1,5 @@
 import express from 'express';
+import { resolveRequestLanguage } from './lib/languageSupport.js';
 
 import {
     AccountRankedPlacementError,
@@ -254,7 +255,8 @@ function serializeActiveDebate(debate) {
             debate.philosopherName,
         debateMode:
             debate.debateMode,
-        topic: debate.topic,
+        topic: debate.displayTopic || debate.topic,
+        language: debate.languageCode || 'en',
         topicFingerprint:
             debate.topicFingerprint,
         topicTheme:
@@ -403,6 +405,7 @@ export function createAccountRankedPlacementRouter({
                     accessToken,
                     requestId,
                     philosopherId,
+                    language: resolveRequestLanguage(req),
                 });
 
             return res
