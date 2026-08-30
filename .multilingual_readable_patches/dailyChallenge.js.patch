@@ -1,0 +1,48 @@
+diff --git a/dailyChallenge.js b/dailyChallenge.js
+index 250d7ab..7308ad3 100644
+--- a/dailyChallenge.js
++++ b/dailyChallenge.js
+@@ -50,6 +50,8 @@ import { fileURLToPath } from 'url';
+ import Anthropic from '@anthropic-ai/sdk';
+ import { DateTime } from 'luxon';
+ import cron from 'node-cron';
++import { localizeDailyChallenge } from './lib/dailyChallengeLocalizationService.js';
++import { resolveRequestLanguage } from './lib/languageSupport.js';
+ 
+ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+ 
+@@ -2870,9 +2872,15 @@ export function createDailyChallengeRouter(pool) {
+                 CHICAGO_ZONE;
+ 
+             const windowInfo = getChallengeWindowForZone(requestedZone);
++            const languageCode = resolveRequestLanguage(req);
+             const challenge = await ensureChallengeForDate(pool, windowInfo.date);
++            const localizedChallenge = await localizeDailyChallenge(
++                pool,
++                challenge,
++                languageCode
++            );
+ 
+-            return res.json(challengeWithWindow(challenge, windowInfo));
++            return res.json(challengeWithWindow(localizedChallenge, windowInfo));
+         } catch (err) {
+             console.error('[DailyChallenge] Endpoint error:', err.message);
+ 
+@@ -2883,10 +2891,16 @@ export function createDailyChallengeRouter(pool) {
+                 CHICAGO_ZONE;
+ 
+             const windowInfo = getChallengeWindowForZone(requestedZone);
++            const languageCode = resolveRequestLanguage(req);
+             const philosopher = getPhilosopherForDate(windowInfo.date);
+             const fallback = getFallback(philosopher, windowInfo.date, windowInfo.expiresAt);
++            const localizedFallback = await localizeDailyChallenge(
++                pool,
++                fallback,
++                languageCode
++            );
+ 
+-            return res.json(challengeWithWindow(fallback, windowInfo));
++            return res.json(challengeWithWindow(localizedFallback, windowInfo));
+         }
+     });
+ 
