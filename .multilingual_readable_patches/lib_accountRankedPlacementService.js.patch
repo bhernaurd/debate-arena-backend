@@ -1,0 +1,292 @@
+diff --git a/lib/accountRankedPlacementService.js b/lib/accountRankedPlacementService.js
+index 51b9883..2addfee 100644
+--- a/lib/accountRankedPlacementService.js
++++ b/lib/accountRankedPlacementService.js
+@@ -1,4 +1,5 @@
+ import { randomUUID } from 'node:crypto';
++import { normalizeLanguageCode } from './languageSupport.js';
+ 
+ import {
+     isRankedPhilosopherID,
+@@ -496,7 +497,13 @@ function normalizeDebate(row, expectedAccountId) {
+             100
+         ),
+         debateMode,
++        languageCode: normalizeLanguageCode(rowValue(row, 'language_code', 'languageCode')),
+         topic: normalizeText(rowValue(row, 'topic', 'topic'), 'debate.topic', 4_000),
++        displayTopic: normalizeText(
++            rowValue(row, 'display_topic', 'displayTopic') ?? rowValue(row, 'topic', 'topic'),
++            'debate.displayTopic',
++            4_000
++        ),
+         topicFingerprint: requireString(
+             rowValue(row, 'topic_fingerprint', 'topicFingerprint'),
+             'debate.topicFingerprint',
+@@ -579,7 +586,7 @@ function requireGeneratedString(
+     return cleaned;
+ }
+ 
+-function normalizeGeneratedTopic(result, expectedPhilosopher, expectedMode) {
++function normalizeGeneratedTopic(result, expectedPhilosopher, expectedMode, expectedLanguage) {
+     if (!result || typeof result !== 'object' || Array.isArray(result)) {
+         fail(
+             'ranked_topic_generation_failed',
+@@ -591,7 +598,8 @@ function normalizeGeneratedTopic(result, expectedPhilosopher, expectedMode) {
+     if (
+         result.philosopherId !== expectedPhilosopher.id ||
+         result.philosopherName !== expectedPhilosopher.name ||
+-        result.debateMode !== expectedMode
++        result.debateMode !== expectedMode ||
++        (result.language != null && normalizeLanguageCode(result.language) !== expectedLanguage)
+     ) {
+         fail(
+             'ranked_topic_generation_mismatch',
+@@ -604,6 +612,11 @@ function normalizeGeneratedTopic(result, expectedPhilosopher, expectedMode) {
+         minimumLength: 30,
+         maximumLength: 220,
+     });
++    const displayTopic = requireGeneratedString(
++        result.displayTopic ?? result.topic,
++        'generatedTopic.displayTopic',
++        { minimumLength: 12, maximumLength: 280 }
++    );
+     const openingQuestion = requireGeneratedString(
+         result.openingQuestion,
+         'generatedTopic.openingQuestion',
+@@ -640,12 +653,14 @@ function normalizeGeneratedTopic(result, expectedPhilosopher, expectedMode) {
+         philosopherName: expectedPhilosopher.name,
+         debateMode: expectedMode,
+         topic,
++        displayTopic,
+         openingQuestion,
+         topicNormalized,
+         topicFingerprint,
+         theme,
+         model,
+         generatorVersion,
++        language: expectedLanguage,
+     });
+ }
+ 
+@@ -695,15 +710,17 @@ function createSeededOpeningMessage({
+     });
+ }
+ 
+-function validateRequestIdentity(row, requestId, philosopher) {
++function validateRequestIdentity(row, requestId, philosopher, languageCode) {
+     const storedRequestId = String(rowValue(row, 'request_id', 'requestId') ?? '').toLowerCase();
+     const storedKind = rowValue(row, 'debate_kind', 'debateKind');
+     const storedPhilosopherId = rowValue(row, 'philosopher_id', 'philosopherId');
++    const storedLanguage = normalizeLanguageCode(rowValue(row, 'language_code', 'languageCode'));
+ 
+     if (
+         storedRequestId !== requestId ||
+         storedKind !== 'placement' ||
+-        storedPhilosopherId !== philosopher.id
++        storedPhilosopherId !== philosopher.id ||
++        storedLanguage !== languageCode
+     ) {
+         fail(
+             'ranked_start_request_reused',
+@@ -944,7 +961,9 @@ export function createPostgresAccountRankedPlacementRepository(pool) {
+                         philosopher_id,
+                         philosopher_name,
+                         debate_mode,
++                        language_code,
+                         topic,
++                        display_topic,
+                         topic_fingerprint,
+                         topic_theme,
+                         topic_model_provider,
+@@ -980,7 +999,9 @@ export function createPostgresAccountRankedPlacementRepository(pool) {
+                         philosopher_id,
+                         philosopher_name,
+                         debate_mode,
++                        language_code,
+                         topic,
++                        display_topic,
+                         topic_fingerprint,
+                         topic_theme,
+                         topic_model_provider,
+@@ -1113,6 +1134,7 @@ export function createPostgresAccountRankedPlacementRepository(pool) {
+                 requestId,
+                 trial,
+                 philosopher,
++                languageCode,
+             }
+         ) {
+             const result = await client.query(
+@@ -1126,6 +1148,7 @@ export function createPostgresAccountRankedPlacementRepository(pool) {
+                         philosopher_id,
+                         philosopher_name,
+                         debate_mode,
++                        language_code,
+                         status,
+                         attempt_count
+                     )
+@@ -1137,6 +1160,7 @@ export function createPostgresAccountRankedPlacementRepository(pool) {
+                         $4,
+                         $5,
+                         $6,
++                        $7,
+                         'reserved',
+                         1
+                     )
+@@ -1149,6 +1173,7 @@ export function createPostgresAccountRankedPlacementRepository(pool) {
+                     philosopher.id,
+                     philosopher.name,
+                     trial.requiredMode,
++                    languageCode,
+                 ]
+             );
+ 
+@@ -1163,6 +1188,7 @@ export function createPostgresAccountRankedPlacementRepository(pool) {
+                     SET
+                         status = 'reserved',
+                         topic = NULL,
++                        display_topic = NULL,
+                         topic_normalized = NULL,
+                         topic_fingerprint = NULL,
+                         topic_theme = NULL,
+@@ -1238,6 +1264,7 @@ export function createPostgresAccountRankedPlacementRepository(pool) {
+                         topic_model_name = $8,
+                         topic_generator_version = $9,
+                         opening_question = $10,
++                        display_topic = $11,
+                         topic_generated_at = CURRENT_TIMESTAMP,
+                         updated_at = CURRENT_TIMESTAMP
+                     WHERE account_id = $1
+@@ -1256,6 +1283,7 @@ export function createPostgresAccountRankedPlacementRepository(pool) {
+                     generatedTopic.model,
+                     generatedTopic.generatorVersion,
+                     generatedTopic.openingQuestion,
++                    generatedTopic.displayTopic,
+                 ]
+             );
+ 
+@@ -1296,7 +1324,9 @@ export function createPostgresAccountRankedPlacementRepository(pool) {
+                         philosopher_id,
+                         philosopher_name,
+                         debate_mode,
++                        language_code,
+                         topic,
++                        display_topic,
+                         topic_source,
+                         topic_fingerprint,
+                         topic_theme,
+@@ -1326,9 +1356,9 @@ export function createPostgresAccountRankedPlacementRepository(pool) {
+                         $5,
+                         $6,
+                         $7,
+-                        'system_generated',
+                         $8,
+                         $9,
++                        'system_generated',
+                         $10,
+                         $11,
+                         $12,
+@@ -1341,9 +1371,11 @@ export function createPostgresAccountRankedPlacementRepository(pool) {
+                         $19,
+                         $20,
+                         $21,
+-                        $21,
+                         $22,
+-                        $23::jsonb
++                        $23,
++                        $23,
++                        $24,
++                        $25::jsonb
+                     )
+                     RETURNING
+                         id,
+@@ -1355,7 +1387,9 @@ export function createPostgresAccountRankedPlacementRepository(pool) {
+                         philosopher_id,
+                         philosopher_name,
+                         debate_mode,
++                        language_code,
+                         topic,
++                        display_topic,
+                         topic_fingerprint,
+                         topic_theme,
+                         topic_model_provider,
+@@ -1374,7 +1408,9 @@ export function createPostgresAccountRankedPlacementRepository(pool) {
+                     philosopher.id,
+                     philosopher.name,
+                     trial.requiredMode,
++                    generatedTopic.language,
+                     generatedTopic.topic,
++                    generatedTopic.displayTopic,
+                     generatedTopic.topicFingerprint,
+                     generatedTopic.theme,
+                     TOPIC_MODEL_PROVIDER,
+@@ -1628,7 +1664,7 @@ export function createAccountRankedPlacementService({
+         }
+     }
+ 
+-    async function reserve({ accountId, installationId, requestId, philosopher }) {
++    async function reserve({ accountId, installationId, requestId, philosopher, languageCode }) {
+         const checkedAt = serviceDate(now);
+         const staleBefore = new Date(checkedAt.getTime() - startLeaseMs);
+ 
+@@ -1649,7 +1685,7 @@ export function createAccountRankedPlacementService({
+             });
+ 
+             if (request) {
+-                validateRequestIdentity(request, requestId, philosopher);
++                validateRequestIdentity(request, requestId, philosopher, languageCode);
+ 
+                 if (rowValue(request, 'status', 'status') === 'completed') {
+                     const existingDebate = await repo.findDebateByStartRequest(client, {
+@@ -1828,6 +1864,7 @@ export function createAccountRankedPlacementService({
+                     requestId,
+                     trial,
+                     philosopher,
++                    languageCode,
+                 });
+             } else {
+                 const storedTrialNumber = normalizeInteger(
+@@ -1893,7 +1930,7 @@ export function createAccountRankedPlacementService({
+                 );
+             }
+ 
+-            validateRequestIdentity(request, requestId, philosopher);
++            validateRequestIdentity(request, requestId, philosopher, generatedTopic.language);
+ 
+             if (rowValue(request, 'status', 'status') === 'completed') {
+                 const existingDebate = await repo.findDebateByStartRequest(client, {
+@@ -2089,9 +2126,11 @@ export function createAccountRankedPlacementService({
+         accessToken,
+         requestId,
+         philosopherId,
++        language = 'en',
+     }) {
+         const cleanRequestId = requireRequestId(requestId);
+         const philosopher = requireCanonicalPhilosopher(philosopherId);
++        const languageCode = normalizeLanguageCode(language);
+         const authorization = await authorize({ installationId, accessToken });
+         const accountId = String(authorization.accountId ?? '').toLowerCase();
+         const authorizedInstallationId = requireInstallationId(
+@@ -2116,6 +2155,7 @@ export function createAccountRankedPlacementService({
+                 installationId: authorizedInstallationId,
+                 requestId: cleanRequestId,
+                 philosopher,
++                languageCode,
+             });
+         } catch (error) {
+             const conflict = postgresConflict(error);
+@@ -2150,12 +2190,14 @@ export function createAccountRankedPlacementService({
+                 philosopherId: philosopher.id,
+                 debateMode: reservation.trial.requiredMode,
+                 recentTopics: reservation.recentTopics,
++                ...(languageCode === 'en' ? {} : { language: languageCode }),
+             });
+ 
+             generatedTopic = normalizeGeneratedTopic(
+                 rawGeneratedTopic,
+                 philosopher,
+-                reservation.trial.requiredMode
++                reservation.trial.requiredMode,
++                languageCode
+             );
+         } catch (error) {
+             const publicError = mapDependencyError(error, {
