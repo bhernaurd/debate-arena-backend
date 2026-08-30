@@ -1,0 +1,42 @@
+diff --git a/pushRoutes.js b/pushRoutes.js
+index bce9989..451acb8 100644
+--- a/pushRoutes.js
++++ b/pushRoutes.js
+@@ -496,8 +520,10 @@ export function createPushRouter(pool) {
+                 appVersion,
+                 buildNumber,
+                 apnsEnvironment,
++                languagePreference,
+             } = req.body || {};
+ 
++            const language = resolveRequestLanguage(req);
+             const normalizedToken = normalizeDeviceToken(deviceToken);
+ 
+             if (!isValidDeviceToken(normalizedToken)) {
+@@ -513,6 +539,8 @@ export function createPushRouter(pool) {
+                 appVersion,
+                 buildNumber,
+                 apnsEnvironment,
++                language,
++                languagePreference,
+             });
+ 
+             await syncPushTokensJson(pool);
+@@ -522,7 +550,7 @@ export function createPushRouter(pool) {
+                 `(length=${normalizedToken.length}, timezone=${record.timezone}, ` +
+                 `userId=${record.userId || 'none'}, installId=${record.installId || 'none'}, ` +
+                 `env=${record.apnsEnvironment || 'unknown'}, appVersion=${record.appVersion || 'unknown'}, ` +
+-                `build=${record.buildNumber || 'unknown'}, pruned=${record.prunedCount || 0})`
++                `build=${record.buildNumber || 'unknown'}, language=${record.language}, pruned=${record.prunedCount || 0})`
+             );
+ 
+             return res.json({
+@@ -535,6 +563,8 @@ export function createPushRouter(pool) {
+                 apnsEnvironment: record.apnsEnvironment || null,
+                 appVersion: record.appVersion || null,
+                 buildNumber: record.buildNumber || null,
++                language: record.language,
++                languagePreference: record.languagePreference,
+                 prunedCount: record.prunedCount || 0,
+             });
+         } catch (err) {
