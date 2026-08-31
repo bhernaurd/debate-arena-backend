@@ -120,3 +120,17 @@ test('does not call the FX provider for USD-only bags', async () => {
   assert.deepEqual(result.bag, { USD: 7.99 });
   assert.deepEqual(result.convertedCurrencies, []);
 });
+
+test('preserves an empty bag so missing Apple reports stay distinguishable from zero-dollar reports', async () => {
+  const converter = createSubscriptionUsdConverter({
+    fetchImpl: async () => {
+      throw new Error('should not fetch');
+    },
+  });
+
+  const result = await converter.convertBag({}, '2026-08');
+
+  assert.deepEqual(result.bag, {});
+  assert.deepEqual(result.convertedCurrencies, []);
+  assert.deepEqual(result.fallbackCurrencies, []);
+});
