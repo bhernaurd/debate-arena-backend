@@ -1,4 +1,5 @@
 import express from 'express';
+import { resolveRequestLanguage } from './lib/languageSupport.js';
 
 import {
     AccountRankedLadderError,
@@ -192,7 +193,8 @@ function serializeActiveDebate(debate) {
         philosopherId: debate.philosopherId,
         philosopherName: debate.philosopherName,
         debateMode: debate.debateMode,
-        topic: debate.topic,
+        topic: debate.displayTopic || debate.topic,
+        language: debate.languageCode || 'en',
         topicFingerprint: debate.topicFingerprint,
         topicTheme: debate.topicTheme,
         topicModelProvider: debate.topicModelProvider,
@@ -341,6 +343,7 @@ export function createAccountRankedLadderRouter({
                 requestId: requireUUID(body.requestId, 'requestId'),
                 philosopherId: requireText(body.philosopherId, 'philosopherId', 100),
                 debateMode: requireText(body.debateMode, 'debateMode', 20),
+                language: resolveRequestLanguage(req),
             });
 
             return res
