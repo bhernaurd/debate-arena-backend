@@ -1,0 +1,111 @@
+name: Finalize subscription USD revenue fix
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/finalize-subscription-usd-revenue.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Patch dashboard revenue reporting
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+
+          function replaceOnce(text, oldValue, newValue, label) {
+            const index = text.indexOf(oldValue);
+            if (index < 0) throw new Error(`Patch target not found: ${label}`);
+            if (text.indexOf(oldValue, index + oldValue.length) >= 0) throw new Error(`Patch target is not unique: ${label}`);
+            return text.slice(0, index) + newValue + text.slice(index + oldValue.length);
+          }
+
+          let history = fs.readFileSync('lib/subscriptionAdminHistoryService.js', 'utf8');
+
+          history = replaceOnce(
+            history,
+            "import { getAppleFiscalPayoutCalendar } from './appleFiscalCalendar.js';\n",
+            "import { getAppleFiscalPayoutCalendar } from './appleFiscalCalendar.js';\nimport { createSubscriptionUsdConverter } from './subscriptionUsdConversionService.js';\n",
+            'history currency converter import'
+          );
+
+          history = replaceOnce(
+            history,
+            "export async function loadSubscriptionAdminHistory(pool) {",
+            "export async function loadSubscriptionAdminHistory(\n  pool,\n  { currencyConverter = createSubscriptionUsdConverter() } = {}\n) {",
+            'history loader signature'
+          );
+
+          history = replaceOnce(
+            history,
+            `  const financialPeriods = normalizeFinancialPeriods(financeResult.rows);\n  const allTime = allTimeFromMonths(months);`,
+            `  const financialPeriods = normalizeFinancialPeriods(financeResult.rows);\n\n  const fxConvertedCurrencies = new Set();\n  const fxFallbackCurrencies = new Set();\n  const fxFailures = [];\n\n  async function normalizeMoneyBag(bag, monthKey, label) {\n    const sourceBag = finalizeCurrencyBag(bag || {});\n    try {\n      const converted = await currencyConverter.convertBag(sourceBag, monthKey);\n      for (const currency of converted.convertedCurrencies || []) {\n        fxConvertedCurrencies.add(currency);\n      }\n      for (const currency of converted.fallbackCurrencies || []) {\n        fxFallbackCurrencies.add(currency);\n      }\n      return finalizeCurrencyBag(converted.bag || { USD: 0 });\n    } catch (error) {\n      fxFailures.push({\n        month: monthKey,\n        label,\n        currencies: Object.keys(sourceBag).filter((currency) => currency !== 'USD'),\n        error: error?.message || String(error),\n      });\n      return sourceBag;\n    }\n  }\n\n  function usdDifference(left, right) {\n    if (\n      Object.keys(left || {}).some((currency) => currency !== 'USD') ||\n      Object.keys(right || {}).some((currency) => currency !== 'USD')\n    ) {\n      return {};\n    }\n    return finalizeCurrencyBag({\n      USD: numberValue(left?.USD) - numberValue(right?.USD),\n    });\n  }\n\n  for (const month of months) {\n    month.grossSales = await normalizeMoneyBag(\n      month.grossSales,\n      month.month,\n      'verified_gross_sales'\n    );\n    month.refunds = await normalizeMoneyBag(\n      month.refunds,\n      month.month,\n      'verified_refunds'\n    );\n    month.appleReportedGrossSales = await normalizeMoneyBag(\n      month.appleReportedGrossSales,\n      month.month,\n      'apple_reported_gross_sales'\n    );\n    month.appleEstimatedProceeds = await normalizeMoneyBag(\n      month.appleEstimatedProceeds,\n      month.month,\n      'apple_estimated_proceeds'\n    );\n\n    month.netSales = usdDifference(month.grossSales, month.refunds);\n    month.appleEstimatedDeductions = usdDifference(\n      month.appleReportedGrossSales,\n      month.appleEstimatedProceeds\n    );\n  }\n\n  for (const period of financialPeriods) {\n    period.finalProceeds = await normalizeMoneyBag(\n      period.finalProceeds,\n      period.reportDate,\n      'apple_final_proceeds'\n    );\n  }\n\n  const allTime = allTimeFromMonths(months);`,
+            'history USD normalization block'
+          );
+
+          history = replaceOnce(
+            history,
+            `    reporting: {\n      salesAndTrends: {`,
+            `    reporting: {\n      currency: {\n        reportingCurrency: currencyConverter.reportingCurrency || 'USD',\n        status: fxFailures.length ? 'partial' : 'normalized',\n        source: 'Frankfurter central-bank reference rates',\n        convertedCurrencies: [...fxConvertedCurrencies].sort(),\n        fallbackCurrencies: [...fxFallbackCurrencies].sort(),\n        failures: fxFailures,\n        note: 'Original App Store currencies remain stored on each transaction; dashboard revenue is normalized to USD for reporting.',\n      },\n      salesAndTrends: {`,
+            'history currency reporting metadata'
+          );
+
+          fs.writeFileSync('lib/subscriptionAdminHistoryService.js', history);
+
+          let historyUi = fs.readFileSync('lib/subscriptionAdminHistoryUi.js', 'utf8');
+          historyUi = replaceOnce(
+            historyUi,
+            "metric('Gross sales this month',money(m.net_sales_this_month_usd||0),'Verified customer billings · before Apple fees/tax'),\\n        metric('Apple proceeds est.',appleProceedsValue,appleProceedsHint)",
+            "metric('Gross sales this month',historyMoneyBag(hm.grossSales||{}),'Verified customer billings · normalized to USD'),\\n        metric('Apple proceeds est.',appleProceedsValue,appleProceedsHint)",
+            'overview gross sales uses normalized history'
+          );
+          fs.writeFileSync('lib/subscriptionAdminHistoryUi.js', historyUi);
+
+          let revenueUi = fs.readFileSync('lib/subscriptionAdminRevenueUi.js', 'utf8');
+          revenueUi = replaceOnce(
+            revenueUi,
+            "metric('Gross sales',historyMoneyBag(summary.grossSales),'Verified customer billings')",
+            "metric('Gross sales',historyMoneyBag(summary.grossSales),'Verified customer billings · normalized to USD')",
+            'revenue gross sales hint'
+          );
+          fs.writeFileSync('lib/subscriptionAdminRevenueUi.js', revenueUi);
+
+          let pkg = fs.readFileSync('package.json', 'utf8');
+          pkg = replaceOnce(
+            pkg,
+            "node --check lib/subscriptionAdminHistoryService.js && node --check lib/subscriptionAdminHistoryUi.js",
+            "node --check lib/subscriptionAdminHistoryService.js && node --check lib/subscriptionUsdConversionService.js && node --check lib/subscriptionAdminHistoryUi.js",
+            'package syntax check'
+          );
+          fs.writeFileSync('package.json', pkg);
+
+          console.log('Applied subscription dashboard USD normalization patch.');
+          NODE
+      - name: Install dependencies
+        run: npm ci
+      - name: Run targeted tests
+        run: node --test test/subscriptionUsdConversionService.test.js test/subscriptionAdminUsdHistory.test.js test/subscriptionAdminRevenueUi.test.js test/subscriptionAdminOverviewUi.test.js
+      - name: Syntax checks
+        run: npm run check
+      - name: Full test suite
+        run: npm test
+      - name: Commit finalized revenue fix
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/subscriptionUsdConversionService.js lib/subscriptionAdminHistoryService.js lib/subscriptionAdminHistoryUi.js lib/subscriptionAdminRevenueUi.js test/subscriptionUsdConversionService.test.js test/subscriptionAdminUsdHistory.test.js package.json
+          git rm .github/workflows/finalize-subscription-usd-revenue.yml
+          git commit -m "Normalize subscription revenue to USD"
+          git push
