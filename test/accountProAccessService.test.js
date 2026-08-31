@@ -309,16 +309,16 @@ test(
 );
 
 test(
-    'PostgreSQL repository queries account ownership and current entitlement dates',
+    'PostgreSQL repository checks App Store first and Google Play second',
     async () => {
-        let captured;
+        const captured = [];
 
         const pool = {
             async query(text, values) {
-                captured = {
+                captured.push({
                     text,
                     values,
-                };
+                });
 
                 return {
                     rows: [],
@@ -339,42 +339,153 @@ test(
                     CHECKED_AT,
             });
 
-        assert.equal(
-            result,
-            null
-        );
+        assert.equal(result, null);
+        assert.equal(captured.length, 2);
+
+        const [appStoreQuery, playQuery] = captured;
+
         assert.match(
-            captured.text,
+            appStoreQuery.text,
             /account_subscription_ownership/
         );
         assert.match(
-            captured.text,
+            appStoreQuery.text,
             /subscription_entitlements/
         );
         assert.match(
-            captured.text,
+            appStoreQuery.text,
             /ownership_status = 'active'/
         );
         assert.match(
-            captured.text,
+            appStoreQuery.text,
             /entitlement\.status IN/
         );
         assert.match(
-            captured.text,
+            appStoreQuery.text,
             /grace_period_expires_date > \$3/
         );
-        assert.deepEqual(
-            captured.values[0],
+        assert.equal(
+            appStoreQuery.values[0],
             ACCOUNT_ID
         );
         assert.ok(
             Array.isArray(
-                captured.values[1]
+                appStoreQuery.values[1]
             )
         );
         assert.equal(
-            captured.values[2],
+            appStoreQuery.values[2],
             CHECKED_AT
         );
+
+        assert.match(
+            playQuery.text,
+            /google_play_subscription_entitlements/
+        );
+        assert.match(
+            playQuery.text,
+            /normalized_status IN/
+        );
+        assert.match(
+            playQuery.text,
+            /expires_date > \$3/
+        );
+        assert.equal(
+            playQuery.values[0],
+            ACCOUNT_ID
+        );
+        assert.equal(
+            playQuery.values[2],
+            CHECKED_AT
+        );
+    }
+);
+
+test(
+    'PostgreSQL repository normalizes a current Google Play entitlement',
+    async () => {
+        let queryCount = 0;
+
+        const pool = {
+            async query() {
+                queryCount += 1;
+                if (queryCount === 1) {
+                    return { rows: [] };
+                }
+
+                return {
+                    rows: [
+                        activeRow({
+                            original_transaction_id:
+                                'google-play:' + 'a'.repeat(64),
+                            environment:
+                                'GooglePlay',
+                            last_signed_date:
+                                new Date(
+                                    '2026-07-30T04:10:00.000Z'
+                                ),
+                        }),
+                    ],
+                };
+            },
+        };
+
+        const service =
+            createAccountProAccessService({
+                repository:
+                    createPostgresAccountProAccessRepository(
+                        pool
+                    ),
+                now: () =>
+                    CHECKED_AT,
+            });
+
+        const result =
+            await service.getCurrentAccess({
+                accountId: ACCOUNT_ID,
+            });
+
+        assert.equal(result.hasProAccess, true);
+        assert.equal(
+            result.entitlement.environment,
+            'GooglePlay'
+        );
+        assert.equal(
+            result.entitlement.productId,
+            PRODUCT_ID
+        );
+    }
+);
+
+test(
+    'missing Google Play migration preserves the prior free result',
+    async () => {
+        let queryCount = 0;
+
+        const pool = {
+            async query() {
+                queryCount += 1;
+                if (queryCount === 1) {
+                    return { rows: [] };
+                }
+
+                const error = new Error('relation does not exist');
+                error.code = '42P01';
+                throw error;
+            },
+        };
+
+        const repository =
+            createPostgresAccountProAccessRepository(
+                pool
+            );
+        const result =
+            await repository.findCurrentAccess({
+                accountId: ACCOUNT_ID,
+                checkedAt: CHECKED_AT,
+            });
+
+        assert.equal(result, null);
+        assert.equal(queryCount, 2);
     }
 );
