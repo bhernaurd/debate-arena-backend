@@ -184,11 +184,11 @@ test(
 test(
     'PostgreSQL account access query includes permanent Lifetime Pro and prioritizes it',
     async () => {
-        let captured;
+        const captured = [];
 
         const pool = {
             async query(text, values) {
-                captured = { text, values };
+                captured.push({ text, values });
                 return { rows: [] };
             },
         };
@@ -203,27 +203,40 @@ test(
             checkedAt: CHECKED_AT,
         });
 
+        assert.equal(captured.length, 2);
+
+        const appStoreQuery = captured[0];
+        const playFallbackQuery = captured[1];
+
         assert.match(
-            captured.text,
+            appStoreQuery.text,
             /entitlement\.product_id = \$4/
         );
         assert.match(
-            captured.text,
+            appStoreQuery.text,
             /entitlement\.status = 'active'/
         );
         assert.match(
-            captured.text,
+            appStoreQuery.text,
             /THEN 0/
         );
         assert.equal(
-            captured.values[3],
+            appStoreQuery.values[3],
             AGORA_PRO_LIFETIME_PRODUCT_ID
         );
         assert.equal(
-            captured.values[1].includes(
+            appStoreQuery.values[1].includes(
                 AGORA_PRO_LIFETIME_PRODUCT_ID
             ),
             true
+        );
+
+        // A missing App Store/Lifetime row now intentionally falls through to
+        // Google Play. This assertion keeps the Lifetime priority check scoped
+        // to the first query rather than accidentally inspecting the fallback.
+        assert.match(
+            playFallbackQuery.text,
+            /google_play_subscription_entitlements/
         );
     }
 );
