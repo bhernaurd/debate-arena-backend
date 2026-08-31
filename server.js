@@ -14,6 +14,7 @@ import questionsRouter from './questions.js';
 import { createAnalyticsRouter } from './analytics.js';
 import aiJobsRouter from './aiJobs.js';
 import { createAppStoreSubscriptionRouter } from './appStoreSubscriptionRoutes.js';
+import { createGooglePlaySubscriptionRouter } from './googlePlaySubscriptionRoutes.js';
 import { createSubscriptionAdminRouter } from './subscriptionAdminRoutes.js';
 import { createSubscriptionAdminDashboardRouter } from './subscriptionAdminDashboardRoutes.js';
 import { createPaywallConfigurationRouter } from './paywallConfigurationRoutes.js';
@@ -39,7 +40,8 @@ import { createAccountRankedLadderService } from './lib/accountRankedLadderServi
 import { createAccountRankedUnifiedDebateService } from './lib/accountRankedUnifiedDebateService.js';
 import { createRankedRatingService } from './lib/rankedRatingService.js';
 import { createRankedDebateEngineService } from './lib/rankedDebateEngineService.js';
-import { createAccountProAccessService } from './lib/accountProAccessService.js';
+import { createCrossPlatformProAccessService } from './lib/crossPlatformProAccessService.js';
+import { createGooglePlaySubscriptionService } from './lib/googlePlaySubscriptionService.js';
 import { createRankedTopicGeneratorService } from './lib/rankedTopicGeneratorService.js';
 import {
   createAccountSubscriptionOwnershipService,
@@ -372,7 +374,12 @@ const accountRankedProfileService =
   });
 
 const accountProAccessService =
-  createAccountProAccessService({
+  createCrossPlatformProAccessService({
+    pool,
+  });
+
+const googlePlaySubscriptionService =
+  createGooglePlaySubscriptionService({
     pool,
   });
 
@@ -537,6 +544,14 @@ app.use(
   createAccountSubscriptionEntitlementRouter({
     accountAuthService,
     proAccessService: accountProAccessService,
+  })
+);
+app.use(
+  '/api/account/google-play',
+  subscriptionSyncLimiter,
+  createGooglePlaySubscriptionRouter({
+    accountAuthService,
+    googlePlaySubscriptionService,
   })
 );
 app.use('/api/account', accountAuthRouter);
