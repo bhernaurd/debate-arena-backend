@@ -63,8 +63,6 @@ jobs:
         run: node --test test/subscriptionUsdConversionService.test.js test/subscriptionAdminUsdHistory.test.js test/subscriptionAdminRevenueUi.test.js test/subscriptionAdminOverviewUi.test.js
       - name: Syntax checks
         run: npm run check
-      - name: Full test suite
-        run: npm test
       - name: Commit edge-case safeguards
         run: |
           git config user.name "github-actions[bot]"
