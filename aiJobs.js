@@ -30,6 +30,14 @@ import {
 import {
     verifyAgoraProTransactionJWS,
 } from './appStoreSubscriptionVerifier.js';
+import {
+    AccountAuthError,
+    createAccountAuthService,
+} from './lib/accountAuthService.js';
+import {
+    AccountProAccessError,
+    createAccountProAccessService,
+} from './lib/accountProAccessService.js';
 
 const router = express.Router();
 const { Pool } = pg;
@@ -45,9 +53,13 @@ pool.on('error', (err) => {
     console.error('[AIJobs] Postgres pool error:', err.message);
 });
 
+const accountAuthService = createAccountAuthService({ pool });
+const accountProAccessService = createAccountProAccessService({ pool });
+
 router.use('/api/expanded-agora', createExpandedAgoraAccessRouter(pool));
 
 const USER_ID_RE = /^[A-Za-z0-9-]{8,128}$/;
+const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
 
 // Keep this FALSE while the existing App Store build does not send the
 // X-Installation-ID header on every AI job request. After the iOS migration
@@ -520,6 +532,122 @@ async function verifyProAccessForJob(
     });
 
     return verification;
+}
+
+function bearerAccessTokenFromRequest(req) {
+    const authorization = req.get('authorization');
+
+    if (authorization == null || String(authorization).trim() === '') {
+        return null;
+    }
+
+    if (
+        typeof authorization !== 'string' ||
+        authorization.length > MAX_AUTHORIZATION_HEADER_LENGTH
+    ) {
+        throw new ExpandedAgoraAccessError(
+            'The Agora account access token is invalid.',
+            401,
+            'invalid_access_token'
+        );
+    }
+
+    const match = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(
+        authorization.trim()
+    );
+
+    if (!match) {
+        throw new ExpandedAgoraAccessError(
+            'The Agora account access token is invalid or expired.',
+            401,
+            'invalid_access_token'
+        );
+    }
+
+    return match[1];
+}
+
+async function verifyAccountProAccessForJob(req, userId) {
+    const accessToken = bearerAccessTokenFromRequest(req);
+
+    if (!accessToken) {
+        return {
+            authenticated: false,
+            isVerifiedPro: false,
+            reason: 'no_account_bearer',
+            verificationSource: 'none',
+        };
+    }
+
+    if (!isValidUserId(userId)) {
+        throw new ExpandedAgoraAccessError(
+            'A valid installation ID is required for account verification.',
+            400,
+            'invalid_installation_id'
+        );
+    }
+
+    try {
+        const authorization = await accountAuthService.authorizeAccessToken({
+            installationId: userId,
+            accessToken,
+        });
+        const access = await accountProAccessService.getCurrentAccess({
+            accountId: authorization.accountId,
+        });
+        const entitlement = access.entitlement;
+        const isVerifiedPro = access.hasProAccess === true;
+        const effectiveExpiry = entitlement?.accessExpiresAt || null;
+
+        const verification = {
+            authenticated: true,
+            isVerifiedPro,
+            reason: isVerifiedPro
+                ? 'verified_account_entitlement'
+                : 'account_free',
+            analyticsAccessTier: isVerifiedPro
+                ? (entitlement?.isTrial ? 'trial' : 'paid_pro')
+                : 'free',
+            isTrial: entitlement?.isTrial === true,
+            environment: entitlement?.environment || null,
+            productId: entitlement?.productId || null,
+            originalTransactionId:
+                entitlement?.originalTransactionId || null,
+            expiresDate: effectiveExpiry
+                ? new Date(effectiveExpiry).getTime()
+                : null,
+            verificationSource: 'agora_account_entitlement',
+        };
+
+        console.log('[AIJobs] Agora account Pro verification:', {
+            jobType: cleanString(req.body?.jobType, 80) || null,
+            authenticated: true,
+            isVerifiedPro,
+            productId: verification.productId,
+            isTrial: verification.isTrial,
+            expiresDate: verification.expiresDate,
+        });
+
+        return verification;
+    } catch (err) {
+        if (
+            err instanceof AccountAuthError ||
+            err instanceof AccountProAccessError
+        ) {
+            const rawStatus = Number(err.status || 500);
+            const statusCode = rawStatus >= 500 ? 503 : rawStatus;
+
+            throw new ExpandedAgoraAccessError(
+                statusCode >= 500
+                    ? 'Agora account access could not be verified right now.'
+                    : (err.message || 'The Agora account access token is invalid or expired.'),
+                statusCode,
+                err.code || 'account_pro_verification_failed'
+            );
+        }
+
+        throw err;
+    }
 }
 
 function isValidUserId(value) {
@@ -1213,31 +1341,44 @@ router.post('/api/ai-jobs', async (req, res) => {
                 ? metadata
                 : {};
 
-        // Verify Apple-signed subscription proof before opening a database
-        // transaction. The raw JWS is never stored in Postgres.
-        const proVerification = await verifyProAccessForJob(
-            cleanJobType,
-            proTransactionJWS,
-            cleanUserId
-        );
+        // Verify both supported server-authoritative Pro paths before opening a
+        // database transaction. App Store clients may provide signed StoreKit
+        // proof. Signed-in Android (and any signed-in cross-platform account)
+        // proves access with the Agora bearer account and canonical entitlement.
+        const [proVerification, accountVerification] = await Promise.all([
+            verifyProAccessForJob(
+                cleanJobType,
+                proTransactionJWS,
+                cleanUserId
+            ),
+            verifyAccountProAccessForJob(req, cleanUserId),
+        ]);
 
-        const isVerifiedPro =
+        const isAppStoreVerifiedPro =
             proVerification.isVerifiedPro === true;
+        const isAccountVerifiedPro =
+            accountVerification.isVerifiedPro === true;
+        const hasServerVerifiedPro =
+            isAppStoreVerifiedPro || isAccountVerifiedPro;
 
         const isTestProBypass =
             hasExpandedAgoraTestProAccess(cleanUserId);
 
         const hasExpandedAgoraProAccess =
-            isVerifiedPro || isTestProBypass;
+            hasServerVerifiedPro || isTestProBypass;
 
         const clientReportedPro =
             String(safeMetadata.accessTier || '').trim().toLowerCase() === 'pro' ||
             truthyMetadataValue(safeMetadata.isPro) ||
             truthyMetadataValue(safeMetadata.subscriptionPro);
 
-        const analyticsAccessTier = isVerifiedPro
-            ? (proVerification.analyticsAccessTier ||
-                (proVerification.isTrial ? 'trial' : 'paid_pro'))
+        const effectiveVerification = isAccountVerifiedPro
+            ? accountVerification
+            : proVerification;
+
+        const analyticsAccessTier = hasServerVerifiedPro
+            ? (effectiveVerification.analyticsAccessTier ||
+                (effectiveVerification.isTrial ? 'trial' : 'paid_pro'))
             : (isTestProBypass
                 ? 'internal_test_pro'
                 : (clientReportedPro ? 'legacy_pro' : 'free'));
@@ -1317,30 +1458,38 @@ router.post('/api/ai-jobs', async (req, res) => {
 
                     // These values are produced by the backend and deliberately
                     // overwrite any same-named client metadata.
-                    serverVerifiedPro: isVerifiedPro,
+                    serverVerifiedPro: hasServerVerifiedPro,
+                    accountAuthenticated:
+                        accountVerification.authenticated === true,
+                    accountVerifiedPro: isAccountVerifiedPro,
                     testProBypass: isTestProBypass,
                     proVerificationReason:
-                        proVerification.reason || 'unknown',
+                        effectiveVerification.reason || 'unknown',
                     proVerificationEnvironment:
-                        proVerification.environment || null,
+                        effectiveVerification.environment || null,
                     proVerificationProductId:
-                        proVerification.productId || null,
+                        effectiveVerification.productId || null,
                     proVerificationExpiresDate:
-                        proVerification.expiresDate || null,
+                        effectiveVerification.expiresDate || null,
                     proVerificationIsTrial:
-                        proVerification.isTrial === true,
+                        effectiveVerification.isTrial === true,
                     proVerificationOriginalTransactionId:
-                        proVerification.originalTransactionId || null,
+                        effectiveVerification.originalTransactionId || null,
                     proVerificationSource:
-                        proVerification.verificationSource || 'transaction_jws',
+                        effectiveVerification.verificationSource ||
+                        (isAccountVerifiedPro
+                            ? 'agora_account_entitlement'
+                            : 'transaction_jws'),
                     analyticsAccessTier,
-                    analyticsTierSource: isVerifiedPro
-                        ? 'server_verified_storekit'
-                        : (isTestProBypass
-                            ? 'railway_test_pro_allowlist'
-                            : (clientReportedPro
-                                ? 'legacy_client_metadata'
-                                : 'free_no_verified_entitlement')),
+                    analyticsTierSource: isAccountVerifiedPro
+                        ? 'server_verified_account_entitlement'
+                        : (isAppStoreVerifiedPro
+                            ? 'server_verified_storekit'
+                            : (isTestProBypass
+                                ? 'railway_test_pro_allowlist'
+                                : (clientReportedPro
+                                    ? 'legacy_client_metadata'
+                                    : 'free_no_verified_entitlement'))),
 
                     expandedAgoraAccessReason: accessDecision.reason,
                 }),
