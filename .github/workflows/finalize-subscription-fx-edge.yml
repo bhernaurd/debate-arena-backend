@@ -1,0 +1,75 @@
+name: Finalize subscription FX edge cases
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/finalize-subscription-fx-edge.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Tighten FX reporting state
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+
+          function replaceOnce(text, oldValue, newValue, label) {
+            const index = text.indexOf(oldValue);
+            if (index < 0) throw new Error(`Patch target not found: ${label}`);
+            if (text.indexOf(oldValue, index + oldValue.length) >= 0) throw new Error(`Patch target is not unique: ${label}`);
+            return text.slice(0, index) + newValue + text.slice(index + oldValue.length);
+          }
+
+          const path = 'lib/subscriptionAdminHistoryService.js';
+          let text = fs.readFileSync(path, 'utf8');
+
+          text = replaceOnce(
+            text,
+            "const LIFETIME_PRODUCT_ID = 'agora_pro_lifetime';\n",
+            "const LIFETIME_PRODUCT_ID = 'agora_pro_lifetime';\nconst DEFAULT_CURRENCY_CONVERTER = createSubscriptionUsdConverter();\n",
+            'shared currency converter'
+          );
+
+          text = replaceOnce(
+            text,
+            "  { currencyConverter = createSubscriptionUsdConverter() } = {}\n",
+            "  { currencyConverter = DEFAULT_CURRENCY_CONVERTER } = {}\n",
+            'shared converter default'
+          );
+
+          text = replaceOnce(
+            text,
+            `  function usdDifference(left, right) {\n    if (\n      Object.keys(left || {}).some((currency) => currency !== 'USD') ||\n      Object.keys(right || {}).some((currency) => currency !== 'USD')\n    ) {\n      return {};\n    }\n    return finalizeCurrencyBag({\n      USD: numberValue(left?.USD) - numberValue(right?.USD),\n    });\n  }`,
+            `  function usdDifference(left, right) {\n    const leftKeys = Object.keys(left || {});\n    const rightKeys = Object.keys(right || {});\n\n    if (!leftKeys.length && !rightKeys.length) {\n      return {};\n    }\n\n    if (\n      leftKeys.some((currency) => currency !== 'USD') ||\n      rightKeys.some((currency) => currency !== 'USD')\n    ) {\n      return {};\n    }\n\n    return finalizeCurrencyBag({\n      USD: numberValue(left?.USD) - numberValue(right?.USD),\n    });\n  }`,
+            'missing report difference state'
+          );
+
+          fs.writeFileSync(path, text);
+          NODE
+      - run: npm ci
+      - name: Targeted tests
+        run: node --test test/subscriptionUsdConversionService.test.js test/subscriptionAdminUsdHistory.test.js test/subscriptionAdminRevenueUi.test.js test/subscriptionAdminOverviewUi.test.js
+      - name: Syntax checks
+        run: npm run check
+      - name: Full test suite
+        run: npm test
+      - name: Commit edge-case safeguards
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/subscriptionAdminHistoryService.js lib/subscriptionUsdConversionService.js test/subscriptionUsdConversionService.test.js
+          git rm .github/workflows/finalize-subscription-fx-edge.yml
+          git commit -m "Preserve subscription FX reporting state"
+          git push
