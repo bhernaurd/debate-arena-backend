@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import express from 'express';
 
 import { AccountAuthError } from './lib/accountAuthService.js';
@@ -10,11 +11,16 @@ import {
     createGooglePlayRtdnService,
 } from './lib/googlePlayRtdnService.js';
 import {
+    GooglePlayRtdnMessageStoreError,
+    createGooglePlayRtdnMessageStore,
+} from './lib/googlePlayRtdnMessageStore.js';
+import {
     GooglePlaySubscriptionError,
 } from './lib/googlePlaySubscriptionService.js';
 
 const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
 const MAX_PUBSUB_DATA_LENGTH = 131_072;
+const MAX_PUBSUB_MESSAGE_ID_LENGTH = 255;
 const INSTALLATION_ID_RE = /^[A-Za-z0-9-]{8,128}$/;
 
 class GooglePlaySubscriptionRouteError extends Error {
@@ -110,6 +116,26 @@ function requireGooglePushBearerToken(req) {
     return match[1];
 }
 
+function requirePubSubMessageId(body) {
+    const raw = body?.message?.messageId ?? body?.message?.message_id;
+    if (typeof raw !== 'string') {
+        fail(
+            'invalid_google_play_rtdn_message_id',
+            'Google Play Pub/Sub message ID is required.',
+            { status: 400 }
+        );
+    }
+    const cleaned = raw.trim();
+    if (!cleaned || cleaned.length > MAX_PUBSUB_MESSAGE_ID_LENGTH) {
+        fail(
+            'invalid_google_play_rtdn_message_id',
+            'Google Play Pub/Sub message ID is invalid.',
+            { status: 400 }
+        );
+    }
+    return cleaned;
+}
+
 function decodeGooglePlayNotification(body) {
     const encoded = body?.message?.data;
     if (
@@ -140,12 +166,42 @@ function decodeGooglePlayNotification(body) {
     }
 }
 
+function sha256Hex(value) {
+    if (typeof value !== 'string' || !value.trim()) return null;
+    return crypto.createHash('sha256').update(value.trim(), 'utf8').digest('hex');
+}
+
+function pubSubDedupeMetadata(messageId, notification) {
+    const subscriptionNotification = notification?.subscriptionNotification;
+    const notificationType = Number(subscriptionNotification?.notificationType);
+    const eventTimeMillis = Number(notification?.eventTimeMillis);
+    const tokenHash = sha256Hex(subscriptionNotification?.purchaseToken);
+
+    return {
+        messageId,
+        packageName:
+            typeof notification?.packageName === 'string'
+                ? notification.packageName.trim()
+                : null,
+        notificationType:
+            Number.isSafeInteger(notificationType) && notificationType >= 0
+                ? notificationType
+                : null,
+        eventTimeMillis:
+            Number.isSafeInteger(eventTimeMillis) && eventTimeMillis >= 0
+                ? eventTimeMillis
+                : null,
+        purchaseTokenSha256: tokenHash,
+    };
+}
+
 function routeError(error) {
     if (
         error instanceof GooglePlaySubscriptionError ||
         error instanceof GooglePlaySubscriptionRouteError ||
         error instanceof GoogleOidcPushVerificationError ||
         error instanceof GooglePlayRtdnError ||
+        error instanceof GooglePlayRtdnMessageStoreError ||
         error instanceof AccountAuthError
     ) {
         const status =
@@ -190,6 +246,7 @@ export function createGooglePlaySubscriptionRouter({
     googlePlaySubscriptionService,
     googleOidcPushVerifier = createGoogleOidcPushVerifier(),
     googlePlayRtdnService = null,
+    googlePlayRtdnMessageStore = createGooglePlayRtdnMessageStore(),
     logger = console,
 } = {}) {
     if (
@@ -219,6 +276,17 @@ export function createGooglePlaySubscriptionRouter({
         );
     }
 
+    if (
+        !googlePlayRtdnMessageStore ||
+        typeof googlePlayRtdnMessageStore.claim !== 'function' ||
+        typeof googlePlayRtdnMessageStore.complete !== 'function' ||
+        typeof googlePlayRtdnMessageStore.markFailed !== 'function'
+    ) {
+        throw new Error(
+            'Google Play subscription routes require an RTDN message dedupe store.'
+        );
+    }
+
     const rtdnService =
         googlePlayRtdnService ||
         createGooglePlayRtdnService({
@@ -245,14 +313,40 @@ export function createGooglePlaySubscriptionRouter({
 
     // Google Cloud Pub/Sub authenticated push endpoint for Play RTDN. The push
     // JWT authenticates Google; the base64 message only identifies a state
-    // change. Entitlement is always re-read from subscriptionsv2.get.
+    // change. Entitlement is always re-read from subscriptionsv2.get. Pub/Sub
+    // messageId is persisted separately as idempotency data so at-least-once
+    // delivery cannot repeat Publisher API work unnecessarily.
     router.post('/rtdn', async (req, res) => {
+        let claimedMessageId = null;
+
         try {
             const pushToken = requireGooglePushBearerToken(req);
             await googleOidcPushVerifier.verifyBearerToken(pushToken);
 
+            const messageId = requirePubSubMessageId(req.body);
             const notification = decodeGooglePlayNotification(req.body);
+            const claim = await googlePlayRtdnMessageStore.claim(
+                pubSubDedupeMetadata(messageId, notification)
+            );
+
+            if (!claim.claimed && !claim.inProgress) {
+                return res.status(204).end();
+            }
+
+            if (!claim.claimed && claim.inProgress) {
+                fail(
+                    'google_play_rtdn_already_processing',
+                    'Google Play notification is already being processed.',
+                    { status: 503, retryable: true }
+                );
+            }
+
+            claimedMessageId = messageId;
             const result = await rtdnService.processNotification(notification);
+            await googlePlayRtdnMessageStore.complete(messageId, {
+                processed: Boolean(result?.processed),
+            });
+            claimedMessageId = null;
 
             if (
                 logger &&
@@ -273,6 +367,17 @@ export function createGooglePlaySubscriptionRouter({
             // callback remains the ownership-claim path for first-ever purchases.
             return res.status(204).end();
         } catch (error) {
+            if (claimedMessageId) {
+                try {
+                    await googlePlayRtdnMessageStore.markFailed(
+                        claimedMessageId,
+                        error?.code || 'google_play_rtdn_processing_failed'
+                    );
+                } catch (dedupeError) {
+                    error = dedupeError;
+                }
+            }
+
             const response = routeError(error);
 
             if (
