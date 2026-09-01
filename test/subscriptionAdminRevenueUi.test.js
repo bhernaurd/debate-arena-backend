@@ -55,13 +55,15 @@ test('navigation names clearly separate subscriber analytics from revenue', () =
   assert.match(html, /history:\['Revenue','Sales, Apple proceeds, fees and refunds over time'\]/);
 });
 
-test('Subscriber Analytics separates recurring subscriptions from Lifetime Pro', () => {
+test('Subscriber Analytics shows monthly acquisition and keeps Lifetime out of Overview', () => {
   const html = renderFinalDashboard();
   const breakdown = html.match(/<section id="view-breakdown"[^>]*>([\s\S]*?)<section id="view-customers"/i)?.[1] || '';
 
   assert.ok(breakdown, 'Subscriber Analytics section not found');
-  assert.match(breakdown, /<h2>Active subscription growth<\/h2>/);
-  assert.match(breakdown, /id="breakdownChartSummary">Subscriptions over time<\/span>/);
+  assert.match(breakdown, /<h2>New subscribers by month<\/h2>/);
+  assert.match(breakdown, /id="breakdownChartSummary">First-time subscription starts<\/span>/);
+  assert.match(html, /New subscribers by month/);
+  assert.match(html, /row\.newSubscribers/);
   assert.match(html, /metric\('Free trials',m\.active_trials/);
   assert.match(html, /metric\('Free trial starts',row\.trialStarts/);
   assert.match(html, /<th>Free trial starts<\/th>/);

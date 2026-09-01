@@ -41,7 +41,7 @@ function applyDashboardEnhancements(html) {
   return output;
 }
 
-test('Overview separates Lifetime Pro from active subscriptions', () => {
+test('Overview shows free trials instead of Lifetime Pro', () => {
   const html = applyDashboardEnhancements(renderBaseDashboard());
 
   assert.match(html, /data-view="breakdown">Breakdown<\/button>/);
@@ -66,7 +66,8 @@ test('Overview separates Lifetime Pro from active subscriptions', () => {
   assert.doesNotMatch(loadOverview, /metric\('Trials'/);
   assert.doesNotMatch(loadOverview, /metric\('Monthly'/);
   assert.doesNotMatch(loadOverview, /metric\('Annual'/);
-  assert.match(loadOverview, /metric\('Lifetime Pro'/);
+  assert.match(loadOverview, /metric\('Free trials'/);
+  assert.doesNotMatch(loadOverview, /metric\('Lifetime Pro'/);
   assert.doesNotMatch(loadOverview, /metric\('Lifetime'/);
   assert.doesNotMatch(loadOverview, /metric\('Canceling'/);
   assert.doesNotMatch(loadOverview, /sourceDistribution/);
@@ -81,7 +82,7 @@ test('Breakdown mirrors History with period selection and subscriber-only metric
   assert.match(breakdown, /id="breakdownPeriod"/);
   assert.match(breakdown, /<option value="current">Current<\/option>/);
   assert.match(breakdown, /id="breakdownNote"/);
-  assert.match(breakdown, /<h2>Subscriber growth<\/h2>/);
+  assert.match(breakdown, /<h2>New subscribers by month<\/h2>/);
   assert.match(breakdown, /id="breakdownChartSummary"/);
   assert.match(breakdown, /id="breakdownChart"/);
   assert.match(breakdown, /<h2>Subscriber history<\/h2>/);
@@ -92,9 +93,11 @@ test('Breakdown mirrors History with period selection and subscriber-only metric
   assert.match(html, /async function loadBreakdown\(\)/);
   assert.match(html, /api\('\/overview'\),api\('\/history'\)/);
   assert.match(html, /function renderSubscriberGrowthChart\(selected='current'\)/);
+  assert.match(html, /newSubscribers/);
   assert.match(html, /activeSubscriptionsAtMonthEnd/);
-  assert.match(html, /active_pro_entitlements/);
-  assert.match(html, /Subscriber growth by month/);
+  assert.match(html, /New subscribers by month/);
+  assert.match(html, /<rect/);
+  assert.doesNotMatch(html, /Subscriber growth by month/);
   assert.match(html, /metric\('Active subscriptions'/);
   assert.match(html, /metric\('Free period'/);
   assert.match(html, /metric\('Monthly'/);
