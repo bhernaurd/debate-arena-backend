@@ -22,6 +22,12 @@ import express from 'express';
 import crypto from 'crypto';
 import pg from 'pg';
 import https from 'https';
+import {
+    endsWithQuestionMark,
+    normalizeLanguageCode,
+    resolveRequestLanguage,
+    userVisibleLanguageContract,
+} from './lib/languageSupport.js';
 
 const router = express.Router();
 const { Pool } = pg;
@@ -164,7 +170,7 @@ function resolvePhilosopher(input) {
 function normalizeText(text) {
     return String(text || '')
         .toLowerCase()
-        .replace(/[^\w\s]/g, '')
+        .replace(/[^\p{L}\p{N}\s]/gu, '')
         .replace(/\s+/g, ' ')
         .trim();
 }
@@ -247,7 +253,7 @@ function sanitizeQuestion(raw) {
     const difficulty = normalizeDifficulty(raw.difficulty);
 
     if (!question || !difficulty) return null;
-    if (!question.endsWith('?')) return null;
+    if (!endsWithQuestionMark(question)) return null;
     if (question.length > MAX_QUESTION_CHARS) return null;
 
     return {
@@ -426,7 +432,7 @@ async function createClaudeMessageWithRetry(args, label = 'questions') {
 
 // ─── Claude generation ──────────────────────────────────────────────────────
 
-function buildPrompt(philosopher, themes, recentQuestions, neededDifficulties) {
+function buildPrompt(philosopher, themes, recentQuestions, neededDifficulties, languageCode) {
     const difficultyList = neededDifficulties.join(', ');
 
     const exclusionBlock = recentQuestions.length > 0
@@ -500,15 +506,21 @@ Return exactly this shape:
 Important:
 - difficulty must be exactly one of: beginner, intermediate, advanced
 - Do not return two questions with the same difficulty.
-- Do not omit any requested difficulty.`;
+- Do not omit any requested difficulty.
+
+${userVisibleLanguageContract(languageCode)}
+- Keep the JSON keys "questions", "question", "theme", and "difficulty" exactly in English.
+- Keep each difficulty value exactly one of: beginner, intermediate, advanced.
+- The question and theme values must be written in the selected user experience language.`;
 }
 
-async function callClaudeForQuestions(philosopher, recentQuestionTexts, neededDifficulties) {
+async function callClaudeForQuestions(philosopher, recentQuestionTexts, neededDifficulties, languageCode) {
     const prompt = buildPrompt(
         philosopher,
         PHILOSOPHER_THEMES[philosopher],
         recentQuestionTexts,
-        neededDifficulties
+        neededDifficulties,
+        languageCode
     );
 
     const message = await createClaudeMessageWithRetry(
@@ -532,7 +544,7 @@ async function callClaudeForQuestions(philosopher, recentQuestionTexts, neededDi
         .filter(Boolean);
 }
 
-async function generateDifficultyLockedQuestions(philosopher, recentTexts, recentNormalized) {
+async function generateDifficultyLockedQuestions(philosopher, recentTexts, recentNormalized, languageCode) {
     let accepted = [];
 
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -544,7 +556,8 @@ async function generateDifficultyLockedQuestions(philosopher, recentTexts, recen
         const generated = await callClaudeForQuestions(
             philosopher,
             [...recentTexts, ...accepted.map(q => q.question)],
-            neededDifficulties
+            neededDifficulties,
+            languageCode
         );
 
         const selected = selectOnePerDifficulty(
@@ -606,7 +619,7 @@ async function enforceGenerateRateLimit(userId, philosopher) {
     }
 }
 
-async function saveGeneratedQuestionsAtomic({ generationId, userId, philosopher, questions }) {
+async function saveGeneratedQuestionsAtomic({ generationId, userId, philosopher, languageCode, questions }) {
     const client = await pool.connect();
 
     try {
@@ -614,7 +627,7 @@ async function saveGeneratedQuestionsAtomic({ generationId, userId, philosopher,
 
         const values = [];
         const rowsSql = questions.map((q, index) => {
-            const base = index * 7;
+            const base = index * 8;
 
             values.push(
                 generationId,
@@ -623,16 +636,17 @@ async function saveGeneratedQuestionsAtomic({ generationId, userId, philosopher,
                 q.question,
                 normalizeText(q.question),
                 q.theme,
-                q.difficulty
+                q.difficulty,
+                languageCode
             );
 
-            return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, 'ai_generated', now())`;
+            return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}, $${base + 6}, $${base + 7}, $${base + 8}, 'ai_generated', now())`;
         }).join(',\n');
 
         const insert = await client.query(
             `INSERT INTO generated_questions
                  (generation_id, user_id, philosopher, question_text,
-                  question_normalized, theme, difficulty, source, generated_at)
+                  question_normalized, theme, difficulty, language_code, source, generated_at)
              VALUES
                  ${rowsSql}
              RETURNING id, question_text, theme, difficulty`,
@@ -660,6 +674,7 @@ async function saveGeneratedQuestionsAtomic({ generationId, userId, philosopher,
 router.post('/api/questions/generate', async (req, res) => {
     try {
         const { userId } = req.body;
+        const languageCode = resolveRequestLanguage(req);
 
         if (!validateUserId(userId)) {
             return res.status(400).json({
@@ -682,10 +697,10 @@ router.post('/api/questions/generate', async (req, res) => {
         const recent = await pool.query(
             `SELECT question_text, question_normalized
              FROM generated_questions
-             WHERE user_id = $1 AND philosopher = $2
+             WHERE user_id = $1 AND philosopher = $2 AND language_code = $3
              ORDER BY generated_at DESC
-             LIMIT $3`,
-            [userId, philosopher, RECENT_EXCLUSION_COUNT]
+             LIMIT $4`,
+            [userId, philosopher, languageCode, RECENT_EXCLUSION_COUNT]
         );
 
         const recentTexts = recent.rows.map(r => r.question_text).filter(Boolean);
@@ -694,7 +709,8 @@ router.post('/api/questions/generate', async (req, res) => {
         const accepted = await generateDifficultyLockedQuestions(
             philosopher,
             recentTexts,
-            recentNormalized
+            recentNormalized,
+            languageCode
         );
 
         const generationId = crypto.randomUUID();
@@ -703,6 +719,7 @@ router.post('/api/questions/generate', async (req, res) => {
             generationId,
             userId,
             philosopher,
+            languageCode,
             questions: accepted,
         });
 
@@ -710,11 +727,12 @@ router.post('/api/questions/generate', async (req, res) => {
 
         console.log(
             `[Questions] Generated Beginner → Intermediate → Advanced for ${philosopher} ` +
-            `(user ${userId.slice(0, 8)}…) | generation_id: ${generationId}`
+            `(user ${userId.slice(0, 8)}…, language ${languageCode}) | generation_id: ${generationId}`
         );
 
         return res.json({
             success: true,
+            language: normalizeLanguageCode(languageCode),
             questions: orderedSaved,
         });
     } catch (err) {

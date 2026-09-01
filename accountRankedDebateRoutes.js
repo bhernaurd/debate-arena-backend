@@ -427,6 +427,8 @@ function serializeDebate(debate) {
             debate.philosopherName,
         debateMode:
             debate.debateMode,
+        language:
+            debate.language || 'en',
         topic:
             debate.topic,
         topicFingerprint:

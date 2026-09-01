@@ -23,6 +23,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { DateTime } from 'luxon';
 import { sendPush } from './apnsService.js';
+import {
+    normalizeLanguageCode,
+    normalizeLanguagePreference,
+    resolveRequestLanguage,
+} from './lib/languageSupport.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const TOKENS_PATH = path.join(__dirname, 'push_tokens.json');
@@ -127,6 +132,8 @@ function rowToTokenRecord(row) {
         appVersion: row.app_version || null,
         buildNumber: row.build_number || null,
         apnsEnvironment: row.apns_environment || null,
+        language: normalizeLanguageCode(row.language_code),
+        languagePreference: normalizeLanguagePreference(row.language_preference),
 
         registeredAt: row.registered_at || row.created_at || null,
         updatedAt: row.updated_at || row.last_registered_at || null,
@@ -172,6 +179,8 @@ async function syncPushTokensJson(pool) {
                 appVersion: record.appVersion,
                 buildNumber: record.buildNumber,
                 apnsEnvironment: record.apnsEnvironment,
+                language: record.language,
+                languagePreference: record.languagePreference,
             };
         }
 
@@ -243,10 +252,14 @@ async function upsertPushToken(pool, {
     appVersion,
     buildNumber,
     apnsEnvironment,
+    language,
+    languagePreference,
 }) {
     const finalInstallId = normalizeText(installId) || deviceToken;
     const finalUserId = normalizeText(userId);
     const finalEnvironment = normalizeApnsEnvironment(apnsEnvironment);
+    const finalLanguage = normalizeLanguageCode(language);
+    const finalLanguagePreference = normalizeLanguagePreference(languagePreference);
 
     const client = await pool.connect();
 
@@ -267,6 +280,8 @@ async function upsertPushToken(pool, {
                 app_version,
                 build_number,
                 apns_environment,
+                language_code,
+                language_preference,
                 registered_at,
                 updated_at,
                 created_at,
@@ -284,6 +299,8 @@ async function upsertPushToken(pool, {
                 $6,
                 $7,
                 $8,
+                $9,
+                $10,
                 now(),
                 now(),
                 now(),
@@ -301,6 +318,8 @@ async function upsertPushToken(pool, {
                 app_version = EXCLUDED.app_version,
                 build_number = EXCLUDED.build_number,
                 apns_environment = EXCLUDED.apns_environment,
+                language_code = EXCLUDED.language_code,
+                language_preference = EXCLUDED.language_preference,
                 last_registered_at = now(),
                 updated_at = now(),
                 last_failure_at = NULL,
@@ -315,6 +334,8 @@ async function upsertPushToken(pool, {
                 normalizeText(appVersion),
                 normalizeText(buildNumber),
                 finalEnvironment,
+                finalLanguage,
+                finalLanguagePreference,
             ]
         );
 
@@ -358,10 +379,14 @@ async function markCompleted(pool, {
     userId,
     installId,
     apnsEnvironment,
+    language,
+    languagePreference,
 }) {
     const normalizedUserId = normalizeText(userId);
     const normalizedInstallId = normalizeText(installId);
     const normalizedEnvironment = normalizeApnsEnvironment(apnsEnvironment);
+    const normalizedLanguage = normalizeLanguageCode(language);
+    const normalizedLanguagePreference = normalizeLanguagePreference(languagePreference);
 
     const existing = await pool.query(
         `SELECT user_id, install_id, apns_environment
@@ -372,7 +397,6 @@ async function markCompleted(pool, {
     );
 
     const existingRow = existing.rows[0];
-
     const finalUserId = normalizedUserId || existingRow?.user_id || null;
     const finalInstallId = normalizedInstallId || existingRow?.install_id || null;
     const finalEnvironment = normalizeApnsEnvironment(
@@ -383,23 +407,21 @@ async function markCompleted(pool, {
         deviceToken,
         challengeId,
         challengeDate,
+        normalizedLanguage,
+        normalizedLanguagePreference,
     ];
 
     const conditions = [`device_token = $1`];
 
     if (finalUserId) {
-        values.push(finalUserId);
-        values.push(finalEnvironment);
-
+        values.push(finalUserId, finalEnvironment);
         conditions.push(
             `(user_id = $${values.length - 1} AND apns_environment = $${values.length})`
         );
     }
 
     if (finalInstallId) {
-        values.push(finalInstallId);
-        values.push(finalEnvironment);
-
+        values.push(finalInstallId, finalEnvironment);
         conditions.push(
             `(install_id = $${values.length - 1} AND apns_environment = $${values.length})`
         );
@@ -410,6 +432,8 @@ async function markCompleted(pool, {
          SET
             last_completed_challenge_id = $2,
             last_completed_challenge_date = COALESCE($3::date, last_completed_challenge_date),
+            language_code = $4,
+            language_preference = $5,
             updated_at = now()
          WHERE ${conditions.join(' OR ')}
          RETURNING *`,
@@ -496,8 +520,10 @@ export function createPushRouter(pool) {
                 appVersion,
                 buildNumber,
                 apnsEnvironment,
+                languagePreference,
             } = req.body || {};
 
+            const language = resolveRequestLanguage(req);
             const normalizedToken = normalizeDeviceToken(deviceToken);
 
             if (!isValidDeviceToken(normalizedToken)) {
@@ -513,6 +539,8 @@ export function createPushRouter(pool) {
                 appVersion,
                 buildNumber,
                 apnsEnvironment,
+                language,
+                languagePreference,
             });
 
             await syncPushTokensJson(pool);
@@ -522,7 +550,7 @@ export function createPushRouter(pool) {
                 `(length=${normalizedToken.length}, timezone=${record.timezone}, ` +
                 `userId=${record.userId || 'none'}, installId=${record.installId || 'none'}, ` +
                 `env=${record.apnsEnvironment || 'unknown'}, appVersion=${record.appVersion || 'unknown'}, ` +
-                `build=${record.buildNumber || 'unknown'}, pruned=${record.prunedCount || 0})`
+                `build=${record.buildNumber || 'unknown'}, language=${record.language}, pruned=${record.prunedCount || 0})`
             );
 
             return res.json({
@@ -535,6 +563,8 @@ export function createPushRouter(pool) {
                 apnsEnvironment: record.apnsEnvironment || null,
                 appVersion: record.appVersion || null,
                 buildNumber: record.buildNumber || null,
+                language: record.language,
+                languagePreference: record.languagePreference,
                 prunedCount: record.prunedCount || 0,
             });
         } catch (err) {
@@ -558,7 +588,10 @@ export function createPushRouter(pool) {
                 userId,
                 installId,
                 apnsEnvironment,
+                languagePreference,
             } = req.body || {};
+
+            const language = resolveRequestLanguage(req);
 
             const normalizedToken = normalizeDeviceToken(deviceToken);
             const normalizedChallengeId = String(challengeId || '').trim();
@@ -577,6 +610,8 @@ export function createPushRouter(pool) {
                 userId,
                 installId,
                 apnsEnvironment,
+                language,
+                languagePreference,
             });
 
             if (!updated) {
