@@ -21,6 +21,9 @@ import {
 import {
   enhanceSubscriptionAdminRevenueHtml,
 } from './lib/subscriptionAdminRevenueUi.js';
+import {
+  enhanceSubscriptionAdminLifetimeHtml,
+} from './lib/subscriptionAdminLifetimeUi.js';
 
 const { Pool } = pg;
 
@@ -89,15 +92,17 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
     res.send = (body) => {
       const enhancedBody =
         typeof body === 'string'
-          ? enhanceSubscriptionAdminRevenueHtml(
-              enhanceSubscriptionAdminOverviewHtml(
-              enhanceSubscriptionAdminPayoutHtml(
-                enhanceSubscriptionAdminHistoryHtml(
-                  enhanceDashboardHtml(body)
+          ? enhanceSubscriptionAdminLifetimeHtml(
+              enhanceSubscriptionAdminRevenueHtml(
+                enhanceSubscriptionAdminOverviewHtml(
+                  enhanceSubscriptionAdminPayoutHtml(
+                    enhanceSubscriptionAdminHistoryHtml(
+                      enhanceDashboardHtml(body)
+                    )
+                  )
                 )
               )
             )
-          )
           : body;
 
       return originalSend(enhancedBody);

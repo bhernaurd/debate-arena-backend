@@ -7,6 +7,7 @@ import { enhanceSubscriptionAdminHistoryHtml } from '../lib/subscriptionAdminHis
 import { enhanceSubscriptionAdminOverviewHtml } from '../lib/subscriptionAdminOverviewUi.js';
 import { enhanceSubscriptionAdminPayoutHtml } from '../lib/subscriptionAdminPayoutUi.js';
 import { enhanceSubscriptionAdminRevenueHtml } from '../lib/subscriptionAdminRevenueUi.js';
+import { enhanceSubscriptionAdminLifetimeHtml } from '../lib/subscriptionAdminLifetimeUi.js';
 
 function renderBaseDashboard() {
   const source = fs.readFileSync(
@@ -39,6 +40,7 @@ function renderFinalDashboard() {
   output = enhanceSubscriptionAdminPayoutHtml(output);
   output = enhanceSubscriptionAdminOverviewHtml(output);
   output = enhanceSubscriptionAdminRevenueHtml(output);
+  output = enhanceSubscriptionAdminLifetimeHtml(output);
   return output;
 }
 
@@ -53,13 +55,13 @@ test('navigation names clearly separate subscriber analytics from revenue', () =
   assert.match(html, /history:\['Revenue','Sales, Apple proceeds, fees and refunds over time'\]/);
 });
 
-test('Subscriber Analytics uses clear trial and Active Pro terminology', () => {
+test('Subscriber Analytics separates recurring subscriptions from Lifetime Pro', () => {
   const html = renderFinalDashboard();
   const breakdown = html.match(/<section id="view-breakdown"[^>]*>([\s\S]*?)<section id="view-customers"/i)?.[1] || '';
 
   assert.ok(breakdown, 'Subscriber Analytics section not found');
-  assert.match(breakdown, /<h2>Active Pro growth<\/h2>/);
-  assert.match(breakdown, /id="breakdownChartSummary">Active Pro over time<\/span>/);
+  assert.match(breakdown, /<h2>Active subscription growth<\/h2>/);
+  assert.match(breakdown, /id="breakdownChartSummary">Subscriptions over time<\/span>/);
   assert.match(html, /metric\('Free trials',m\.active_trials/);
   assert.match(html, /metric\('Free trial starts',row\.trialStarts/);
   assert.match(html, /<th>Free trial starts<\/th>/);

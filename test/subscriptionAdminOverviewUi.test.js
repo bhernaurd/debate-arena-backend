@@ -5,6 +5,7 @@ import test from 'node:test';
 import { enhanceSubscriptionAdminHistoryHtml } from '../lib/subscriptionAdminHistoryUi.js';
 import { enhanceSubscriptionAdminPayoutHtml } from '../lib/subscriptionAdminPayoutUi.js';
 import { enhanceSubscriptionAdminOverviewHtml } from '../lib/subscriptionAdminOverviewUi.js';
+import { enhanceSubscriptionAdminLifetimeHtml } from '../lib/subscriptionAdminLifetimeUi.js';
 
 function renderBaseDashboard() {
   const source = fs.readFileSync(
@@ -36,10 +37,11 @@ function applyDashboardEnhancements(html) {
   output = enhanceSubscriptionAdminHistoryHtml(output);
   output = enhanceSubscriptionAdminPayoutHtml(output);
   output = enhanceSubscriptionAdminOverviewHtml(output);
+  output = enhanceSubscriptionAdminLifetimeHtml(output);
   return output;
 }
 
-test('Overview keeps four primary KPIs and moves subscriber detail to Breakdown', () => {
+test('Overview separates Lifetime Pro from active subscriptions', () => {
   const html = applyDashboardEnhancements(renderBaseDashboard());
 
   assert.match(html, /data-view="breakdown">Breakdown<\/button>/);
@@ -57,13 +59,14 @@ test('Overview keeps four primary KPIs and moves subscriber detail to Breakdown'
 
   const loadOverview = html.match(/async function loadOverview\(\)\{([\s\S]*?)let breakdownData/i)?.[1] || '';
   assert.ok(loadOverview, 'loadOverview function not found');
-  assert.match(loadOverview, /metric\('Active Pro'/);
+  assert.match(loadOverview, /metric\('Active subscriptions'/);
   assert.match(loadOverview, /metric\('Paid subscribers'/);
   assert.match(loadOverview, /metric\('Gross sales this month'/);
   assert.match(loadOverview, /metric\('Apple proceeds est\.'/);
   assert.doesNotMatch(loadOverview, /metric\('Trials'/);
   assert.doesNotMatch(loadOverview, /metric\('Monthly'/);
   assert.doesNotMatch(loadOverview, /metric\('Annual'/);
+  assert.match(loadOverview, /metric\('Lifetime Pro'/);
   assert.doesNotMatch(loadOverview, /metric\('Lifetime'/);
   assert.doesNotMatch(loadOverview, /metric\('Canceling'/);
   assert.doesNotMatch(loadOverview, /sourceDistribution/);
@@ -89,10 +92,10 @@ test('Breakdown mirrors History with period selection and subscriber-only metric
   assert.match(html, /async function loadBreakdown\(\)/);
   assert.match(html, /api\('\/overview'\),api\('\/history'\)/);
   assert.match(html, /function renderSubscriberGrowthChart\(selected='current'\)/);
-  assert.match(html, /activeProAtMonthEnd/);
+  assert.match(html, /activeSubscriptionsAtMonthEnd/);
   assert.match(html, /active_pro_entitlements/);
   assert.match(html, /Subscriber growth by month/);
-  assert.match(html, /metric\('Total subscribers'/);
+  assert.match(html, /metric\('Active subscriptions'/);
   assert.match(html, /metric\('Free period'/);
   assert.match(html, /metric\('Monthly'/);
   assert.match(html, /metric\('Annual'/);
