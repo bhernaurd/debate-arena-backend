@@ -19,9 +19,12 @@ test('Google Play readiness check covers the production Android billing prerequi
     assert.match(scriptSource, /FIREBASE_PROJECT_ID/);
     assert.match(scriptSource, /schema_migrations/);
     assert.match(scriptSource, /033_google_play_subscription_entitlements\.sql/);
+    assert.match(scriptSource, /034_google_play_rtdn_messages\.sql/);
     assert.match(scriptSource, /google_play_subscription_entitlements/);
+    assert.match(scriptSource, /google_play_rtdn_messages/);
     assert.match(scriptSource, /purchase_token_sha256/);
     assert.match(scriptSource, /obfuscated_external_account_id/);
+    assert.match(scriptSource, /rtdnMessageTableReady/);
     assert.match(scriptSource, /public\/privacy-policy\/index\.html/);
     assert.match(scriptSource, /public\/account-deletion\/index\.html/);
 });
@@ -38,7 +41,7 @@ test('Google Play readiness output reports only state, never secret values', () 
     assert.doesNotMatch(outputBlock, /process\.env\.DATABASE_URL/);
 });
 
-test('package scripts expose the readiness check and syntax-gate it', () => {
+test('package scripts expose the readiness check and syntax-gate RTDN dedupe code', () => {
     assert.equal(
         packageSource.scripts['google-play:check'],
         'node scripts/checkGooglePlayReadiness.js'
@@ -46,5 +49,9 @@ test('package scripts expose the readiness check and syntax-gate it', () => {
     assert.match(
         packageSource.scripts.check,
         /node --check scripts\/checkGooglePlayReadiness\.js/
+    );
+    assert.match(
+        packageSource.scripts.check,
+        /node --check lib\/googlePlayRtdnMessageStore\.js/
     );
 });
