@@ -7,10 +7,18 @@ import {
     createFcmPushService,
 } from '../lib/fcmPushService.js';
 
-function jsonResponse(status, body) {
+function jsonResponse(status, body, headers = {}) {
+    const normalizedHeaders = new Map(
+        Object.entries(headers).map(([key, value]) => [key.toLowerCase(), String(value)])
+    );
     return {
         ok: status >= 200 && status < 300,
         status,
+        headers: {
+            get(name) {
+                return normalizedHeaders.get(String(name).toLowerCase()) || null;
+            },
+        },
         async json() {
             return body;
         },
@@ -164,4 +172,93 @@ test('FCM refreshes its OAuth token once when Google rejects a send with 401', a
     assert.equal(result.ok, true);
     assert.equal(tokenCalls, 2);
     assert.equal(sendCalls, 2);
+});
+
+test('FCM retries one explicit 503 after the required backoff instead of failing the delivery immediately', async () => {
+    const credentials = testCredentials();
+    const delays = [];
+    let sendCalls = 0;
+
+    const service = createFcmPushService({
+        credentialsProvider: () => credentials,
+        now: () => Date.UTC(2026, 8, 1, 22, 0, 0),
+        random: () => 0,
+        sleepImpl: async delayMs => {
+            delays.push(delayMs);
+        },
+        fetchImpl: async (url) => {
+            if (String(url).includes('oauth2.googleapis.com/token')) {
+                return jsonResponse(200, {
+                    access_token: 'token-1',
+                    expires_in: 3600,
+                });
+            }
+
+            sendCalls += 1;
+            if (sendCalls === 1) {
+                return jsonResponse(503, {
+                    error: { status: 'UNAVAILABLE' },
+                });
+            }
+
+            return jsonResponse(200, {
+                name: 'projects/example-project/messages/recovered-message',
+            });
+        },
+    });
+
+    const result = await service.sendPush(
+        'fcm-token:abc_DEF-123456789012345678901234567890',
+        'Title',
+        'Body'
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(sendCalls, 2);
+    assert.deepEqual(delays, [10_000]);
+});
+
+test('FCM honors Retry-After for one quota retry', async () => {
+    const credentials = testCredentials();
+    const delays = [];
+    let sendCalls = 0;
+
+    const service = createFcmPushService({
+        credentialsProvider: () => credentials,
+        now: () => Date.UTC(2026, 8, 1, 22, 0, 0),
+        sleepImpl: async delayMs => {
+            delays.push(delayMs);
+        },
+        fetchImpl: async (url) => {
+            if (String(url).includes('oauth2.googleapis.com/token')) {
+                return jsonResponse(200, {
+                    access_token: 'token-1',
+                    expires_in: 3600,
+                });
+            }
+
+            sendCalls += 1;
+            if (sendCalls === 1) {
+                return jsonResponse(
+                    429,
+                    { error: { status: 'RESOURCE_EXHAUSTED' } },
+                    { 'Retry-After': '75' }
+                );
+            }
+
+            return jsonResponse(200, {
+                name: 'projects/example-project/messages/quota-recovered-message',
+            });
+        },
+    });
+
+    const result = await service.sendPush(
+        'fcm-token:abc_DEF-123456789012345678901234567890',
+        'Title',
+        'Body'
+    );
+
+    assert.equal(result.ok, true);
+    assert.equal(sendCalls, 2);
+    assert.deepEqual(delays, [75_000]);
 });
