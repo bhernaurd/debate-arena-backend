@@ -7,8 +7,16 @@ import pg from 'pg';
 
 const { Pool } = pg;
 const EXPECTED_PACKAGE_NAME = 'com.bhernaurd.theagora';
-const REQUIRED_MIGRATION_VERSION = 33;
-const REQUIRED_MIGRATION_FILENAME = '033_google_play_subscription_entitlements.sql';
+const REQUIRED_MIGRATIONS = Object.freeze([
+    Object.freeze({
+        version: 33,
+        filename: '033_google_play_subscription_entitlements.sql',
+    }),
+    Object.freeze({
+        version: 34,
+        filename: '034_google_play_rtdn_messages.sql',
+    }),
+]);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -73,7 +81,9 @@ async function databaseStatus(connectionString) {
             configured: false,
             reachable: false,
             migration033Applied: false,
+            migration034Applied: false,
             entitlementTableReady: false,
+            rtdnMessageTableReady: false,
             reason: 'DATABASE_URL is missing',
         });
     }
@@ -113,36 +123,68 @@ async function databaseStatus(connectionString) {
                     WHERE table_schema = 'public'
                       AND table_name = 'google_play_subscription_entitlements'
                       AND column_name = 'obfuscated_external_account_id'
-                ) AS has_account_binding_column
+                ) AS has_account_binding_column,
+                to_regclass('public.google_play_rtdn_messages') IS NOT NULL
+                    AS has_rtdn_message_table,
+                EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'google_play_rtdn_messages'
+                      AND column_name = 'message_id'
+                ) AS has_rtdn_message_id_column,
+                EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'google_play_rtdn_messages'
+                      AND column_name = 'purchase_token_sha256'
+                ) AS has_rtdn_token_hash_column,
+                EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'google_play_rtdn_messages'
+                      AND column_name = 'status'
+                ) AS has_rtdn_status_column
             `
         );
 
         const schema = result.rows[0] || {};
-        let migration033Applied = false;
+        const appliedMigrations = new Map();
 
         if (schema.has_migration_table) {
-            const migration = await pool.query(
+            const migrationResult = await pool.query(
                 `
-                SELECT EXISTS (
-                    SELECT 1
-                    FROM schema_migrations
-                    WHERE version = $1
-                      AND filename = $2
-                ) AS applied
+                SELECT version, filename
+                FROM schema_migrations
+                WHERE version = ANY($1::integer[])
                 `,
-                [REQUIRED_MIGRATION_VERSION, REQUIRED_MIGRATION_FILENAME]
+                [REQUIRED_MIGRATIONS.map((migration) => migration.version)]
             );
-            migration033Applied = migration.rows[0]?.applied === true;
+            for (const row of migrationResult.rows || []) {
+                appliedMigrations.set(Number(row.version), String(row.filename || ''));
+            }
         }
+
+        const migrationApplied = (migration) =>
+            appliedMigrations.get(migration.version) === migration.filename;
 
         return Object.freeze({
             configured: true,
             reachable: true,
-            migration033Applied,
+            migration033Applied: migrationApplied(REQUIRED_MIGRATIONS[0]),
+            migration034Applied: migrationApplied(REQUIRED_MIGRATIONS[1]),
             entitlementTableReady: Boolean(
                 schema.has_entitlement_table &&
                 schema.has_token_hash_column &&
                 schema.has_account_binding_column
+            ),
+            rtdnMessageTableReady: Boolean(
+                schema.has_rtdn_message_table &&
+                schema.has_rtdn_message_id_column &&
+                schema.has_rtdn_token_hash_column &&
+                schema.has_rtdn_status_column
             ),
             reason: null,
         });
@@ -151,7 +193,9 @@ async function databaseStatus(connectionString) {
             configured: true,
             reachable: false,
             migration033Applied: false,
+            migration034Applied: false,
             entitlementTableReady: false,
+            rtdnMessageTableReady: false,
             reason: error?.code || 'database_check_failed',
         });
     } finally {
@@ -196,7 +240,9 @@ async function main() {
         ),
         databaseReachable: database.reachable,
         migration033Applied: database.migration033Applied,
+        migration034Applied: database.migration034Applied,
         entitlementTableReady: database.entitlementTableReady,
+        rtdnMessageTableReady: database.rtdnMessageTableReady,
         privacyPolicyResource,
         accountDeletionResource,
     });
