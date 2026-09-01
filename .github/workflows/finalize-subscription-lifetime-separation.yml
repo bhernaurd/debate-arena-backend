@@ -162,7 +162,10 @@ jobs:
             text = text
               .replace("test('Overview keeps four primary KPIs and moves subscriber detail to Breakdown'", "test('Overview separates Lifetime Pro from active subscriptions'")
               .replace(`  assert.match(loadOverview, /metric\\('Active Pro'/);`, `  assert.match(loadOverview, /metric\\('Active subscriptions'/);`)
-              .replace(`  assert.doesNotMatch(loadOverview, /metric\\('Lifetime'/);`, `  assert.match(loadOverview, /metric\\('Lifetime Pro'/);\\n  assert.doesNotMatch(loadOverview, /metric\\('Lifetime'/);`)
+              .replace(
+                `  assert.doesNotMatch(loadOverview, /metric\\('Lifetime'/);`,
+                `  assert.match(loadOverview, /metric\\('Lifetime Pro'/);\n  assert.doesNotMatch(loadOverview, /metric\\('Lifetime'/);`
+              )
               .replace(`  assert.match(html, /activeProAtMonthEnd/);`, `  assert.match(html, /activeSubscriptionsAtMonthEnd/);`)
               .replace(`  assert.match(html, /metric\\('Total subscribers'/);`, `  assert.match(html, /metric\\('Active subscriptions'/);`);
             fs.writeFileSync(path, text);
