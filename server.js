@@ -188,6 +188,20 @@ const subscriptionSyncLimiter = rateLimit({
   message: { error: 'Too many subscription sync requests.' },
 });
 
+// Google Play purchase sync is app-originated and rate-limited. RTDN is an
+// authenticated Google Pub/Sub push stream and must not share the app's small
+// per-IP sync bucket because legitimate lifecycle events can arrive in bursts.
+// The /rtdn route still verifies Google's signed OIDC push identity before it
+// decodes or processes any subscription event.
+const googlePlaySubscriptionSyncLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.path === '/rtdn',
+  message: { error: 'Too many Google Play subscription sync requests.' },
+});
+
 const affiliatePortalLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 120,
@@ -548,7 +562,7 @@ app.use(
 );
 app.use(
   '/api/account/google-play',
-  subscriptionSyncLimiter,
+  googlePlaySubscriptionSyncLimiter,
   createGooglePlaySubscriptionRouter({
     accountAuthService,
     googlePlaySubscriptionService,
