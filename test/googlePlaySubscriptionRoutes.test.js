@@ -140,7 +140,7 @@ test('server mounts Google Play sync before the generic account router and rate-
     assert.ok(googlePlayMount < genericAccountMount);
     assert.match(
         serverSource,
-        /'\/api\/account\/google-play',[\s\S]*?subscriptionSyncLimiter,[\s\S]*?createGooglePlaySubscriptionRouter/
+        /'\/api\/account\/google-play',[\s\S]*?googlePlaySubscriptionSyncLimiter,[\s\S]*?createGooglePlaySubscriptionRouter/
     );
 });
 
