@@ -38,6 +38,9 @@ import {
     AccountProAccessError,
     createAccountProAccessService,
 } from './lib/accountProAccessService.js';
+import {
+    applyAgoraAiSafetyPolicyToAnthropicPayload,
+} from './lib/aiSafetyPolicy.js';
 
 const router = express.Router();
 const { Pool } = pg;
@@ -857,7 +860,11 @@ function callAnthropicMessagesRaw(payload, label = 'ai job') {
             return;
         }
 
-        const body = JSON.stringify(payload);
+        const safePayload =
+            applyAgoraAiSafetyPolicyToAnthropicPayload(
+                payload
+            );
+        const body = JSON.stringify(safePayload);
 
         const options = {
             hostname: 'api.anthropic.com',
