@@ -46,6 +46,20 @@ function activeRow(overrides = {}) {
     };
 }
 
+function manualGrantRow(overrides = {}) {
+    return activeRow({
+        original_transaction_id:
+            'manual-pro:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        environment:
+            'Manual',
+        product_id:
+            'agora_pro_lifetime',
+        expires_date:
+            null,
+        ...overrides,
+    });
+}
+
 function makeRepository(row) {
     return {
         async findCurrentAccess() {
@@ -175,6 +189,32 @@ test(
                 .toISOString(),
             '2026-08-02T04:15:00.000Z'
         );
+    }
+);
+
+test(
+    'manual lifetime grant is permanent Pro access',
+    async () => {
+        const service =
+            createAccountProAccessService({
+                repository:
+                    makeRepository(
+                        manualGrantRow()
+                    ),
+                now: () => CHECKED_AT,
+            });
+
+        const result =
+            await service.requireCurrentProAccess({
+                accountId: ACCOUNT_ID,
+            });
+
+        assert.equal(result.hasProAccess, true);
+        assert.equal(result.entitlement.environment, 'Manual');
+        assert.equal(result.entitlement.productId, 'agora_pro_lifetime');
+        assert.equal(result.entitlement.isLifetime, true);
+        assert.equal(result.entitlement.isRecurring, false);
+        assert.equal(result.entitlement.accessExpiresAt, null);
     }
 );
 
@@ -309,7 +349,7 @@ test(
 );
 
 test(
-    'PostgreSQL repository checks App Store first and Google Play second',
+    'PostgreSQL repository checks manual grant, App Store, then Google Play',
     async () => {
         const captured = [];
 
@@ -340,9 +380,24 @@ test(
             });
 
         assert.equal(result, null);
-        assert.equal(captured.length, 2);
+        assert.equal(captured.length, 3);
 
-        const [appStoreQuery, playQuery] = captured;
+        const [manualQuery, appStoreQuery, playQuery] = captured;
+
+        assert.match(
+            manualQuery.text,
+            /account_manual_pro_grants/
+        );
+        assert.match(
+            manualQuery.text,
+            /grant\.revoked_at IS NULL/
+        );
+        assert.match(
+            manualQuery.text,
+            /account\.status = 'active'/
+        );
+        assert.equal(manualQuery.values[0], ACCOUNT_ID);
+        assert.equal(manualQuery.values[1], 'agora_pro_lifetime');
 
         assert.match(
             appStoreQuery.text,
@@ -402,6 +457,60 @@ test(
 );
 
 test(
+    'PostgreSQL repository returns an active manual grant before store lookup',
+    async () => {
+        let queryCount = 0;
+        const pool = {
+            async query() {
+                queryCount += 1;
+                return {
+                    rows: [manualGrantRow()],
+                };
+            },
+        };
+
+        const repository =
+            createPostgresAccountProAccessRepository(pool);
+        const result = await repository.findCurrentAccess({
+            accountId: ACCOUNT_ID,
+            checkedAt: CHECKED_AT,
+        });
+
+        assert.equal(queryCount, 1);
+        assert.equal(result.environment, 'Manual');
+        assert.equal(result.product_id, 'agora_pro_lifetime');
+    }
+);
+
+test(
+    'missing manual-grant migration preserves existing App Store access',
+    async () => {
+        let queryCount = 0;
+        const pool = {
+            async query() {
+                queryCount += 1;
+                if (queryCount === 1) {
+                    const error = new Error('relation does not exist');
+                    error.code = '42P01';
+                    throw error;
+                }
+                return { rows: [activeRow()] };
+            },
+        };
+
+        const repository =
+            createPostgresAccountProAccessRepository(pool);
+        const result = await repository.findCurrentAccess({
+            accountId: ACCOUNT_ID,
+            checkedAt: CHECKED_AT,
+        });
+
+        assert.equal(queryCount, 2);
+        assert.equal(result.environment, 'Production');
+    }
+);
+
+test(
     'PostgreSQL repository normalizes a current Google Play entitlement',
     async () => {
         let queryCount = 0;
@@ -409,7 +518,7 @@ test(
         const pool = {
             async query() {
                 queryCount += 1;
-                if (queryCount === 1) {
+                if (queryCount <= 2) {
                     return { rows: [] };
                 }
 
@@ -445,6 +554,7 @@ test(
                 accountId: ACCOUNT_ID,
             });
 
+        assert.equal(queryCount, 3);
         assert.equal(result.hasProAccess, true);
         assert.equal(
             result.entitlement.environment,
@@ -465,7 +575,7 @@ test(
         const pool = {
             async query() {
                 queryCount += 1;
-                if (queryCount === 1) {
+                if (queryCount <= 2) {
                     return { rows: [] };
                 }
 
@@ -486,6 +596,6 @@ test(
             });
 
         assert.equal(result, null);
-        assert.equal(queryCount, 2);
+        assert.equal(queryCount, 3);
     }
 );
