@@ -344,6 +344,7 @@ async function main() {
     const database = await databaseStatus(process.env.DATABASE_URL);
     const privacyPolicyResource = await fileExists('public/privacy-policy/index.html');
     const accountDeletionResource = await fileExists('public/account-deletion/index.html');
+    const termsOfUseResource = await fileExists('public/terms-of-use/index.html');
     const aiContentReportRoute = await fileExists('aiContentReportRoutes.js');
     const aiContentReportService = await fileExists('lib/aiContentReportService.js');
     const manualProGrantCli = await fileExists('scripts/manageManualProGrant.js');
@@ -392,6 +393,7 @@ async function main() {
         ...productionBypassChecks,
         privacyPolicyResource,
         accountDeletionResource,
+        termsOfUseResource,
     });
 
     const ready = Object.values(checks).every(Boolean);
