@@ -20,6 +20,10 @@ const REQUIRED_MIGRATIONS = Object.freeze([
         version: 35,
         filename: '035_ai_content_reports.sql',
     }),
+    Object.freeze({
+        version: 36,
+        filename: '036_account_manual_pro_grants.sql',
+    }),
 ]);
 
 const __filename = fileURLToPath(import.meta.url);
@@ -87,9 +91,11 @@ async function databaseStatus(connectionString) {
             migration033Applied: false,
             migration034Applied: false,
             migration035Applied: false,
+            migration036Applied: false,
             entitlementTableReady: false,
             rtdnMessageTableReady: false,
             aiContentReportTableReady: false,
+            manualProGrantTableReady: false,
             reason: 'DATABASE_URL is missing',
         });
     }
@@ -175,7 +181,30 @@ async function databaseStatus(connectionString) {
                     WHERE table_schema = 'public'
                       AND table_name = 'ai_content_reports'
                       AND column_name = 'reason'
-                ) AS has_ai_report_reason_column
+                ) AS has_ai_report_reason_column,
+                to_regclass('public.account_manual_pro_grants') IS NOT NULL
+                    AS has_manual_pro_grant_table,
+                EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'account_manual_pro_grants'
+                      AND column_name = 'account_id'
+                ) AS has_manual_grant_account_column,
+                EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'account_manual_pro_grants'
+                      AND column_name = 'reason'
+                ) AS has_manual_grant_reason_column,
+                EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'account_manual_pro_grants'
+                      AND column_name = 'revoked_at'
+                ) AS has_manual_grant_revocation_column
             `
         );
 
@@ -205,6 +234,7 @@ async function databaseStatus(connectionString) {
             migration033Applied: migrationApplied(REQUIRED_MIGRATIONS[0]),
             migration034Applied: migrationApplied(REQUIRED_MIGRATIONS[1]),
             migration035Applied: migrationApplied(REQUIRED_MIGRATIONS[2]),
+            migration036Applied: migrationApplied(REQUIRED_MIGRATIONS[3]),
             entitlementTableReady: Boolean(
                 schema.has_entitlement_table &&
                 schema.has_token_hash_column &&
@@ -222,6 +252,12 @@ async function databaseStatus(connectionString) {
                 schema.has_ai_report_truncated_column &&
                 schema.has_ai_report_reason_column
             ),
+            manualProGrantTableReady: Boolean(
+                schema.has_manual_pro_grant_table &&
+                schema.has_manual_grant_account_column &&
+                schema.has_manual_grant_reason_column &&
+                schema.has_manual_grant_revocation_column
+            ),
             reason: null,
         });
     } catch (error) {
@@ -231,9 +267,11 @@ async function databaseStatus(connectionString) {
             migration033Applied: false,
             migration034Applied: false,
             migration035Applied: false,
+            migration036Applied: false,
             entitlementTableReady: false,
             rtdnMessageTableReady: false,
             aiContentReportTableReady: false,
+            manualProGrantTableReady: false,
             reason: error?.code || 'database_check_failed',
         });
     } finally {
@@ -262,6 +300,7 @@ async function main() {
     const accountDeletionResource = await fileExists('public/account-deletion/index.html');
     const aiContentReportRoute = await fileExists('aiContentReportRoutes.js');
     const aiContentReportService = await fileExists('lib/aiContentReportService.js');
+    const manualProGrantCli = await fileExists('scripts/manageManualProGrant.js');
 
     const checks = Object.freeze({
         packageNameMatches: packageName === EXPECTED_PACKAGE_NAME,
@@ -282,11 +321,14 @@ async function main() {
         migration033Applied: database.migration033Applied,
         migration034Applied: database.migration034Applied,
         migration035Applied: database.migration035Applied,
+        migration036Applied: database.migration036Applied,
         entitlementTableReady: database.entitlementTableReady,
         rtdnMessageTableReady: database.rtdnMessageTableReady,
         aiContentReportTableReady: database.aiContentReportTableReady,
+        manualProGrantTableReady: database.manualProGrantTableReady,
         aiContentReportRoute,
         aiContentReportService,
+        manualProGrantCli,
         privacyPolicyResource,
         accountDeletionResource,
     });
@@ -295,7 +337,7 @@ async function main() {
 
     // Deliberately report only presence/state. Never print service-account JSON,
     // private keys, OAuth tokens, purchase tokens, DATABASE_URL, RTDN bearer data,
-    // AI report bodies, or reported response text.
+    // AI report bodies, reported response text, or reviewer Google credentials.
     console.log('[GooglePlayReadiness]', {
         ready,
         packageName,
