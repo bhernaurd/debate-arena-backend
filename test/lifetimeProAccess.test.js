@@ -182,7 +182,7 @@ test(
 );
 
 test(
-    'PostgreSQL account access query includes permanent Lifetime Pro and prioritizes it',
+    'PostgreSQL account access query preserves manual, Lifetime, and Google Play priority',
     async () => {
         const captured = [];
 
@@ -203,10 +203,20 @@ test(
             checkedAt: CHECKED_AT,
         });
 
-        assert.equal(captured.length, 2);
+        assert.equal(captured.length, 3);
 
-        const appStoreQuery = captured[0];
-        const playFallbackQuery = captured[1];
+        const manualGrantQuery = captured[0];
+        const appStoreQuery = captured[1];
+        const playFallbackQuery = captured[2];
+
+        assert.match(
+            manualGrantQuery.text,
+            /account_manual_pro_grants/
+        );
+        assert.match(
+            manualGrantQuery.text,
+            /grant\.revoked_at IS NULL/
+        );
 
         assert.match(
             appStoreQuery.text,
@@ -231,9 +241,8 @@ test(
             true
         );
 
-        // A missing App Store/Lifetime row now intentionally falls through to
-        // Google Play. This assertion keeps the Lifetime priority check scoped
-        // to the first query rather than accidentally inspecting the fallback.
+        // If neither a manual grant nor an App Store/Lifetime row exists,
+        // the resolver intentionally falls through to Google Play.
         assert.match(
             playFallbackQuery.text,
             /google_play_subscription_entitlements/
