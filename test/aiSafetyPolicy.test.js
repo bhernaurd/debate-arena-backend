@@ -159,7 +159,7 @@ test(
 );
 
 test(
-    'Ranked safety policy remains the final system segment even after an output-correction retry',
+    'Ranked safety policy remains the final provider system segment even after an output-correction retry',
     async () => {
         const captured = [];
         let callCount = 0;
@@ -266,17 +266,13 @@ test(
             aiJobs,
             /applyAgoraAiSafetyPolicyToAnthropicPayload\(\s*payload\s*\)/
         );
-        assert.equal(
-            ranked.includes(
-                'appendAgoraAiSafetyPolicy('
-            ),
-            true
+        assert.match(
+            ranked,
+            /applyAgoraAiSafetyPolicyToAnthropicPayload\(\s*payload\s*\)/
         );
-        assert.equal(
-            ranked.includes(
-                "parts.join('\\n\\n')"
-            ),
-            true
+        assert.match(
+            ranked,
+            /createCoreRankedDebateEngineService/
         );
         assert.match(
             server,
