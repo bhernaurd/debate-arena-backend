@@ -27,6 +27,12 @@ import {
 import {
   enhanceSubscriptionAdminAccountsHtml,
 } from './lib/subscriptionAdminAccountsUi.js';
+import {
+  enhanceSubscriptionAdminAutoRenewHtml,
+} from './lib/subscriptionAdminAutoRenewUi.js';
+import {
+  getAppleSubscriptionVerificationState,
+} from './lib/appleSubscriptionVerificationState.js';
 
 const { Pool } = pg;
 
@@ -95,7 +101,8 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
     res.send = (body) => {
       const enhancedBody =
         typeof body === 'string'
-          ? enhanceSubscriptionAdminAccountsHtml(
+          ? enhanceSubscriptionAdminAutoRenewHtml(
+              enhanceSubscriptionAdminAccountsHtml(
               enhanceSubscriptionAdminLifetimeHtml(
                 enhanceSubscriptionAdminRevenueHtml(
                 enhanceSubscriptionAdminOverviewHtml(
@@ -105,6 +112,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
                     )
                   )
                 )
+              )
               )
               )
             )
@@ -122,6 +130,13 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
 
   // These private data routes intentionally come after the base dashboard router.
   // Requests therefore pass through the base dashboard's secure session middleware.
+  router.get('/data/auto-renew-verification', (_req, res) => {
+    return res.json({
+      success: true,
+      ...getAppleSubscriptionVerificationState(),
+    });
+  });
+
   router.get('/data/accounts-summary', async (_req, res) => {
   try {
     const [summaryResult, monthlyResult] = await Promise.all([
