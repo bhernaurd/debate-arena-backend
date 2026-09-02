@@ -1,0 +1,186 @@
+name: Finalize overview context and accounts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/finalize-overview-context-accounts.yml
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Add account summary route
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('subscriptionAdminDashboardRoutes.js')
+          text = path.read_text()
+          marker = "  // This route intentionally comes after the base dashboard router. Requests\n  // therefore pass through the base dashboard's secure session middleware\n  // before this private history query is allowed to run.\n  router.get('/data/history', async (_req, res) => {"
+          if text.count(marker) != 1:
+              raise SystemExit(f'account route marker: expected 1 match, found {text.count(marker)}')
+          replacement = """  // These private data routes intentionally come after the base dashboard router.\n  // Requests therefore pass through the base dashboard's secure session middleware.\n  router.get('/data/accounts-summary', async (_req, res) => {\n    try {\n      const result = await historyPool.query(`\n        SELECT\n          COUNT(*) FILTER (WHERE status <> 'deleted')::int AS total_accounts,\n          COUNT(*) FILTER (WHERE status = 'active')::int AS active_accounts\n        FROM accounts\n      `);\n      return res.json({\n        success: true,\n        totalAccounts: Number(result.rows[0]?.total_accounts || 0),\n        activeAccounts: Number(result.rows[0]?.active_accounts || 0),\n      });\n    } catch (error) {\n      console.error(\n        '[SubscriptionDashboardAccounts] Failed:',\n        error?.message || error\n      );\n      return res.status(500).json({\n        success: false,\n        error: {\n          code: 'subscription_accounts_summary_failed',\n          message: 'Account summary is temporarily unavailable.',\n        },\n      });\n    }\n  });\n\n  router.get('/data/history', async (_req, res) => {"""
+          text = text.replace(marker, replacement, 1)
+          path.write_text(text)
+          PY
+
+      - name: Add Overview comparisons and Accounts metric
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('lib/subscriptionAdminLifetimeUi.js')
+          text = path.read_text()
+
+          def replace_once(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, found {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+              "Number(m.active_paid_subscribers||0)+' paid · '+Number(m.active_trials||0)+' trial'+(Number(m.active_trials||0)===1?'':'s')",
+              "Number(m.active_paid_subscribers||0)+' paid · '+Number(m.active_trials||0)+' trial'+(Number(m.active_trials||0)===1?'':'s')+' · '+Number(hm.newSubscribers||0)+' new this month'",
+              'active subscription context'
+          )
+
+          replace_once(
+              "metric('Paid subscribers',m.active_paid_subscribers||0,'Monthly + annual, excluding trials'),\\n        metric('Free trials',m.active_trials||0,'Active free-trial subscribers'),",
+              "metric('Paid subscribers',m.active_paid_subscribers||0,Number(hm.newPaidSubscribers||0)+' first paid this month'),\\n        metric('Free trials',m.active_trials||0,Number(hm.trialStarts||0)+' started this month'),",
+              'paid and trial context'
+          )
+
+          replace_once(
+              ".metric.tone-trial .value { color:#b6a7ef; }\\n    .metric.tone-estimate",
+              ".metric.tone-trial .value { color:#b6a7ef; }\\n    .metric.tone-info { border-color:rgba(102,168,232,.30);background:linear-gradient(145deg,rgba(102,168,232,.08),var(--panel) 58%);box-shadow:inset 3px 0 0 rgba(102,168,232,.70); }\\n    .metric.tone-info .value { color:#8fc1ee; }\\n    .metric.tone-estimate",
+              'account semantic color'
+          )
+
+          replace_once(
+              "function metricTone(label){ const key=String(label||'').toLowerCase(); if(key.includes('refund')",
+              "function metricTone(label){ const key=String(label||'').toLowerCase(); if(key.includes('account'))return 'tone-info'; if(key.includes('refund')",
+              'account metric tone'
+          )
+
+          anchor = "    .replaceAll('month-end subscriber total.', 'month-end subscription total.');\n\n  output = output.replace(\n    /<h2>(?:Subscriber growth|Active Pro growth|Active subscription growth)<\\/h2>"
+          if text.count(anchor) != 1:
+              raise SystemExit(f'overview helper anchor: expected 1 match, found {text.count(anchor)}')
+          helper_block = """    .replaceAll('month-end subscriber total.', 'month-end subscription total.');\n\n  output = output.replace(\n    `  async function loadOverview(){`,\n    `  function overviewPreviousMonth(h){\n    const current=String(h?.currentMonth||'');\n    return [...(h?.months||[])].filter(row=>String(row.month||'')<current).sort((a,b)=>String(a.month).localeCompare(String(b.month))).at(-1)||null;\n  }\n  function overviewGrossHint(previous){\n    if(!previous)return 'Verified customer billings · normalized to USD';\n    return 'Month to date · '+historyMonthLabel(previous.month)+' total '+historyMoneyBag(previous.grossSales||{});\n  }\n  function overviewAppleHint(base,previous,connected){\n    if(!connected||!previous)return base;\n    const bag=previous.appleEstimatedProceeds||{};\n    if(!Number(previous.appleReportDays||0)&&!historyHasMoney(bag))return base;\n    return base+' · '+historyMonthLabel(previous.month)+' '+historyMoneyBag(bag);\n  }\n  async function loadOverview(){`\n  );\n\n  output = output\n    .replace(\n      \"const appleProceedsHint=appleConnected?'Apple Sales & Trends estimate':'Add Vendor Number and import Apple reports';\",\n      \"const previousMonth=overviewPreviousMonth(h); const appleProceedsHint=overviewAppleHint(appleConnected?'Apple Sales & Trends estimate':'Add Vendor Number and import Apple reports',previousMonth,appleConnected);\"\n    )\n    .replace(\n      \"metric('Gross sales this month',historyMoneyBag(hm.grossSales||{}),'Verified customer billings · normalized to USD')\",\n      \"metric('Gross sales this month',historyMoneyBag(hm.grossSales||{}),overviewGrossHint(previousMonth))\"\n    )\n    .replace(\n      \"const [overview,history]=await Promise.all([api('/overview'),api('/history')]);\",\n      \"const [overview,history,accounts]=await Promise.all([api('/overview'),api('/history'),api('/accounts-summary')]);\"\n    )\n    .replace(\n      \"breakdownData={overview,history};\",\n      \"breakdownData={overview,history,accounts};\"\n    )\n    .replace(\n      \"metrics.innerHTML=[\\n        metric('Active subscriptions',\",\n      \"metrics.innerHTML=[\\n        metric('Accounts',Number(breakdownData.accounts?.totalAccounts||0),'Registered Agora accounts · excludes deleted'),\\n        metric('Active subscriptions',\"\n    );\n\n  output = output.replace(\n    /<h2>(?:Subscriber growth|Active Pro growth|Active subscription growth)<\\/h2>"""
+          text = text.replace(anchor, helper_block, 1)
+
+          path.write_text(text)
+          PY
+
+      - name: Add dashboard validation
+        run: |
+          cat > test/subscriptionAdminOverviewContext.test.js <<'EOF'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import test from 'node:test';
+          import vm from 'node:vm';
+
+          import { enhanceSubscriptionAdminHistoryHtml } from '../lib/subscriptionAdminHistoryUi.js';
+          import { enhanceSubscriptionAdminPayoutHtml } from '../lib/subscriptionAdminPayoutUi.js';
+          import { enhanceSubscriptionAdminOverviewHtml } from '../lib/subscriptionAdminOverviewUi.js';
+          import { enhanceSubscriptionAdminRevenueHtml } from '../lib/subscriptionAdminRevenueUi.js';
+          import { enhanceSubscriptionAdminLifetimeHtml } from '../lib/subscriptionAdminLifetimeUi.js';
+
+          function renderBaseDashboard() {
+            const source = fs.readFileSync(new URL('../subscriptionAdminDashboardBaseRoutes.js', import.meta.url), 'utf8');
+            const startMarker = 'function renderDashboardPage({ sessionHours }) {';
+            const endMarker = '\n\nfunction queryString(req) {';
+            const start = source.indexOf(startMarker);
+            const end = source.indexOf(endMarker, start);
+            assert.notEqual(start, -1);
+            assert.notEqual(end, -1);
+            const fnSource = source.slice(start, end);
+            const render = new Function(`${fnSource}; return renderDashboardPage;`)();
+            return render({ sessionHours: 12 });
+          }
+
+          function renderFinalDashboard() {
+            let output = String(renderBaseDashboard())
+              .replace('Auto-renew off but access remains', 'Paid subscriptions ending this month')
+              .replace(
+                `metric('Estimated MRR',money(m.estimated_mrr_usd||0),'Recurring only. Lifetime excluded')`,
+                `metric('Sales this month',money(m.net_sales_this_month_usd||0),'Customer billings this month · before Apple fees/tax')`
+              );
+            output = enhanceSubscriptionAdminHistoryHtml(output);
+            output = enhanceSubscriptionAdminPayoutHtml(output);
+            output = enhanceSubscriptionAdminOverviewHtml(output);
+            output = enhanceSubscriptionAdminRevenueHtml(output);
+            output = enhanceSubscriptionAdminLifetimeHtml(output);
+            return output;
+          }
+
+          test('Overview adds compact current-month context without a period filter', () => {
+            const html = renderFinalDashboard();
+            assert.match(html, /new this month/);
+            assert.match(html, /first paid this month/);
+            assert.match(html, /started this month/);
+            assert.match(html, /function overviewPreviousMonth\(h\)/);
+            assert.match(html, /Month to date/);
+            assert.match(html, /overviewAppleHint/);
+            const overview = html.match(/<section id="view-overview">([\s\S]*?)<section id="view-breakdown"/i)?.[1] || '';
+            assert.doesNotMatch(overview, /historyPeriod|breakdownPeriod/);
+          });
+
+          test('Subscriber Analytics includes registered Agora account count', () => {
+            const html = renderFinalDashboard();
+            assert.match(html, /api\('\/accounts-summary'\)/);
+            assert.match(html, /metric\('Accounts'/);
+            assert.match(html, /Registered Agora accounts · excludes deleted/);
+            assert.match(html, /tone-info/);
+          });
+
+          test('rendered dashboard client remains syntactically valid', () => {
+            const html = renderFinalDashboard();
+            const script = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/i)?.[1] || '';
+            assert.ok(script);
+            new vm.Script(script, { filename: 'subscription-admin-client.js' });
+          });
+
+          test('dashboard exposes protected account summary from canonical accounts table', () => {
+            const source = fs.readFileSync(new URL('../subscriptionAdminDashboardRoutes.js', import.meta.url), 'utf8');
+            assert.match(source, /router\.get\('\/data\/accounts-summary'/);
+            assert.match(source, /FROM accounts/);
+            assert.match(source, /status <> 'deleted'/);
+            assert.match(source, /totalAccounts/);
+          });
+          EOF
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run targeted tests
+        run: node --test test/subscriptionAdminOverviewContext.test.js test/subscriptionAdminOverviewUi.test.js test/subscriptionAdminRevenueUi.test.js test/subscriptionAdminLifetimeSeparation.test.js
+
+      - name: Run syntax checks
+        run: |
+          node --check subscriptionAdminDashboardRoutes.js
+          node --check lib/subscriptionAdminLifetimeUi.js
+
+      - name: Run full test suite
+        run: npm test
+
+      - name: Commit dashboard changes
+        run: |
+          rm -f .github/workflows/finalize-overview-context-accounts.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add subscriptionAdminDashboardRoutes.js lib/subscriptionAdminLifetimeUi.js test/subscriptionAdminOverviewContext.test.js .github/workflows/finalize-overview-context-accounts.yml
+          git commit -m "Add Overview context and account tracking"
+          git push origin main
