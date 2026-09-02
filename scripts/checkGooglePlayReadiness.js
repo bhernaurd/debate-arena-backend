@@ -5,6 +5,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import pg from 'pg';
 
+import {
+    googlePlayProductionBypassChecks,
+} from '../lib/googlePlayReleasePolicy.js';
+
 const { Pool } = pg;
 const EXPECTED_PACKAGE_NAME = 'com.bhernaurd.theagora';
 const REQUIRED_MIGRATIONS = Object.freeze([
@@ -294,6 +298,10 @@ async function main() {
         emailVariable: 'FIREBASE_SERVICE_ACCOUNT_EMAIL',
         privateKeyVariable: 'FIREBASE_SERVICE_ACCOUNT_PRIVATE_KEY',
     });
+    const productionBypassChecks =
+        googlePlayProductionBypassChecks(
+            process.env
+        );
 
     const database = await databaseStatus(process.env.DATABASE_URL);
     const privacyPolicyResource = await fileExists('public/privacy-policy/index.html');
@@ -301,6 +309,9 @@ async function main() {
     const aiContentReportRoute = await fileExists('aiContentReportRoutes.js');
     const aiContentReportService = await fileExists('lib/aiContentReportService.js');
     const manualProGrantCli = await fileExists('scripts/manageManualProGrant.js');
+    const aiSafetyPolicy = await fileExists('lib/aiSafetyPolicy.js');
+    const rankedAiSafetyWrapper = await fileExists('lib/rankedDebateEngineService.js');
+    const rankedAiCore = await fileExists('lib/rankedDebateEngineCoreService.js');
 
     const checks = Object.freeze({
         packageNameMatches: packageName === EXPECTED_PACKAGE_NAME,
@@ -329,6 +340,10 @@ async function main() {
         aiContentReportRoute,
         aiContentReportService,
         manualProGrantCli,
+        aiSafetyPolicy,
+        rankedAiSafetyWrapper,
+        rankedAiCore,
+        ...productionBypassChecks,
         privacyPolicyResource,
         accountDeletionResource,
     });
