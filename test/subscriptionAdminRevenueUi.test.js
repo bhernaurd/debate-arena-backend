@@ -82,7 +82,7 @@ test('dashboard shows compact data freshness context', () => {
   assert.match(html, /Pending reconciliation/);
   assert.doesNotMatch(html, /Delayed · last checked/);
   assert.match(html, /Financial settlements:<\/b>/);
-  assert.ok(html.includes("const appleProceedsHint=appleConnected?'Apple Sales & Trends estimate'"));
+  assert.match(html, /appleProceedsHint=overviewAppleHint/);
   assert.doesNotMatch(html, /appleProceedsHint=appleConnected\?\(h\?\.reporting\?\.salesAndTrends\?\.importedThrough/);
   assert.match(html, /renderDataFreshness\(historyData\)/);
   assert.match(html, /renderDataFreshness\(history\)/);

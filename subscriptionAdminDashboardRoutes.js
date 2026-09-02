@@ -115,9 +115,33 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
     createBaseSubscriptionAdminDashboardRouter(options)
   );
 
-  // This route intentionally comes after the base dashboard router. Requests
-  // therefore pass through the base dashboard's secure session middleware
-  // before this private history query is allowed to run.
+  // These private data routes intentionally come after the base dashboard router.
+  // Requests therefore pass through the base dashboard's secure session middleware.
+  router.get('/data/accounts-summary', async (_req, res) => {
+    try {
+      const result = await historyPool.query(`
+        SELECT
+          COUNT(*) FILTER (WHERE status <> 'deleted')::int AS total_accounts,
+          COUNT(*) FILTER (WHERE status = 'active')::int AS active_accounts
+        FROM accounts
+      `);
+      return res.json({
+        success: true,
+        totalAccounts: Number(result.rows[0]?.total_accounts || 0),
+        activeAccounts: Number(result.rows[0]?.active_accounts || 0),
+      });
+    } catch (error) {
+      console.error('[SubscriptionDashboardAccounts] Failed:', error?.message || error);
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'subscription_accounts_summary_failed',
+          message: 'Account summary is temporarily unavailable.',
+        },
+      });
+    }
+  });
+
   router.get('/data/history', async (_req, res) => {
     try {
       const history = await loadSubscriptionAdminHistory(historyPool);
