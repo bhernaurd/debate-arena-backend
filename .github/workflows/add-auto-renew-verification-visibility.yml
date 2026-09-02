@@ -1,0 +1,423 @@
+name: Add auto-renew verification visibility
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/add-auto-renew-verification-visibility.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Add verification state and dashboard UI
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          state = r'''const chainVerifications = new Map();
+
+          let configuration = {
+            enabled: false,
+            schedule: null,
+            limitPerRun: null,
+            bundleId: null,
+          };
+
+          let lastRun = null;
+
+          function isoDate(value = new Date()) {
+            const date = value instanceof Date ? value : new Date(value);
+            return Number.isNaN(date.getTime()) ? null : date.toISOString();
+          }
+
+          export function setAppleSubscriptionVerificationConfiguration(next = {}) {
+            configuration = {
+              ...configuration,
+              ...next,
+              enabled: Boolean(next.enabled),
+            };
+          }
+
+          export function recordAppleAutoRenewVerification({
+            originalTransactionId,
+            verifiedAt = new Date(),
+            source = 'unknown',
+            autoRenewEnabled = null,
+            status = null,
+          } = {}) {
+            const key = String(originalTransactionId || '').trim();
+            const verifiedIso = isoDate(verifiedAt);
+            if (!key || !verifiedIso) return null;
+
+            const previous = chainVerifications.get(key);
+            if (
+              previous?.verifiedAt &&
+              new Date(previous.verifiedAt).getTime() > new Date(verifiedIso).getTime()
+            ) {
+              return previous;
+            }
+
+            const record = Object.freeze({
+              originalTransactionId: key,
+              verifiedAt: verifiedIso,
+              source: String(source || 'unknown'),
+              autoRenewEnabled:
+                autoRenewEnabled === true
+                  ? true
+                  : autoRenewEnabled === false
+                    ? false
+                    : null,
+              status: status == null ? null : String(status),
+            });
+            chainVerifications.set(key, record);
+            return record;
+          }
+
+          export function recordAppleSubscriptionReconciliationRun({
+            reason = 'scheduled',
+            startedAt = new Date(),
+            completedAt = new Date(),
+            summary = null,
+            error = null,
+          } = {}) {
+            const completedIso = isoDate(completedAt) || new Date().toISOString();
+            const verified = Array.isArray(summary?.verified) ? summary.verified : [];
+
+            for (const row of verified) {
+              recordAppleAutoRenewVerification({
+                originalTransactionId: row.originalTransactionId,
+                verifiedAt: row.verifiedAt || completedIso,
+                source: 'apple_status_reconcile',
+                autoRenewEnabled: row.autoRenewEnabled,
+                status: row.status,
+              });
+            }
+
+            lastRun = Object.freeze({
+              reason: String(reason || 'scheduled'),
+              startedAt: isoDate(startedAt),
+              completedAt: completedIso,
+              success: !error,
+              checked: Number(summary?.checked || 0),
+              updated: Number(summary?.updated || 0),
+              autoRenewChanges: Number(summary?.autoRenewChanges || 0),
+              failed: Number(summary?.failed || (error ? 1 : 0)),
+              error: error ? String(error?.message || error) : null,
+            });
+            return lastRun;
+          }
+
+          export function getAppleSubscriptionVerificationState() {
+            return {
+              configuration: { ...configuration },
+              lastRun: lastRun ? { ...lastRun } : null,
+              chains: Object.fromEntries(
+                [...chainVerifications.entries()].map(([key, value]) => [
+                  key,
+                  { ...value },
+                ])
+              ),
+            };
+          }
+
+          export function resetAppleSubscriptionVerificationStateForTests() {
+            chainVerifications.clear();
+            configuration = {
+              enabled: false,
+              schedule: null,
+              limitPerRun: null,
+              bundleId: null,
+            };
+            lastRun = null;
+          }
+          '''
+          Path('lib/appleSubscriptionVerificationState.js').write_text(state)
+
+          ui = r'''export function enhanceSubscriptionAdminAutoRenewHtml(html) {
+            let output = String(html);
+
+            output = output
+              .replace(
+                '      <div class="grid" id="breakdownMetrics"><div class="loading">Loading subscriber breakdown...</div></div>',
+                '      <div class="renewal-freshness" id="renewalFreshness">Apple auto-renew verification: checking…</div>\\n      <div class="grid" id="breakdownMetrics"><div class="loading">Loading subscriber breakdown...</div></div>'
+              )
+              .replace(
+                '.hidden { display:none !important; }',
+                `.renewal-freshness { display:flex;align-items:center;gap:8px;margin:0 0 12px;padding:10px 12px;border:1px solid #233347;border-radius:10px;background:rgba(82,145,208,.08);color:#98bce2;font-size:11px;font-weight:650;line-height:1.35; }\n    .renewal-freshness.good { border-color:#234b38;background:rgba(60,170,111,.07);color:#91d5ad; }\n    .renewal-freshness.warn { border-color:#5a4820;background:rgba(210,166,69,.08);color:#d9bd76; }\n    .hidden { display:none !important; }`
+              )
+              .replace(
+                '  let breakdownData=null;',
+                `  let autoRenewVerificationData=null;\n  function verificationAge(value){\n    if(!value)return null; const date=new Date(value); if(Number.isNaN(date.getTime()))return null;\n    const seconds=Math.max(0,Math.floor((Date.now()-date.getTime())/1000));\n    if(seconds<45)return 'just now'; if(seconds<3600)return Math.floor(seconds/60)+'m ago'; if(seconds<86400)return Math.floor(seconds/3600)+'h ago';\n    return date.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' '+date.toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'});\n  }\n  function autoRenewVerificationFor(c){\n    const key=String(c?.original_transaction_id||''); return autoRenewVerificationData?.chains?.[key]||null;\n  }\n  function autoRenewDetail(c){\n    if(c?.is_lifetime_pro)return 'N/A';\n    const state=c?.auto_renew_enabled===true?'On':c?.auto_renew_enabled===false?'Off':'Unknown';\n    const verification=autoRenewVerificationFor(c); const age=verificationAge(verification?.verifiedAt);\n    return age?state+' · verified '+age:state+' · verification pending';\n  }\n  function renderRenewalFreshness(){\n    const el=qs('#renewalFreshness'); if(!el)return; const config=autoRenewVerificationData?.configuration||{}, run=autoRenewVerificationData?.lastRun||null;\n    el.classList.remove('good','warn');\n    if(!config.enabled){ el.classList.add('warn'); el.textContent='Apple auto-renew verification is not enabled.'; return; }\n    if(!run?.completedAt){ el.textContent='Apple auto-renew verification is waiting for its first server check.'; return; }\n    const age=verificationAge(run.completedAt)||fmtDate(run.completedAt);\n    if(Number(run.failed||0)>0){ el.classList.add('warn'); el.textContent='Last Apple auto-renew check '+age+' · '+Math.max(0,Number(run.checked||0)-Number(run.failed||0))+'/'+Number(run.checked||0)+' verified · '+Number(run.failed||0)+' retrying'; return; }\n    el.classList.add('good'); el.textContent='Apple auto-renew verified '+age+' · '+Number(run.checked||0)+' checked · hourly safety net';\n  }\n  let breakdownData=null;`
+              )
+              .replace(
+                "const [overview,history]=await Promise.all([api('/overview'),api('/history')]);",
+                "const [overview,history,verification]=await Promise.all([api('/overview'),api('/history'),api('/auto-renew-verification')]);"
+              )
+              .replace(
+                'breakdownData={overview,history};',
+                'breakdownData={overview,history}; autoRenewVerificationData=verification; renderRenewalFreshness();'
+              )
+              .replace(
+                "const d=await api('/customers/'+encodeURIComponent(key)); const c=(d.chains||[])[0]||{};",
+                "const [d,verification]=await Promise.all([api('/customers/'+encodeURIComponent(key)),api('/auto-renew-verification')]); autoRenewVerificationData=verification; const c=(d.chains||[])[0]||{};"
+              )
+              .replace(
+                "['Auto-renew',c.is_lifetime_pro?'N/A':(c.auto_renew_enabled===true?'On':c.auto_renew_enabled===false?'Off':'Unknown')]",
+                "['Auto-renew',autoRenewDetail(c)]"
+              );
+
+            return output;
+          }
+
+          export default enhanceSubscriptionAdminAutoRenewHtml;
+          '''
+          Path('lib/subscriptionAdminAutoRenewUi.js').write_text(ui)
+          PY
+
+      - name: Wire verification sources and dashboard
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f'anchor not found in {path}: {old[:120]!r}')
+              p.write_text(text.replace(old, new, 1))
+
+          # Reconciliation service returns exactly which chains Apple verified.
+          replace_once(
+              'lib/appleSubscriptionStatusReconciliationService.js',
+              "      status: updated?.status ?? chain.status,\n    };",
+              "      status: updated?.status ?? chain.status,\n      verifiedAt: new Date().toISOString(),\n    };"
+          )
+          replace_once(
+              'lib/appleSubscriptionStatusReconciliationService.js',
+              "      failures: [],\n    };",
+              "      failures: [],\n      verified: [],\n    };"
+          )
+          replace_once(
+              'lib/appleSubscriptionStatusReconciliationService.js',
+              "        if (result.changedAutoRenew) summary.autoRenewChanges += 1;",
+              "        if (result.changedAutoRenew) summary.autoRenewChanges += 1;\n        summary.verified.push({\n          originalTransactionId: result.originalTransactionId,\n          verifiedAt: result.verifiedAt,\n          autoRenewEnabled: result.autoRenewEnabled,\n          status: result.status,\n        });"
+          )
+
+          # Worker publishes each completed Apple verification pass.
+          worker = Path('appleSubscriptionStatusReconciliationWorker.js')
+          text = worker.read_text()
+          anchor = "import {\n  createAppleSubscriptionStatusReconciliationService,\n} from './lib/appleSubscriptionStatusReconciliationService.js';\n"
+          addition = anchor + "import {\n  recordAppleSubscriptionReconciliationRun,\n  setAppleSubscriptionVerificationConfiguration,\n} from './lib/appleSubscriptionVerificationState.js';\n"
+          if anchor not in text: raise SystemExit('worker import anchor missing')
+          text = text.replace(anchor, addition, 1)
+          anchor = "  const limit = integerEnvironment(\n    'APPLE_SUBSCRIPTION_STATUS_RECONCILE_LIMIT',\n    250,\n    1,\n    1000\n  );\n"
+          addition = anchor + "\n  setAppleSubscriptionVerificationConfiguration({\n    enabled: false,\n    schedule: 'hourly at :20 America/Chicago',\n    limitPerRun: limit,\n    bundleId: APP_STORE_BUNDLE_ID,\n  });\n"
+          if anchor not in text: raise SystemExit('worker limit anchor missing')
+          text = text.replace(anchor, addition, 1)
+          anchor = "  } else {\n    const productionClient = new AppStoreServerAPIClient("
+          replacement = "  } else {\n    setAppleSubscriptionVerificationConfiguration({\n      enabled: true,\n      schedule: 'hourly at :20 America/Chicago',\n      limitPerRun: limit,\n      bundleId: APP_STORE_BUNDLE_ID,\n    });\n    const productionClient = new AppStoreServerAPIClient("
+          if anchor not in text: raise SystemExit('worker enabled anchor missing')
+          text = text.replace(anchor, replacement, 1)
+          anchor = "      running = true;\n      try {\n        const summary = await service.reconcileActiveSubscriptions({ limit });\n        console.log('[AppleSubscriptionStatusReconcile] Completed.', {"
+          replacement = "      running = true;\n      const startedAt = new Date();\n      try {\n        const summary = await service.reconcileActiveSubscriptions({ limit });\n        recordAppleSubscriptionReconciliationRun({\n          reason,\n          startedAt,\n          completedAt: new Date(),\n          summary,\n        });\n        console.log('[AppleSubscriptionStatusReconcile] Completed.', {"
+          if anchor not in text: raise SystemExit('worker run anchor missing')
+          text = text.replace(anchor, replacement, 1)
+          anchor = "      } catch (error) {\n        console.error(\n          '[AppleSubscriptionStatusReconcile] Run failed:',"
+          replacement = "      } catch (error) {\n        recordAppleSubscriptionReconciliationRun({\n          reason,\n          startedAt,\n          completedAt: new Date(),\n          error,\n        });\n        console.error(\n          '[AppleSubscriptionStatusReconcile] Run failed:',"
+          if anchor not in text: raise SystemExit('worker catch anchor missing')
+          text = text.replace(anchor, replacement, 1)
+          worker.write_text(text)
+
+          # Real-time signed Apple renewal notifications also publish verification time.
+          routes = Path('appStoreSubscriptionRoutes.js')
+          text = routes.read_text()
+          anchor = "import {\n    AGORA_PRO_PRODUCT_IDS,\n    verifyAppStoreNotificationJWS,\n    verifyAppStoreRenewalInfoJWS,\n    verifyAppStoreTransactionJWS,\n} from './appStoreSubscriptionVerifier.js';\n"
+          replacement = anchor + "import {\n    recordAppleAutoRenewVerification,\n} from './lib/appleSubscriptionVerificationState.js';\n"
+          if anchor not in text: raise SystemExit('app store import anchor missing')
+          text = text.replace(anchor, replacement, 1)
+          old = "            if (transaction) {\n                await persistVerifiedSnapshot(client, {"
+          new = "            const notificationEventAt =\n                toDate(notification?.signedDate) || new Date();\n            let persistedSnapshot = null;\n\n            if (transaction) {\n                persistedSnapshot = await persistVerifiedSnapshot(client, {"
+          if old not in text: raise SystemExit('notification persist anchor missing')
+          text = text.replace(old, new, 1)
+          text = text.replace(
+              "                    eventAt: toDate(notification?.signedDate) || new Date(),",
+              "                    eventAt: notificationEventAt,",
+              1
+          )
+          old = "            await client.query('COMMIT');\n\n            return res.json({\n                success: true,\n                notificationUUID,\n            });"
+          new = "            await client.query('COMMIT');\n\n            const incomingAutoRenew = autoRenewEnabled(renewal);\n            const canonicalSignedAt = persistedSnapshot?.entitlement?.lastSignedDate\n                ? new Date(persistedSnapshot.entitlement.lastSignedDate).getTime()\n                : NaN;\n            if (\n                environment === 'Production' &&\n                incomingAutoRenew !== null &&\n                persistedSnapshot?.entitlement?.originalTransactionId &&\n                Number.isFinite(canonicalSignedAt) &&\n                canonicalSignedAt <= notificationEventAt.getTime()\n            ) {\n                recordAppleAutoRenewVerification({\n                    originalTransactionId:\n                        persistedSnapshot.entitlement.originalTransactionId,\n                    verifiedAt: new Date(),\n                    source: 'apple_notification',\n                    autoRenewEnabled:\n                        persistedSnapshot.entitlement.autoRenewEnabled,\n                    status: persistedSnapshot.entitlement.status,\n                });\n            }\n\n            return res.json({\n                success: true,\n                notificationUUID,\n            });"
+          if old not in text: raise SystemExit('notification commit anchor missing')
+          text = text.replace(old, new, 1)
+          routes.write_text(text)
+
+          # Dashboard uses the live verification state and applies the UI enhancer last.
+          dashboard = Path('subscriptionAdminDashboardRoutes.js')
+          text = dashboard.read_text()
+          anchor = "import {\n  enhanceSubscriptionAdminAccountsHtml,\n} from './lib/subscriptionAdminAccountsUi.js';\n"
+          replacement = anchor + "import {\n  enhanceSubscriptionAdminAutoRenewHtml,\n} from './lib/subscriptionAdminAutoRenewUi.js';\nimport {\n  getAppleSubscriptionVerificationState,\n} from './lib/appleSubscriptionVerificationState.js';\n"
+          if anchor not in text: raise SystemExit('dashboard import anchor missing')
+          text = text.replace(anchor, replacement, 1)
+          old = "          ? enhanceSubscriptionAdminAccountsHtml(\n              enhanceSubscriptionAdminLifetimeHtml("
+          new = "          ? enhanceSubscriptionAdminAutoRenewHtml(\n              enhanceSubscriptionAdminAccountsHtml(\n              enhanceSubscriptionAdminLifetimeHtml("
+          if old not in text: raise SystemExit('dashboard enhancer open anchor missing')
+          text = text.replace(old, new, 1)
+          old = "              )\n            )\n          : body;"
+          new = "              )\n              )\n            )\n          : body;"
+          if old not in text: raise SystemExit('dashboard enhancer close anchor missing')
+          text = text.replace(old, new, 1)
+          anchor = "  // These private data routes intentionally come after the base dashboard router.\n  // Requests therefore pass through the base dashboard's secure session middleware.\n"
+          endpoint = anchor + "  router.get('/data/auto-renew-verification', (_req, res) => {\n    return res.json({\n      success: true,\n      ...getAppleSubscriptionVerificationState(),\n    });\n  });\n\n"
+          if anchor not in text: raise SystemExit('dashboard data route anchor missing')
+          text = text.replace(anchor, endpoint, 1)
+          dashboard.write_text(text)
+          PY
+
+      - name: Add tests and syntax coverage
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          test_state = r'''import assert from 'node:assert/strict';
+          import test from 'node:test';
+          import {
+            getAppleSubscriptionVerificationState,
+            recordAppleAutoRenewVerification,
+            recordAppleSubscriptionReconciliationRun,
+            resetAppleSubscriptionVerificationStateForTests,
+            setAppleSubscriptionVerificationConfiguration,
+          } from '../lib/appleSubscriptionVerificationState.js';
+
+          test('verification state keeps the newest live Apple check per subscription chain', () => {
+            resetAppleSubscriptionVerificationStateForTests();
+            setAppleSubscriptionVerificationConfiguration({ enabled: true, schedule: 'hourly' });
+            recordAppleAutoRenewVerification({
+              originalTransactionId: 'orig-1',
+              verifiedAt: '2026-09-02T21:00:00.000Z',
+              source: 'apple_notification',
+              autoRenewEnabled: false,
+            });
+            recordAppleSubscriptionReconciliationRun({
+              reason: 'hourly',
+              startedAt: '2026-09-02T21:20:00.000Z',
+              completedAt: '2026-09-02T21:20:02.000Z',
+              summary: {
+                checked: 1,
+                updated: 1,
+                autoRenewChanges: 0,
+                failed: 0,
+                verified: [{
+                  originalTransactionId: 'orig-1',
+                  verifiedAt: '2026-09-02T21:20:01.000Z',
+                  autoRenewEnabled: false,
+                  status: 'active',
+                }],
+              },
+            });
+            const state = getAppleSubscriptionVerificationState();
+            assert.equal(state.configuration.enabled, true);
+            assert.equal(state.lastRun.checked, 1);
+            assert.equal(state.lastRun.failed, 0);
+            assert.equal(state.chains['orig-1'].source, 'apple_status_reconcile');
+            assert.equal(state.chains['orig-1'].verifiedAt, '2026-09-02T21:20:01.000Z');
+            assert.equal(state.chains['orig-1'].autoRenewEnabled, false);
+          });
+          '''
+          Path('test/appleSubscriptionVerificationState.test.js').write_text(test_state)
+
+          test_ui = r'''import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import test from 'node:test';
+          import vm from 'node:vm';
+          import { enhanceSubscriptionAdminHistoryHtml } from '../lib/subscriptionAdminHistoryUi.js';
+          import { enhanceSubscriptionAdminPayoutHtml } from '../lib/subscriptionAdminPayoutUi.js';
+          import { enhanceSubscriptionAdminOverviewHtml } from '../lib/subscriptionAdminOverviewUi.js';
+          import { enhanceSubscriptionAdminRevenueHtml } from '../lib/subscriptionAdminRevenueUi.js';
+          import { enhanceSubscriptionAdminLifetimeHtml } from '../lib/subscriptionAdminLifetimeUi.js';
+          import { enhanceSubscriptionAdminAccountsHtml } from '../lib/subscriptionAdminAccountsUi.js';
+          import { enhanceSubscriptionAdminAutoRenewHtml } from '../lib/subscriptionAdminAutoRenewUi.js';
+
+          function renderBaseDashboard() {
+            const source = fs.readFileSync(new URL('../subscriptionAdminDashboardBaseRoutes.js', import.meta.url), 'utf8');
+            const a = source.indexOf('function renderDashboardPage({ sessionHours }) {');
+            const b = source.indexOf('\n\nfunction queryString(req) {', a);
+            return new Function(`${source.slice(a, b)}; return renderDashboardPage;`)()({ sessionHours: 12 });
+          }
+
+          function renderFinalDashboard() {
+            let output = String(renderBaseDashboard())
+              .replace('Auto-renew off but access remains', 'Paid subscriptions ending this month')
+              .replace(`metric('Estimated MRR',money(m.estimated_mrr_usd||0),'Recurring only. Lifetime excluded')`, `metric('Sales this month',money(m.net_sales_this_month_usd||0),'Customer billings this month · before Apple fees/tax')`);
+            output = enhanceSubscriptionAdminHistoryHtml(output);
+            output = enhanceSubscriptionAdminPayoutHtml(output);
+            output = enhanceSubscriptionAdminOverviewHtml(output);
+            output = enhanceSubscriptionAdminRevenueHtml(output);
+            output = enhanceSubscriptionAdminLifetimeHtml(output);
+            output = enhanceSubscriptionAdminAccountsHtml(output);
+            return enhanceSubscriptionAdminAutoRenewHtml(output);
+          }
+
+          test('Subscriber Analytics shows Apple auto-renew freshness and drawer shows per-chain verification age', () => {
+            const html = renderFinalDashboard();
+            assert.match(html, /id="renewalFreshness"/);
+            assert.match(html, /api\('\/auto-renew-verification'\)/);
+            assert.match(html, /function autoRenewDetail\(c\)/);
+            assert.match(html, /verified '\+age/);
+            assert.match(html, /\['Auto-renew',autoRenewDetail\(c\)\]/);
+            const script = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/i)?.[1] || '';
+            assert.ok(script);
+            new vm.Script(script, { filename: 'subscription-admin-client.js' });
+          });
+
+          test('dashboard exposes private auto-renew verification state route', () => {
+            const source = fs.readFileSync(new URL('../subscriptionAdminDashboardRoutes.js', import.meta.url), 'utf8');
+            assert.match(source, /router\.get\('\/data\/auto-renew-verification'/);
+            assert.match(source, /getAppleSubscriptionVerificationState/);
+          });
+
+          test('real-time Apple signed renewal notifications publish verification state', () => {
+            const source = fs.readFileSync(new URL('../appStoreSubscriptionRoutes.js', import.meta.url), 'utf8');
+            assert.match(source, /recordAppleAutoRenewVerification/);
+            assert.match(source, /source: 'apple_notification'/);
+          });
+          '''
+          Path('test/subscriptionAdminAutoRenewUi.test.js').write_text(test_ui)
+
+          p = Path('package.json')
+          text = p.read_text()
+          old = "node --check appleSubscriptionStatusReconciliationWorker.js && node --check lib/appleSubscriptionStatusReconciliationService.js"
+          new = "node --check appleSubscriptionStatusReconciliationWorker.js && node --check lib/appleSubscriptionStatusReconciliationService.js && node --check lib/appleSubscriptionVerificationState.js && node --check lib/subscriptionAdminAutoRenewUi.js"
+          if old not in text:
+              raise SystemExit('package syntax anchor missing')
+          p.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Install and validate
+        run: |
+          npm ci
+          npm run check
+          npm test
+
+      - name: Commit implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/add-auto-renew-verification-visibility.yml
+          git add appStoreSubscriptionRoutes.js appleSubscriptionStatusReconciliationWorker.js lib/appleSubscriptionStatusReconciliationService.js lib/appleSubscriptionVerificationState.js lib/subscriptionAdminAutoRenewUi.js subscriptionAdminDashboardRoutes.js package.json test/appleSubscriptionVerificationState.test.js test/subscriptionAdminAutoRenewUi.test.js
+          git commit -m "Show Apple auto-renew verification freshness"
+          git push origin main

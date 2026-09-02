@@ -13,6 +13,10 @@ import {
 import {
   createAppleSubscriptionStatusReconciliationService,
 } from './lib/appleSubscriptionStatusReconciliationService.js';
+import {
+  recordAppleSubscriptionReconciliationRun,
+  setAppleSubscriptionVerificationConfiguration,
+} from './lib/appleSubscriptionVerificationState.js';
 
 const { Pool } = pg;
 const TIME_ZONE = 'America/Chicago';
@@ -65,6 +69,13 @@ if (enabled) {
     1000
   );
 
+  setAppleSubscriptionVerificationConfiguration({
+    enabled: false,
+    schedule: 'hourly at :20 America/Chicago',
+    limitPerRun: limit,
+    bundleId: APP_STORE_BUNDLE_ID,
+  });
+
   if (!connectionString) {
     console.warn(
       '[AppleSubscriptionStatusReconcile] Disabled: DATABASE_URL is missing.'
@@ -74,6 +85,12 @@ if (enabled) {
       '[AppleSubscriptionStatusReconcile] Disabled: add an App Store Connect In-App Purchase key using APP_STORE_SERVER_ISSUER_ID, APP_STORE_SERVER_KEY_ID, and APP_STORE_SERVER_PRIVATE_KEY.'
     );
   } else {
+    setAppleSubscriptionVerificationConfiguration({
+      enabled: true,
+      schedule: 'hourly at :20 America/Chicago',
+      limitPerRun: limit,
+      bundleId: APP_STORE_BUNDLE_ID,
+    });
     const productionClient = new AppStoreServerAPIClient(
       privateKey,
       keyId,
@@ -112,8 +129,15 @@ if (enabled) {
       }
 
       running = true;
+      const startedAt = new Date();
       try {
         const summary = await service.reconcileActiveSubscriptions({ limit });
+        recordAppleSubscriptionReconciliationRun({
+          reason,
+          startedAt,
+          completedAt: new Date(),
+          summary,
+        });
         console.log('[AppleSubscriptionStatusReconcile] Completed.', {
           reason,
           checked: summary.checked,
@@ -122,6 +146,12 @@ if (enabled) {
           failed: summary.failed,
         });
       } catch (error) {
+        recordAppleSubscriptionReconciliationRun({
+          reason,
+          startedAt,
+          completedAt: new Date(),
+          error,
+        });
         console.error(
           '[AppleSubscriptionStatusReconcile] Run failed:',
           error?.message || error

@@ -11,6 +11,9 @@ import {
     verifyAppStoreRenewalInfoJWS,
     verifyAppStoreTransactionJWS,
 } from './appStoreSubscriptionVerifier.js';
+import {
+    recordAppleAutoRenewVerification,
+} from './lib/appleSubscriptionVerificationState.js';
 
 const USER_ID_RE = /^[A-Za-z0-9-]{8,128}$/;
 const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
@@ -1529,8 +1532,12 @@ export function createAppStoreSubscriptionRouter(
                 });
             }
 
+            const notificationEventAt =
+                toDate(notification?.signedDate) || new Date();
+            let persistedSnapshot = null;
+
             if (transaction) {
-                await persistVerifiedSnapshot(client, {
+                persistedSnapshot = await persistVerifiedSnapshot(client, {
                     transaction,
                     renewal,
                     environment,
@@ -1539,7 +1546,7 @@ export function createAppStoreSubscriptionRouter(
                     source: 'apple_notification',
                     eventKey: `apple:${notificationUUID}`,
                     notificationUUID,
-                    eventAt: toDate(notification?.signedDate) || new Date(),
+                    eventAt: notificationEventAt,
                     metadata: {
                         notificationType,
                         subtype,
@@ -1558,6 +1565,28 @@ export function createAppStoreSubscriptionRouter(
             );
 
             await client.query('COMMIT');
+
+            const incomingAutoRenew = autoRenewEnabled(renewal);
+            const canonicalSignedAt = persistedSnapshot?.entitlement?.lastSignedDate
+                ? new Date(persistedSnapshot.entitlement.lastSignedDate).getTime()
+                : NaN;
+            if (
+                environment === 'Production' &&
+                incomingAutoRenew !== null &&
+                persistedSnapshot?.entitlement?.originalTransactionId &&
+                Number.isFinite(canonicalSignedAt) &&
+                canonicalSignedAt <= notificationEventAt.getTime()
+            ) {
+                recordAppleAutoRenewVerification({
+                    originalTransactionId:
+                        persistedSnapshot.entitlement.originalTransactionId,
+                    verifiedAt: new Date(),
+                    source: 'apple_notification',
+                    autoRenewEnabled:
+                        persistedSnapshot.entitlement.autoRenewEnabled,
+                    status: persistedSnapshot.entitlement.status,
+                });
+            }
 
             return res.json({
                 success: true,
