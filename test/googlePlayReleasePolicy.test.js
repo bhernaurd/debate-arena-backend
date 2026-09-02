@@ -72,7 +72,7 @@ test(
 );
 
 test(
-    'production bypass variables remain explicit and readiness script consumes the pure checks',
+    'production bypass and account-gate requirements remain explicit in the readiness script',
     () => {
         assert.deepEqual(
             googlePlayReleasePolicyConstants
@@ -99,6 +99,30 @@ test(
         assert.match(
             readinessSource,
             /\.\.\.productionBypassChecks/
+        );
+        assert.match(
+            readinessSource,
+            /GOOGLE_ANDROID_WEB_CLIENT_ID/
+        );
+        assert.match(
+            readinessSource,
+            /googleAndroidWebClientIdConfigured/
+        );
+        assert.match(
+            readinessSource,
+            /loadAccountCryptoConfig\(environment\)/
+        );
+        assert.match(
+            readinessSource,
+            /accountCryptoConfigured/
+        );
+        assert.match(
+            readinessSource,
+            /anthropicConfigured/
+        );
+        assert.match(
+            readinessSource,
+            /ANTHROPIC_API_KEY/
         );
     }
 );
