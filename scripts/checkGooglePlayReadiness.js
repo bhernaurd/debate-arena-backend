@@ -16,6 +16,10 @@ const REQUIRED_MIGRATIONS = Object.freeze([
         version: 34,
         filename: '034_google_play_rtdn_messages.sql',
     }),
+    Object.freeze({
+        version: 35,
+        filename: '035_ai_content_reports.sql',
+    }),
 ]);
 
 const __filename = fileURLToPath(import.meta.url);
@@ -82,8 +86,10 @@ async function databaseStatus(connectionString) {
             reachable: false,
             migration033Applied: false,
             migration034Applied: false,
+            migration035Applied: false,
             entitlementTableReady: false,
             rtdnMessageTableReady: false,
+            aiContentReportTableReady: false,
             reason: 'DATABASE_URL is missing',
         });
     }
@@ -146,7 +152,30 @@ async function databaseStatus(connectionString) {
                     WHERE table_schema = 'public'
                       AND table_name = 'google_play_rtdn_messages'
                       AND column_name = 'status'
-                ) AS has_rtdn_status_column
+                ) AS has_rtdn_status_column,
+                to_regclass('public.ai_content_reports') IS NOT NULL
+                    AS has_ai_content_report_table,
+                EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'ai_content_reports'
+                      AND column_name = 'response_text'
+                ) AS has_ai_report_response_column,
+                EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'ai_content_reports'
+                      AND column_name = 'response_truncated'
+                ) AS has_ai_report_truncated_column,
+                EXISTS (
+                    SELECT 1
+                    FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                      AND table_name = 'ai_content_reports'
+                      AND column_name = 'reason'
+                ) AS has_ai_report_reason_column
             `
         );
 
@@ -175,6 +204,7 @@ async function databaseStatus(connectionString) {
             reachable: true,
             migration033Applied: migrationApplied(REQUIRED_MIGRATIONS[0]),
             migration034Applied: migrationApplied(REQUIRED_MIGRATIONS[1]),
+            migration035Applied: migrationApplied(REQUIRED_MIGRATIONS[2]),
             entitlementTableReady: Boolean(
                 schema.has_entitlement_table &&
                 schema.has_token_hash_column &&
@@ -186,6 +216,12 @@ async function databaseStatus(connectionString) {
                 schema.has_rtdn_token_hash_column &&
                 schema.has_rtdn_status_column
             ),
+            aiContentReportTableReady: Boolean(
+                schema.has_ai_content_report_table &&
+                schema.has_ai_report_response_column &&
+                schema.has_ai_report_truncated_column &&
+                schema.has_ai_report_reason_column
+            ),
             reason: null,
         });
     } catch (error) {
@@ -194,8 +230,10 @@ async function databaseStatus(connectionString) {
             reachable: false,
             migration033Applied: false,
             migration034Applied: false,
+            migration035Applied: false,
             entitlementTableReady: false,
             rtdnMessageTableReady: false,
+            aiContentReportTableReady: false,
             reason: error?.code || 'database_check_failed',
         });
     } finally {
@@ -222,6 +260,8 @@ async function main() {
     const database = await databaseStatus(process.env.DATABASE_URL);
     const privacyPolicyResource = await fileExists('public/privacy-policy/index.html');
     const accountDeletionResource = await fileExists('public/account-deletion/index.html');
+    const aiContentReportRoute = await fileExists('aiContentReportRoutes.js');
+    const aiContentReportService = await fileExists('lib/aiContentReportService.js');
 
     const checks = Object.freeze({
         packageNameMatches: packageName === EXPECTED_PACKAGE_NAME,
@@ -241,8 +281,12 @@ async function main() {
         databaseReachable: database.reachable,
         migration033Applied: database.migration033Applied,
         migration034Applied: database.migration034Applied,
+        migration035Applied: database.migration035Applied,
         entitlementTableReady: database.entitlementTableReady,
         rtdnMessageTableReady: database.rtdnMessageTableReady,
+        aiContentReportTableReady: database.aiContentReportTableReady,
+        aiContentReportRoute,
+        aiContentReportService,
         privacyPolicyResource,
         accountDeletionResource,
     });
@@ -250,7 +294,8 @@ async function main() {
     const ready = Object.values(checks).every(Boolean);
 
     // Deliberately report only presence/state. Never print service-account JSON,
-    // private keys, OAuth tokens, purchase tokens, DATABASE_URL, or RTDN bearer data.
+    // private keys, OAuth tokens, purchase tokens, DATABASE_URL, RTDN bearer data,
+    // AI report bodies, or reported response text.
     console.log('[GooglePlayReadiness]', {
         ready,
         packageName,
