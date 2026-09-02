@@ -6,6 +6,9 @@ import { fileURLToPath } from 'url';
 import pg from 'pg';
 
 import {
+    loadAccountCryptoConfig,
+} from '../lib/accountCrypto.js';
+import {
     googlePlayProductionBypassChecks,
 } from '../lib/googlePlayReleasePolicy.js';
 
@@ -36,6 +39,37 @@ const repositoryRoot = path.resolve(__dirname, '..');
 
 function present(value) {
     return typeof value === 'string' && value.trim().length > 0;
+}
+
+function validGoogleWebClientId(value) {
+    if (!present(value)) return false;
+
+    const cleaned = value.trim();
+
+    return (
+        cleaned.length <= 512 &&
+        cleaned.endsWith('.apps.googleusercontent.com') &&
+        !/\s/.test(cleaned)
+    );
+}
+
+function accountCryptoStatus(environment) {
+    try {
+        loadAccountCryptoConfig(environment);
+
+        return Object.freeze({
+            configured: true,
+            reason: null,
+        });
+    } catch (error) {
+        return Object.freeze({
+            configured: false,
+            reason:
+                error?.code ||
+                error?.name ||
+                'account_crypto_check_failed',
+        });
+    }
 }
 
 function parseServiceAccountJson(rawValue) {
@@ -302,6 +336,10 @@ async function main() {
         googlePlayProductionBypassChecks(
             process.env
         );
+    const accountCrypto =
+        accountCryptoStatus(
+            process.env
+        );
 
     const database = await databaseStatus(process.env.DATABASE_URL);
     const privacyPolicyResource = await fileExists('public/privacy-policy/index.html');
@@ -315,6 +353,14 @@ async function main() {
 
     const checks = Object.freeze({
         packageNameMatches: packageName === EXPECTED_PACKAGE_NAME,
+        googleAndroidWebClientIdConfigured:
+            validGoogleWebClientId(
+                process.env.GOOGLE_ANDROID_WEB_CLIENT_ID
+            ),
+        accountCryptoConfigured:
+            accountCrypto.configured,
+        anthropicConfigured:
+            present(process.env.ANTHROPIC_API_KEY),
         googlePlayPublisherConfigured: googlePlayServiceAccount.configured,
         rtdnAudienceConfigured: present(process.env.GOOGLE_PLAY_RTDN_AUDIENCE),
         rtdnPushIdentityConfigured: present(
@@ -352,7 +398,8 @@ async function main() {
 
     // Deliberately report only presence/state. Never print service-account JSON,
     // private keys, OAuth tokens, purchase tokens, DATABASE_URL, RTDN bearer data,
-    // AI report bodies, reported response text, or reviewer Google credentials.
+    // account-signing/encryption keys, ANTHROPIC_API_KEY, AI report bodies,
+    // reported response text, or reviewer Google credentials.
     console.log('[GooglePlayReadiness]', {
         ready,
         packageName,
@@ -360,6 +407,7 @@ async function main() {
         firebaseCredentialSource: firebaseServiceAccount.source,
         checks,
         databaseReason: database.reason,
+        accountCryptoReason: accountCrypto.reason,
     });
 
     if (!ready) process.exitCode = 1;
