@@ -29,6 +29,7 @@ import { createAccountRankedPlacementRouter } from './accountRankedPlacementRout
 import { createAccountRankedDebateRouter } from './accountRankedDebateRoutes.js';
 import { createAccountRankedLadderRouter } from './accountRankedLadderRoutes.js';
 import { createRankedPhilosopherEligibilityRouter } from './rankedPhilosopherEligibilityRoutes.js';
+import { createAiContentReportRouter } from './aiContentReportRoutes.js';
 import { createAccountAuthService } from './lib/accountAuthService.js';
 import { createAccountDebateHistoryService } from './lib/accountDebateHistoryService.js';
 import { createAccountAchievementService } from './lib/accountAchievementService.js';
@@ -43,6 +44,7 @@ import { createRankedDebateEngineService } from './lib/rankedDebateEngineService
 import { createCrossPlatformProAccessService } from './lib/crossPlatformProAccessService.js';
 import { createGooglePlaySubscriptionService } from './lib/googlePlaySubscriptionService.js';
 import { createRankedTopicGeneratorService } from './lib/rankedTopicGeneratorService.js';
+import { createAiContentReportService } from './lib/aiContentReportService.js';
 import {
   createAccountSubscriptionOwnershipService,
 } from './lib/accountSubscriptionOwnership.js';
@@ -266,6 +268,20 @@ const accountAchievementLimiter = rateLimit({
   },
 });
 
+const aiContentReportLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'too_many_ai_content_reports',
+      message: 'Too many AI content reports. Please try again shortly.',
+      retryable: true,
+    },
+  },
+});
+
 const accountRankedProfileLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
@@ -329,6 +345,12 @@ app.use('/api/app-store/sync-transaction', subscriptionSyncLimiter);
 // Agora authentication configuration during startup and ensures account routes
 // and authenticated subscription ownership use the same authorization rules.
 const accountAuthService = createAccountAuthService({ pool });
+
+const aiContentReportService =
+  createAiContentReportService({
+    pool,
+    accountAuthService,
+  });
 
 const accountSubscriptionOwnershipService =
   createAccountSubscriptionOwnershipService({
@@ -566,6 +588,13 @@ app.use(
   createGooglePlaySubscriptionRouter({
     accountAuthService,
     googlePlaySubscriptionService,
+  })
+);
+app.use(
+  '/api/account/ai-content-reports',
+  aiContentReportLimiter,
+  createAiContentReportRouter({
+    service: aiContentReportService,
   })
 );
 app.use('/api/account', accountAuthRouter);
