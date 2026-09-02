@@ -95,10 +95,10 @@ function normalizeCustomerSort(value) {
 
 function customerSortSql(sort) {
   if (sort === 'newest') {
-    return `COALESCE(original_purchase_date, purchase_date, created_at) DESC NULLS LAST, customer_key ASC`;
+    return `subscriber_since DESC NULLS LAST, customer_key ASC`;
   }
   if (sort === 'oldest') {
-    return `COALESCE(original_purchase_date, purchase_date, created_at) ASC NULLS LAST, customer_key ASC`;
+    return `subscriber_since ASC NULLS LAST, customer_key ASC`;
   }
   return `CASE WHEN has_pro_access THEN 0 ELSE 1 END, CASE WHEN environment = 'Production' THEN 0 ELSE 1 END, COALESCE(latest_transaction_signed_date, updated_at) DESC NULLS LAST, customer_key ASC`;
 }
@@ -392,6 +392,12 @@ export function createSubscriptionAdminRouter(
           trial_active,
           canceling,
           access_ends_at,
+          (
+            SELECT MIN(COALESCE(history.original_purchase_date, history.purchase_date, history.created_at))
+            FROM subscription_admin_customers_v1 history
+            WHERE history.customer_key = subscription_admin_current_customers_v1.customer_key
+              AND history.environment = subscription_admin_current_customers_v1.environment
+          ) AS subscriber_since,
           purchase_date,
           original_purchase_date,
           expires_date,
