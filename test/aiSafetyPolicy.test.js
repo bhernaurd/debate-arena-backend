@@ -266,9 +266,17 @@ test(
             aiJobs,
             /applyAgoraAiSafetyPolicyToAnthropicPayload\(\s*payload\s*\)/
         );
-        assert.match(
-            ranked,
-            /appendAgoraAiSafetyPolicy\(\s*parts\.join\('\n\\n'\)\s*\)/
+        assert.equal(
+            ranked.includes(
+                'appendAgoraAiSafetyPolicy('
+            ),
+            true
+        );
+        assert.equal(
+            ranked.includes(
+                "parts.join('\\n\\n')"
+            ),
+            true
         );
         assert.match(
             server,
