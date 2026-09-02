@@ -10,7 +10,7 @@ const packageSource = JSON.parse(
     await readFile(new URL('../package.json', import.meta.url), 'utf8')
 );
 
-test('Google Play readiness check covers production Android billing, AI reporting, and reviewer access prerequisites', () => {
+test('Google Play readiness check covers production Android billing, AI reporting, reviewer access, and legal prerequisites', () => {
     assert.match(scriptSource, /com\.bhernaurd\.theagora/);
     assert.match(scriptSource, /GOOGLE_PLAY_SERVICE_ACCOUNT_JSON/);
     assert.match(scriptSource, /GOOGLE_PLAY_RTDN_AUDIENCE/);
@@ -36,6 +36,8 @@ test('Google Play readiness check covers production Android billing, AI reportin
     assert.match(scriptSource, /scripts\/manageManualProGrant\.js/);
     assert.match(scriptSource, /public\/privacy-policy\/index\.html/);
     assert.match(scriptSource, /public\/account-deletion\/index\.html/);
+    assert.match(scriptSource, /public\/terms-of-use\/index\.html/);
+    assert.match(scriptSource, /termsOfUseResource/);
 });
 
 test('Google Play readiness output reports only state, never secret, report, or reviewer credential values', () => {
