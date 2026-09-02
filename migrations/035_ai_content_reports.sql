@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS ai_content_reports (
     challenge_id TEXT,
     reason TEXT NOT NULL,
     response_text TEXT NOT NULL,
+    response_truncated BOOLEAN NOT NULL DEFAULT FALSE,
 
     client_platform TEXT NOT NULL DEFAULT 'android',
     app_version TEXT,
