@@ -23,6 +23,12 @@ const VALID_STATUSES = new Set([
   'unknown',
 ]);
 
+const CUSTOMER_SORTS = new Set([
+  'last_activity',
+  'newest',
+  'oldest',
+]);
+
 function cleanText(value, maxLength = 500) {
   if (value == null) return '';
   return String(value).trim().slice(0, maxLength);
@@ -74,6 +80,27 @@ function normalizeOptionalStatus(value) {
   }
 
   return clean;
+}
+
+function normalizeCustomerSort(value) {
+  const clean = cleanText(value, 32).toLowerCase() || 'last_activity';
+  if (!CUSTOMER_SORTS.has(clean)) {
+    const error = new Error('sort must be last_activity, newest, or oldest.');
+    error.statusCode = 400;
+    error.code = 'invalid_customer_sort';
+    throw error;
+  }
+  return clean;
+}
+
+function customerSortSql(sort) {
+  if (sort === 'newest') {
+    return `COALESCE(original_purchase_date, purchase_date, created_at) DESC NULLS LAST, customer_key ASC`;
+  }
+  if (sort === 'oldest') {
+    return `COALESCE(original_purchase_date, purchase_date, created_at) ASC NULLS LAST, customer_key ASC`;
+  }
+  return `CASE WHEN has_pro_access THEN 0 ELSE 1 END, CASE WHEN environment = 'Production' THEN 0 ELSE 1 END, COALESCE(latest_transaction_signed_date, updated_at) DESC NULLS LAST, customer_key ASC`;
 }
 
 function normalizeBooleanQuery(value, fieldName) {
@@ -321,8 +348,9 @@ export function createSubscriptionAdminRouter(
 
   router.get('/customers', async (req, res) => {
     try {
-      const limit = boundedInteger(req.query.limit, 50, 1, 100);
+      const limit = boundedInteger(req.query.limit, 50, 1, 500);
       const offset = boundedInteger(req.query.offset, 0, 0, 100000);
+      const sort = normalizeCustomerSort(req.query.sort);
       const filters = buildCustomerFilters(req.query);
 
       const countResult = await pool.query(
@@ -387,11 +415,7 @@ export function createSubscriptionAdminRouter(
           updated_at
         FROM subscription_admin_current_customers_v1
         ${filters.whereSql}
-        ORDER BY
-          CASE WHEN has_pro_access THEN 0 ELSE 1 END,
-          CASE WHEN environment = 'Production' THEN 0 ELSE 1 END,
-          COALESCE(latest_transaction_signed_date, updated_at) DESC NULLS LAST,
-          customer_key ASC
+        ORDER BY ${customerSortSql(sort)}
         LIMIT ${limitParam}
         OFFSET ${offsetParam}
         `,
@@ -403,6 +427,7 @@ export function createSubscriptionAdminRouter(
         total: Number(countResult.rows[0]?.count || 0),
         limit,
         offset,
+        sort,
         customers: customersResult.rows,
       });
     } catch (error) {
