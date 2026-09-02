@@ -24,6 +24,9 @@ import {
 import {
   enhanceSubscriptionAdminLifetimeHtml,
 } from './lib/subscriptionAdminLifetimeUi.js';
+import {
+  enhanceSubscriptionAdminAccountsHtml,
+} from './lib/subscriptionAdminAccountsUi.js';
 
 const { Pool } = pg;
 
@@ -92,8 +95,9 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
     res.send = (body) => {
       const enhancedBody =
         typeof body === 'string'
-          ? enhanceSubscriptionAdminLifetimeHtml(
-              enhanceSubscriptionAdminRevenueHtml(
+          ? enhanceSubscriptionAdminAccountsHtml(
+              enhanceSubscriptionAdminLifetimeHtml(
+                enhanceSubscriptionAdminRevenueHtml(
                 enhanceSubscriptionAdminOverviewHtml(
                   enhanceSubscriptionAdminPayoutHtml(
                     enhanceSubscriptionAdminHistoryHtml(
@@ -101,6 +105,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
                     )
                   )
                 )
+              )
               )
             )
           : body;
@@ -118,31 +123,57 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
   // These private data routes intentionally come after the base dashboard router.
   // Requests therefore pass through the base dashboard's secure session middleware.
   router.get('/data/accounts-summary', async (_req, res) => {
-    try {
-      const result = await historyPool.query(`
+  try {
+    const [summaryResult, monthlyResult] = await Promise.all([
+      historyPool.query(`
         SELECT
           COUNT(*) FILTER (WHERE status <> 'deleted')::int AS total_accounts,
-          COUNT(*) FILTER (WHERE status = 'active')::int AS active_accounts
+          COUNT(*) FILTER (WHERE status = 'active')::int AS active_accounts,
+          COUNT(*)::int AS all_time_created,
+          COUNT(*) FILTER (
+            WHERE to_char(created_at AT TIME ZONE 'America/Chicago', 'YYYY-MM') =
+                  to_char(NOW() AT TIME ZONE 'America/Chicago', 'YYYY-MM')
+          )::int AS created_this_month
         FROM accounts
-      `);
-      return res.json({
-        success: true,
-        totalAccounts: Number(result.rows[0]?.total_accounts || 0),
-        activeAccounts: Number(result.rows[0]?.active_accounts || 0),
-      });
-    } catch (error) {
-      console.error('[SubscriptionDashboardAccounts] Failed:', error?.message || error);
-      return res.status(500).json({
-        success: false,
-        error: {
-          code: 'subscription_accounts_summary_failed',
-          message: 'Account summary is temporarily unavailable.',
-        },
-      });
-    }
-  });
+      `),
+      historyPool.query(`
+        SELECT
+          to_char(created_at AT TIME ZONE 'America/Chicago', 'YYYY-MM') AS month,
+          COUNT(*)::int AS created_accounts
+        FROM accounts
+        GROUP BY 1
+        ORDER BY 1
+      `),
+    ]);
+    return res.json({
+      success: true,
+      totalAccounts: Number(summaryResult.rows[0]?.total_accounts || 0),
+      activeAccounts: Number(summaryResult.rows[0]?.active_accounts || 0),
+      allTimeCreated: Number(summaryResult.rows[0]?.all_time_created || 0),
+      createdThisMonth: Number(summaryResult.rows[0]?.created_this_month || 0),
+      currentMonth: new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'America/Chicago',
+        year: 'numeric',
+        month: '2-digit',
+      }).format(new Date()).replace('/', '-'),
+      months: monthlyResult.rows.map((row) => ({
+        month: row.month,
+        createdAccounts: Number(row.created_accounts || 0),
+      })),
+    });
+  } catch (error) {
+    console.error('[SubscriptionDashboardAccounts] Failed:', error?.message || error);
+    return res.status(500).json({
+      success: false,
+      error: {
+        code: 'subscription_accounts_summary_failed',
+        message: 'Account summary is temporarily unavailable.',
+      },
+    });
+  }
+});
 
-  router.get('/data/history', async (_req, res) => {
+router.get('/data/history', async (_req, res) => {
     try {
       const history = await loadSubscriptionAdminHistory(historyPool);
       return res.json({
