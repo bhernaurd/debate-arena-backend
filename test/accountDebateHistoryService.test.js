@@ -195,6 +195,21 @@ function makeService({
             };
         },
 
+        async deleteDebate(_client, input) {
+            calls.push(['deleteDebate', input]);
+
+            return {
+                savedDebateId: input.savedDebateId,
+                deleted: true,
+                deletedAt: input.deletedAt,
+            };
+        },
+
+        async listDeletedDebateIds(input) {
+            calls.push(['listDeletedDebateIds', input]);
+            return [];
+        },
+
         ...repositoryOverrides,
     };
 
