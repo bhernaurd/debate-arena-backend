@@ -5,6 +5,8 @@ import {
 } from './lib/accountDebateHistoryService.js';
 
 const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
+const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 class AccountDebateHistoryRouteError extends Error {
     constructor(
@@ -98,6 +100,21 @@ function requireBearerToken(req) {
     return match[1];
 }
 
+
+function requireSavedDebateId(value) {
+    if (
+        typeof value !== 'string' ||
+        !UUID_RE.test(value.trim())
+    ) {
+        fail(
+            'invalid_saved_debate_id',
+            'The SavedDebate id is invalid.',
+            { status: 400 }
+        );
+    }
+
+    return value.trim().toLowerCase();
+}
 
 function optionalQueryString(
     value,
@@ -253,7 +270,8 @@ export function createAccountDebateHistoryRouter({
     if (
         !service ||
         typeof service.syncDebates !== 'function' ||
-        typeof service.listDebates !== 'function'
+        typeof service.listDebates !== 'function' ||
+        typeof service.deleteDebate !== 'function'
     ) {
         throw new Error(
             'A valid account debate-history service is required.'
@@ -299,8 +317,36 @@ export function createAccountDebateHistoryRouter({
                     result.downloadedAt
                 ),
                 debates: result.debates,
+                deletedDebateIds:
+                    result.deletedDebateIds ?? [],
                 nextCursor: result.nextCursor,
                 hasMore: result.hasMore,
+            });
+        })
+    );
+
+    router.delete(
+        '/debates/:savedDebateId',
+        asyncRoute(async (req, res) => {
+            const installationId = requireInstallationId(req);
+            const accessToken = requireBearerToken(req);
+            const savedDebateId = requireSavedDebateId(
+                req.params.savedDebateId
+            );
+
+            const result = await service.deleteDebate({
+                installationId,
+                accessToken,
+                savedDebateId,
+            });
+
+            return res.status(200).json({
+                success: true,
+                accountId: result.accountId,
+                installationId: result.installationId,
+                savedDebateId: result.savedDebateId,
+                deleted: result.deleted,
+                deletedAt: serializeDate(result.deletedAt),
             });
         })
     );
