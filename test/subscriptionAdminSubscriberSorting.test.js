@@ -40,7 +40,7 @@ test('Subscribers tab offers activity, newest, and oldest sorting',()=>{
   assert.match(html,/Newest subscribers/);
   assert.match(html,/Oldest subscribers/);
   assert.match(html,/Subscriber since/);
-  assert.match(html,/original_purchase_date\|\|r\.purchase_date\|\|r\.created_at/);
+  assert.match(html,/subscriber_since\|\|r\.original_purchase_date/);
   assert.match(html,/api\('\/customers\?'\+subscriberParams\(\)\.toString\(\)\)/);
   const script=html.match(/<script>\s*([\s\S]*?)\s*<\/script>/i)?.[1]||'';
   assert.ok(script);
@@ -53,6 +53,7 @@ test('customer API uses a validated server-side sort',()=>{
   assert.match(source,/normalizeCustomerSort\(req\.query\.sort\)/);
   assert.match(source,/sort === 'newest'/);
   assert.match(source,/sort === 'oldest'/);
-  assert.match(source,/COALESCE\(original_purchase_date, purchase_date, created_at\) DESC NULLS LAST/);
-  assert.match(source,/COALESCE\(original_purchase_date, purchase_date, created_at\) ASC NULLS LAST/);
+  assert.match(source,/subscriber_since DESC NULLS LAST/);
+  assert.match(source,/subscriber_since ASC NULLS LAST/);
+  assert.match(source,/SELECT MIN\(COALESCE\(history\.original_purchase_date, history\.purchase_date, history\.created_at\)\)/);
 });

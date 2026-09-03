@@ -95,10 +95,10 @@ function normalizeCustomerSort(value) {
 
 function customerSortSql(sort) {
   if (sort === 'newest') {
-    return `COALESCE(original_purchase_date, purchase_date, created_at) DESC NULLS LAST, customer_key ASC`;
+    return `subscriber_since DESC NULLS LAST, customer_key ASC`;
   }
   if (sort === 'oldest') {
-    return `COALESCE(original_purchase_date, purchase_date, created_at) ASC NULLS LAST, customer_key ASC`;
+    return `subscriber_since ASC NULLS LAST, customer_key ASC`;
   }
   return `CASE WHEN has_pro_access THEN 0 ELSE 1 END, CASE WHEN environment = 'Production' THEN 0 ELSE 1 END, COALESCE(latest_transaction_signed_date, updated_at) DESC NULLS LAST, customer_key ASC`;
 }
@@ -188,6 +188,7 @@ function normalizeMetrics(row = {}) {
     'active_pro_entitlements',
     'active_paid_subscribers',
     'active_trials',
+    'trials_ending',
     'active_lifetime_pro',
     'paid_monthly',
     'paid_annual',
@@ -266,9 +267,21 @@ export function createSubscriptionAdminRouter(
 
   router.get('/overview', async (_req, res) => {
     try {
-      const [metricsResult, sourceResult, statusResult, recentResult] =
-        await Promise.all([
+      const [
+        metricsResult,
+        trialsEndingResult,
+        sourceResult,
+        statusResult,
+        recentResult,
+      ] = await Promise.all([
           pool.query('SELECT * FROM subscription_admin_business_metrics_v1'),
+          pool.query(`
+            SELECT COUNT(*)::int AS trials_ending
+            FROM subscription_admin_current_customers_v1
+            WHERE environment = 'Production'
+              AND trial_active
+              AND auto_renew_enabled = FALSE
+          `),
           pool.query(`
             SELECT
               pro_access_source,
@@ -327,7 +340,10 @@ export function createSubscriptionAdminRouter(
       return res.json({
         success: true,
         generatedAt: new Date().toISOString(),
-        metrics: normalizeMetrics(metricsResult.rows[0] || {}),
+        metrics: normalizeMetrics({
+          ...(metricsResult.rows[0] || {}),
+          trials_ending: trialsEndingResult.rows[0]?.trials_ending || 0,
+        }),
         byAccessSource: sourceResult.rows.map((row) => ({
           ...row,
           active_pro: Number(row.active_pro || 0),
@@ -392,6 +408,12 @@ export function createSubscriptionAdminRouter(
           trial_active,
           canceling,
           access_ends_at,
+          (
+            SELECT MIN(COALESCE(history.original_purchase_date, history.purchase_date, history.created_at))
+            FROM subscription_admin_customers_v1 history
+            WHERE history.customer_key = subscription_admin_current_customers_v1.customer_key
+              AND history.environment = subscription_admin_current_customers_v1.environment
+          ) AS subscriber_since,
           purchase_date,
           original_purchase_date,
           expires_date,
