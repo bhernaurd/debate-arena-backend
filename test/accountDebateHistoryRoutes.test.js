@@ -48,7 +48,7 @@ test('history sync route requires installation and strict Bearer authentication'
     );
 });
 
-test('history router exposes authenticated upload and paginated download', () => {
+test('history router exposes authenticated upload, paginated download, and permanent deletion', () => {
     assert.match(
         routesSource,
         /router\.post\(\s*'\/debates\/sync'/
@@ -61,9 +61,17 @@ test('history router exposes authenticated upload and paginated download', () =>
         routesSource,
         /service\.listDebates\(\{/
     );
+    assert.match(
+        routesSource,
+        /router\.delete\(\s*'\/debates\/:savedDebateId'/
+    );
+    assert.match(
+        routesSource,
+        /service\.deleteDebate\(\{/
+    );
+    assert.match(routesSource, /deletedDebateIds/);
     assert.match(routesSource, /nextCursor/);
     assert.match(routesSource, /hasMore/);
-    assert.doesNotMatch(routesSource, /router\.delete\(/);
 });
 
 test('history download validates single bounded query values', () => {
