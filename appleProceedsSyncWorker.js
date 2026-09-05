@@ -81,15 +81,26 @@ if (enabled) {
 
       try {
         const downloadCoverage = await pool.query(`
-          SELECT EXISTS (
-            SELECT 1
-            FROM app_store_sales_report_rows
-            WHERE apple_identifier = $1
-              AND product_type_identifier IN ('1', '1F', '1T')
-          ) AS has_download_rows
+          SELECT
+            EXISTS (
+              SELECT 1
+              FROM app_store_sales_report_rows
+              WHERE apple_identifier = $1
+                AND product_type_identifier IN ('1', '1F', '1T')
+            ) AS has_download_rows,
+            EXISTS (
+              SELECT 1
+              FROM app_store_sales_report_rows
+              WHERE apple_identifier = $1
+                AND product_type_identifier IN ('1', '1F', '1T')
+                AND UPPER(COALESCE(country_code, '')) ~ '^[A-Z]{2,3}$'
+            ) AS has_country_rows
         `, [agoraAppleId]);
 
-        if (!downloadCoverage.rows[0]?.has_download_rows) {
+        if (
+          !downloadCoverage.rows[0]?.has_download_rows ||
+          !downloadCoverage.rows[0]?.has_country_rows
+        ) {
           return 90;
         }
 
