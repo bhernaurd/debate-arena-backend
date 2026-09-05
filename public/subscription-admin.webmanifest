@@ -1,9 +1,9 @@
 {
-  "id": "/subscription-admin/",
+  "id": "/subscription-admin",
   "name": "Agora Subscriptions",
   "short_name": "Agora Admin",
-  "start_url": "/subscription-admin/",
-  "scope": "/subscription-admin/",
+  "start_url": "/subscription-admin",
+  "scope": "/subscription-admin",
   "display": "standalone",
   "display_override": ["standalone"],
   "background_color": "#0A0D11",
@@ -11,9 +11,15 @@
   "prefer_related_applications": false,
   "icons": [
     {
-      "src": "/subscription-admin-icon.svg?v=5",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/subscription-admin-icon-192.png?v=6",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/subscription-admin-icon-512.png?v=6",
+      "sizes": "512x512",
+      "type": "image/png",
       "purpose": "any"
     }
   ]
