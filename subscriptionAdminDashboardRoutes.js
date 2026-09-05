@@ -255,35 +255,17 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
             )
         ) usage ON TRUE
         LEFT JOIN LATERAL (
-          SELECT country_code, country_source
-          FROM (
-            SELECT
-              install_country.app_store_country_code AS country_code,
-              'observed_storefront'::text AS country_source,
-              install_country.app_store_country_observed_at AS observed_at,
-              0 AS source_priority
-            FROM account_installations install_country
-            WHERE install_country.account_id = a.id
-              AND install_country.app_store_country_code ~ '^[A-Z]{3}$'
-
-            UNION ALL
-
-            SELECT
-              UPPER(event_country.metadata->>'storefrontCountryCode') AS country_code,
-              'analytics_storefront'::text AS country_source,
-              event_country.created_at AS observed_at,
-              1 AS source_priority
-            FROM user_events event_country
-            WHERE event_country.user_id IN (
-              SELECT DISTINCT installation_id
-              FROM account_installations linked_install
-              WHERE linked_install.account_id = a.id
-            )
-              AND UPPER(COALESCE(event_country.metadata->>'storefrontCountryCode', '')) ~ '^[A-Z]{3}$'
-            ORDER BY observed_at DESC NULLS LAST
-            LIMIT 1
-          ) observed_country
-          ORDER BY source_priority ASC, observed_at DESC NULLS LAST
+          SELECT
+            UPPER(event_country.metadata->>'storefrontCountryCode') AS country_code,
+            'analytics_storefront'::text AS country_source
+          FROM user_events event_country
+          WHERE event_country.user_id IN (
+            SELECT DISTINCT installation_id
+            FROM account_installations linked_install
+            WHERE linked_install.account_id = a.id
+          )
+            AND UPPER(COALESCE(event_country.metadata->>'storefrontCountryCode', '')) ~ '^[A-Z]{3}$'
+          ORDER BY event_country.created_at DESC
           LIMIT 1
         ) observed_country ON TRUE
         LEFT JOIN LATERAL (
@@ -373,33 +355,16 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
             COALESCE(observed_country.country_code, subscription_country.country_code) AS country_code
           FROM accounts a
           LEFT JOIN LATERAL (
-            SELECT country_code
-            FROM (
-              SELECT
-                install_country.app_store_country_code AS country_code,
-                install_country.app_store_country_observed_at AS observed_at,
-                0 AS source_priority
-              FROM account_installations install_country
-              WHERE install_country.account_id = a.id
-                AND install_country.app_store_country_code ~ '^[A-Z]{3}$'
-
-              UNION ALL
-
-              SELECT
-                UPPER(event_country.metadata->>'storefrontCountryCode') AS country_code,
-                event_country.created_at AS observed_at,
-                1 AS source_priority
-              FROM user_events event_country
-              WHERE event_country.user_id IN (
-                SELECT DISTINCT installation_id
-                FROM account_installations linked_install
-                WHERE linked_install.account_id = a.id
-              )
-                AND UPPER(COALESCE(event_country.metadata->>'storefrontCountryCode', '')) ~ '^[A-Z]{3}$'
-              ORDER BY observed_at DESC NULLS LAST
-              LIMIT 1
-            ) observed
-            ORDER BY source_priority ASC, observed_at DESC NULLS LAST
+            SELECT
+              UPPER(event_country.metadata->>'storefrontCountryCode') AS country_code
+            FROM user_events event_country
+            WHERE event_country.user_id IN (
+              SELECT DISTINCT installation_id
+              FROM account_installations linked_install
+              WHERE linked_install.account_id = a.id
+            )
+              AND UPPER(COALESCE(event_country.metadata->>'storefrontCountryCode', '')) ~ '^[A-Z]{3}$'
+            ORDER BY event_country.created_at DESC
             LIMIT 1
           ) observed_country ON TRUE
           LEFT JOIN LATERAL (

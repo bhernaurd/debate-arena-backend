@@ -137,19 +137,6 @@ export function createAnalyticsRouter(pool, options = {}) {
     );
   }
 
-  async function recordStorefrontCountry(userId, countryCode) {
-    if (!countryCode) return;
-    await pool.query(
-      `UPDATE account_installations
-       SET app_store_country_code = $2,
-           app_store_country_observed_at = NOW(),
-           updated_at = NOW()
-       WHERE installation_id = $1
-         AND unlinked_at IS NULL`,
-      [userId, countryCode]
-    );
-  }
-
   async function subscriptionContext(userId) {
     const result = await pool.query(
       `
@@ -271,7 +258,9 @@ export function createAnalyticsRouter(pool, options = {}) {
         });
       }
 
-      await recordStorefrontCountry(userId, storefrontCountryCode);
+      // Storefront country is retained in the app_opened event metadata. This keeps
+      // collection additive and lets a future account inherit pre-sign-in observations
+      // through its linked installation without requiring a schema migration first.
       await recordActiveDay(userId);
       await recordEvent(
         userId,

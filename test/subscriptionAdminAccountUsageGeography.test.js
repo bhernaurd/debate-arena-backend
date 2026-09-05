@@ -10,7 +10,7 @@ test('account activity exposes total events, country and Most events without cha
   assert.match(source, /: 'newest';/);
   assert.match(source, /COUNT\(\*\)::int AS total_events/);
   assert.match(source, /excluded_analytics_users/);
-  assert.match(source, /app_store_country_code/);
+  assert.match(source, /storefrontCountryCode/);
   assert.match(source, /subscription_storefront/);
   assert.match(source, /totalEvents: Number\(row\.total_events \|\| 0\)/);
   assert.match(source, /countryCode: row\.country_code \|\| null/);
@@ -50,6 +50,6 @@ test('analytics app-open accepts a validated storefront country and persists it'
   const source = fs.readFileSync('analytics.js', 'utf8');
   assert.match(source, /normalizeStorefrontCountryCode/);
   assert.match(source, /storefrontCountryCode/);
-  assert.match(source, /UPDATE account_installations/);
-  assert.match(source, /app_store_country_observed_at = NOW\(\)/);
+  assert.doesNotMatch(source, /UPDATE account_installations/);
+  assert.match(source, /storefrontCountryCode \? \{ storefrontCountryCode \} : null/);
 });
