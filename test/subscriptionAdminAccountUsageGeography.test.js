@@ -20,6 +20,8 @@ test('geography endpoint uses aggregate Apple first-time download rows', () => {
   assert.match(source, /FROM app_store_sales_report_rows/);
   assert.match(source, /apple_identifier = \$1/);
   assert.match(source, /product_type_identifier IN \('1', '1F', '1T'\)/);
+  assert.match(source, /\^\[A-Z\]\{2,3\}\$/);
+  assert.match(source, /dashboardCountryCode\(row\.country_code\)/);
   assert.match(source, /SUM\(units\)/);
   assert.match(source, /totalDownloads/);
   assert.match(source, /dataThroughDate/);
@@ -75,8 +77,8 @@ test('daily Sales & Trends import includes the app initial-download row but igno
         sourceSha256: 'abc',
         rows: [
           { productId: 'agora_pro_monthly', rawRow: { row: 'subscription' } },
-          { appleIdentifier: '6762416967', productTypeIdentifier: '1F', units: 1, countryCode: 'USA', rawRow: { row: 'app' } },
-          { appleIdentifier: '9999999999', productTypeIdentifier: '1', units: 1, countryCode: 'CAN', rawRow: { row: 'other' } },
+          { appleIdentifier: '6762416967', productTypeIdentifier: '1F', units: 1, countryCode: 'US', rawRow: { row: 'app' } },
+          { appleIdentifier: '9999999999', productTypeIdentifier: '1', units: 1, countryCode: 'CA', rawRow: { row: 'other' } },
         ],
       };
     },
@@ -87,6 +89,7 @@ test('daily Sales & Trends import includes the app initial-download row but igno
   const inserts = queries.filter((row) => row.text.includes('INSERT INTO app_store_sales_report_rows'));
   assert.equal(inserts.length, 2);
   assert.ok(inserts.some((row) => row.params.includes('6762416967')));
+  assert.ok(inserts.some((row) => row.params.includes('US')));
   assert.ok(!inserts.some((row) => row.params.includes('9999999999')));
 });
 
