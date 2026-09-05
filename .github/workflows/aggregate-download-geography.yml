@@ -1,0 +1,43 @@
+name: Aggregate download geography
+
+on:
+  push:
+    branches:
+      - aggregate-download-geography
+    paths:
+      - '.github/workflows/aggregate-download-geography.yml'
+      - 'scripts/patchAggregateDownloadGeography.py'
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply aggregate geography patch
+        run: |
+          python3 scripts/patchAggregateDownloadGeography.py
+          git rm migrations/038_account_storefront_country.sql
+      - name: Install and validate
+        run: |
+          npm ci
+          npm run check
+          npm test
+      - name: Commit tested implementation
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add analytics.js lib/appleProceedsSyncService.js appleProceedsSyncWorker.js subscriptionAdminDashboardRoutes.js lib/subscriptionAdminAccountsUi.js test/subscriptionAdminAccountUsageGeography.test.js
+          git rm scripts/patchAggregateDownloadGeography.py .github/workflows/aggregate-download-geography.yml
+          git commit -m 'Use aggregate App Store download geography'
+          git push origin HEAD:aggregate-download-geography
