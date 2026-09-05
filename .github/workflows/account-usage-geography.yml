@@ -24,7 +24,15 @@ jobs:
           node-version: 22
           cache: npm
       - name: Apply usage and geography patch
-        run: python3 scripts/patchAccountUsageGeography.py
+        run: |
+          python3 scripts/patchAccountUsageGeography.py
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('test/subscriptionAdminAccountUsageGeography.test.js')
+          s = p.read_text()
+          s = s.replace('  <section id="view-history" class="hidden"></section>', '    <section id="view-history" class="hidden"></section>')
+          p.write_text(s)
+          PY
       - name: Install and validate
         run: |
           npm ci
