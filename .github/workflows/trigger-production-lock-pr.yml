@@ -1,0 +1,12 @@
+name: Trigger production lock PR
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/trigger-production-lock-pr.yml'
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo trigger
