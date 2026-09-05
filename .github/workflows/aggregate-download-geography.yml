@@ -60,6 +60,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add analytics.js lib/appleProceedsSyncService.js appleProceedsSyncWorker.js subscriptionAdminDashboardRoutes.js lib/subscriptionAdminAccountsUi.js test/subscriptionAdminAccountUsageGeography.test.js
-          git rm scripts/patchAggregateDownloadGeography.py .github/workflows/aggregate-download-geography.yml
+          git rm -f scripts/patchAggregateDownloadGeography.py .github/workflows/aggregate-download-geography.yml
           git commit -m 'Use aggregate App Store download geography'
           git push origin HEAD:aggregate-download-geography
