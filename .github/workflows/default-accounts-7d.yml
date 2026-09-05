@@ -1,0 +1,50 @@
+name: Default accounts chart to 7D
+
+on:
+  push:
+    paths:
+      - '.github/workflows/default-accounts-7d.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - name: Default daily accounts chart to 7 days
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('lib/subscriptionAdminAccountsUi.js')
+          s = p.read_text()
+          old = '<button type="button" data-account-range="7">7D</button><button type="button" class="active" data-account-range="30">30D</button>'
+          new = '<button type="button" class="active" data-account-range="7">7D</button><button type="button" data-account-range="30">30D</button>'
+          assert old in s, 'range button marker not found'
+          s = s.replace(old, new, 1)
+          assert 'let accountsDailyRange=30;' in s
+          s = s.replace('let accountsDailyRange=30;', 'let accountsDailyRange=7;', 1)
+          assert 'button.dataset.accountRange||30' in s
+          s = s.replace('button.dataset.accountRange||30', 'button.dataset.accountRange||7', 1)
+          p.write_text(s)
+          PY
+      - name: Validate
+        run: |
+          npm ci
+          npm run check
+          node --test test/subscriptionAdminOverviewContext.test.js
+      - name: Commit
+        run: |
+          rm .github/workflows/default-accounts-7d.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/subscriptionAdminAccountsUi.js .github/workflows/default-accounts-7d.yml
+          git commit -m 'Default daily account chart to 7 days'
+          git push
