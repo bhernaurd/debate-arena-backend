@@ -294,7 +294,7 @@ function renderDashboardPage({ sessionHours }) {
       <button class="nav" data-view="events">Events</button>
     </nav>
     <div class="sidebottom">
-      <form method="post" action="/subscription-admin/logout"><button class="logout" type="submit">Sign out</button></form>
+      <form method="post" action="/subscription-admin/logout"><button class="logout" type="submit">Lock</button></form>
     </div>
   </aside>
   <main>
