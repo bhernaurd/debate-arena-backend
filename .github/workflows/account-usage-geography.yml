@@ -1,0 +1,42 @@
+name: Account usage geography
+
+on:
+  push:
+    branches:
+      - account-usage-geography
+    paths:
+      - '.github/workflows/account-usage-geography.yml'
+      - 'scripts/patchAccountUsageGeography.py'
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Apply usage and geography patch
+        run: python3 scripts/patchAccountUsageGeography.py
+      - name: Install and validate
+        run: |
+          npm ci
+          npm run check
+          node --check analytics.js
+          node --test test/subscriptionAdminAccountUsageGeography.test.js test/subscriptionAdminAccountActivity.test.js test/subscriptionAdminOverviewContext.test.js test/subscriptionAdminMobileUi.test.js
+      - name: Commit tested implementation
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add analytics.js subscriptionAdminDashboardRoutes.js lib/subscriptionAdminAccountsUi.js migrations/038_account_storefront_country.sql test/subscriptionAdminAccountUsageGeography.test.js
+          git rm scripts/patchAccountUsageGeography.py .github/workflows/account-usage-geography.yml
+          git commit -m 'Add account usage and geography analytics'
+          git push origin HEAD:account-usage-geography
