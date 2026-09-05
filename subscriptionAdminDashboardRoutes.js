@@ -149,7 +149,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
 
   router.get('/data/accounts-activity', async (req, res) => {
     try {
-      const allowedSorts = new Set(['newest', 'oldest', 'last_sign_in']);
+      const allowedSorts = new Set(['newest', 'oldest', 'last_sign_in', 'most_events']);
       const allowedPeriods = new Set(['all', 'today', '7d']);
       const allowedAccess = new Set(['all', 'pro', 'free']);
       const sort = allowedSorts.has(String(req.query.sort || '')) ? String(req.query.sort) : 'newest';
@@ -168,6 +168,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
           OR COALESCE(gi.email, '') ILIKE ${p}
           OR COALESCE(ar.creator_code, '') ILIKE ${p}
           OR COALESCE(aff.display_name, '') ILIKE ${p}
+          OR COALESCE(country.country_code, '') ILIKE ${p}
         )`);
       }
       if (period === 'today') {
@@ -181,6 +182,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
         newest: 'a.created_at DESC, a.id DESC',
         oldest: 'a.created_at ASC, a.id ASC',
         last_sign_in: 'COALESCE(GREATEST(a.last_authenticated_at, ai.last_authenticated_at, gi.last_authenticated_at), a.created_at) DESC, a.created_at DESC',
+        most_events: 'COALESCE(usage.total_events, 0) DESC, a.created_at DESC, a.id DESC',
       }[sort];
       const result = await historyPool.query(`
         WITH latest_apple_identity AS (
@@ -226,12 +228,83 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
           ar.creator_code AS referral_code,
           aff.display_name AS affiliate_display_name,
           ar.claim_source AS referral_source,
-          ar.claimed_at AS referral_claimed_at
+          ar.claimed_at AS referral_claimed_at,
+          COALESCE(usage.total_events, 0)::int AS total_events,
+          usage.last_event_at,
+          country.country_code,
+          country.country_source
         FROM accounts a
         LEFT JOIN latest_apple_identity ai ON ai.account_id = a.id
         LEFT JOIN latest_google_identity gi ON gi.account_id = a.id
         LEFT JOIN affiliate_account_referrals ar ON ar.account_id = a.id
         LEFT JOIN affiliates aff ON aff.id = ar.affiliate_id
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(*)::int AS total_events,
+            MAX(e.created_at) AS last_event_at
+          FROM user_events e
+          WHERE e.user_id IN (
+            SELECT DISTINCT installation_id
+            FROM account_installations account_install
+            WHERE account_install.account_id = a.id
+          )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM excluded_analytics_users excluded
+              WHERE excluded.user_id = e.user_id
+            )
+        ) usage ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT country_code, country_source
+          FROM (
+            SELECT
+              install_country.app_store_country_code AS country_code,
+              'observed_storefront'::text AS country_source,
+              install_country.app_store_country_observed_at AS observed_at,
+              0 AS source_priority
+            FROM account_installations install_country
+            WHERE install_country.account_id = a.id
+              AND install_country.app_store_country_code ~ '^[A-Z]{3}$'
+
+            UNION ALL
+
+            SELECT
+              UPPER(event_country.metadata->>'storefrontCountryCode') AS country_code,
+              'analytics_storefront'::text AS country_source,
+              event_country.created_at AS observed_at,
+              1 AS source_priority
+            FROM user_events event_country
+            WHERE event_country.user_id IN (
+              SELECT DISTINCT installation_id
+              FROM account_installations linked_install
+              WHERE linked_install.account_id = a.id
+            )
+              AND UPPER(COALESCE(event_country.metadata->>'storefrontCountryCode', '')) ~ '^[A-Z]{3}$'
+            ORDER BY observed_at DESC NULLS LAST
+            LIMIT 1
+          ) observed_country
+          ORDER BY source_priority ASC, observed_at DESC NULLS LAST
+          LIMIT 1
+        ) observed_country ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT
+            UPPER(storefront) AS country_code
+          FROM subscription_admin_current_customers_v1 subscription_country
+          WHERE subscription_country.account_id = a.id
+            AND subscription_country.environment = 'Production'
+            AND UPPER(COALESCE(subscription_country.storefront, '')) ~ '^[A-Z]{3}$'
+          ORDER BY COALESCE(subscription_country.latest_transaction_signed_date, subscription_country.updated_at) DESC NULLS LAST
+          LIMIT 1
+        ) subscription_country ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT
+            COALESCE(observed_country.country_code, subscription_country.country_code) AS country_code,
+            CASE
+              WHEN observed_country.country_code IS NOT NULL THEN observed_country.country_source
+              WHEN subscription_country.country_code IS NOT NULL THEN 'subscription_storefront'
+              ELSE NULL
+            END AS country_source
+        ) country ON TRUE
         LEFT JOIN LATERAL (
           SELECT
             BOOL_OR(has_pro_access) AS has_pro_access,
@@ -267,11 +340,108 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
           affiliateDisplayName: row.affiliate_display_name,
           referralSource: row.referral_source,
           referralClaimedAt: row.referral_claimed_at,
+          totalEvents: Number(row.total_events || 0),
+          lastEventAt: row.last_event_at,
+          countryCode: row.country_code || null,
+          countrySource: row.country_source || null,
         })),
       });
     } catch (error) {
       console.error('[subscription-admin] account activity failed', error);
       res.status(500).json({ error: 'Failed to load account activity' });
+    }
+  });
+
+  router.get('/data/accounts-geography', async (req, res) => {
+    try {
+      const allowedPeriods = new Set(['7d', '30d', 'all']);
+      const period = allowedPeriods.has(String(req.query.period || ''))
+        ? String(req.query.period)
+        : '30d';
+      const where = [];
+      if (period === '7d') {
+        where.push(`(a.created_at AT TIME ZONE 'America/Chicago')::date >= (NOW() AT TIME ZONE 'America/Chicago')::date - 6`);
+      } else if (period === '30d') {
+        where.push(`(a.created_at AT TIME ZONE 'America/Chicago')::date >= (NOW() AT TIME ZONE 'America/Chicago')::date - 29`);
+      }
+
+      const result = await historyPool.query(`
+        WITH account_country AS (
+          SELECT
+            a.id,
+            a.created_at,
+            COALESCE(observed_country.country_code, subscription_country.country_code) AS country_code
+          FROM accounts a
+          LEFT JOIN LATERAL (
+            SELECT country_code
+            FROM (
+              SELECT
+                install_country.app_store_country_code AS country_code,
+                install_country.app_store_country_observed_at AS observed_at,
+                0 AS source_priority
+              FROM account_installations install_country
+              WHERE install_country.account_id = a.id
+                AND install_country.app_store_country_code ~ '^[A-Z]{3}$'
+
+              UNION ALL
+
+              SELECT
+                UPPER(event_country.metadata->>'storefrontCountryCode') AS country_code,
+                event_country.created_at AS observed_at,
+                1 AS source_priority
+              FROM user_events event_country
+              WHERE event_country.user_id IN (
+                SELECT DISTINCT installation_id
+                FROM account_installations linked_install
+                WHERE linked_install.account_id = a.id
+              )
+                AND UPPER(COALESCE(event_country.metadata->>'storefrontCountryCode', '')) ~ '^[A-Z]{3}$'
+              ORDER BY observed_at DESC NULLS LAST
+              LIMIT 1
+            ) observed
+            ORDER BY source_priority ASC, observed_at DESC NULLS LAST
+            LIMIT 1
+          ) observed_country ON TRUE
+          LEFT JOIN LATERAL (
+            SELECT UPPER(storefront) AS country_code
+            FROM subscription_admin_current_customers_v1 subscription_country
+            WHERE subscription_country.account_id = a.id
+              AND subscription_country.environment = 'Production'
+              AND UPPER(COALESCE(subscription_country.storefront, '')) ~ '^[A-Z]{3}$'
+            ORDER BY COALESCE(subscription_country.latest_transaction_signed_date, subscription_country.updated_at) DESC NULLS LAST
+            LIMIT 1
+          ) subscription_country ON TRUE
+          ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+        )
+        SELECT
+          country_code,
+          COUNT(*)::int AS accounts
+        FROM account_country
+        GROUP BY country_code
+        ORDER BY accounts DESC, country_code ASC NULLS LAST
+      `);
+
+      const rows = result.rows || [];
+      const totalAccounts = rows.reduce((sum, row) => sum + Number(row.accounts || 0), 0);
+      const countries = rows
+        .filter((row) => row.country_code)
+        .map((row) => ({
+          countryCode: row.country_code,
+          accounts: Number(row.accounts || 0),
+        }));
+      const knownAccounts = countries.reduce((sum, row) => sum + row.accounts, 0);
+
+      return res.json({
+        success: true,
+        period,
+        totalAccounts,
+        knownAccounts,
+        unknownAccounts: Math.max(0, totalAccounts - knownAccounts),
+        countries,
+      });
+    } catch (error) {
+      console.error('[subscription-admin] account geography failed', error);
+      return res.status(500).json({ error: 'Failed to load account geography' });
     }
   });
 
