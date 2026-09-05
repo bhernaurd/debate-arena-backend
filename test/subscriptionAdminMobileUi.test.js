@@ -15,10 +15,12 @@ test('mobile subscription admin enhancements stay scoped to mobile layout', () =
   assert.match(output, /viewport-fit=cover/);
   assert.match(output, /theme-color/);
   assert.match(output, /apple-mobile-web-app-capable/);
-  assert.match(output, /rel="manifest" href="\/subscription-admin\.webmanifest\?v=1"/);
-  assert.match(output, /apple-touch-icon\.png\?v=3/);
-  assert.match(output, /subscription-admin-icon\.png\?v=3/);
-  assert.match(output, /background:url\('\/subscription-admin-icon\.png\?v=3'\) center\/cover no-repeat/);
+  assert.match(output, /mobile-web-app-capable/);
+  assert.match(output, /application-name/);
+  assert.match(output, /rel="manifest" href="\/subscription-admin\.webmanifest\?v=3"/);
+  assert.doesNotMatch(output, /rel="apple-touch-icon"/);
+  assert.match(output, /subscription-admin-icon\.svg\?v=5/);
+  assert.match(output, /background:url\('\/subscription-admin-icon\.svg\?v=5'\) center\/cover no-repeat/);
   assert.match(output, /\/\* subscription-admin-mobile-v1 \*\//);
   assert.match(output, /@media \(max-width:760px\)/);
   assert.match(output, /grid-template-areas:"brand lock" "nav nav"/);
