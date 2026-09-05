@@ -25,6 +25,28 @@ jobs:
           cache: npm
       - name: Apply aggregate geography patch
         run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('scripts/patchAggregateDownloadGeography.py')
+          s = p.read_text()
+          old = '''sync = replace_once(
+              sync,
+              "    const rows = report.rows.filter(isAgoraProduct);",
+              "    const rows = report.rows.filter(isAgoraSalesReportRow);",
+              'daily sales aggregate row filter',
+          )'''
+          new = '''sales_filter = "    const rows = report.rows.filter(isAgoraProduct);"
+          if sync.count(sales_filter) != 2:
+              raise AssertionError(f"daily sales aggregate row filter: expected 2 existing filters, found {sync.count(sales_filter)}")
+          sync = sync.replace(
+              sales_filter,
+              "    const rows = report.rows.filter(isAgoraSalesReportRow);",
+              1,
+          )'''
+          if old not in s:
+              raise SystemExit('patch-script filter block not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
           python3 scripts/patchAggregateDownloadGeography.py
           git rm migrations/038_account_storefront_country.sql
       - name: Install and validate
