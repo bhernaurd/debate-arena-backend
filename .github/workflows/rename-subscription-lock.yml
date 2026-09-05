@@ -1,0 +1,51 @@
+name: Rename subscription dashboard lock button
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/rename-subscription-lock.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Rename dashboard lock control
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('subscriptionAdminDashboardBaseRoutes.js')
+          s = p.read_text()
+          old = '<form method="post" action="/subscription-admin/logout"><button class="logout" type="submit">Sign out</button></form>'
+          new = '<form method="post" action="/subscription-admin/logout"><button class="logout" type="submit">Lock</button></form>'
+          if s.count(old) != 1:
+              raise SystemExit(f'Expected exactly one sign-out control, found {s.count(old)}')
+          p.write_text(s.replace(old, new))
+          t = Path('test/subscriptionAdminLockButton.test.js')
+          t.write_text("""import assert from 'node:assert/strict';\nimport fs from 'node:fs';\nimport test from 'node:test';\n\ntest('subscription dashboard exposes a Lock control that clears the session', () => {\n  const source = fs.readFileSync('subscriptionAdminDashboardBaseRoutes.js', 'utf8');\n  assert.match(source, /action=\"\\/subscription-admin\\/logout\"/);\n  assert.match(source, />Lock<\\/button>/);\n  assert.equal(source.includes('>Sign out</button>'), false);\n});\n""")
+          PY
+      - name: Install and validate
+        run: |
+          npm ci
+          npm run check
+          npm test
+      - name: Commit implementation
+        run: |
+          rm .github/workflows/rename-subscription-lock.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add subscriptionAdminDashboardBaseRoutes.js test/subscriptionAdminLockButton.test.js .github/workflows/rename-subscription-lock.yml
+          git commit -m 'Rename subscription dashboard sign out to Lock'
+          git push
