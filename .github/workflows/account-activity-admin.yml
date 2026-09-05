@@ -23,7 +23,9 @@ jobs:
           node-version: 22
           cache: npm
       - name: Apply account activity patch
-        run: python3 scripts/patchSubscriptionAdminAccountActivity.py
+        run: |
+          python3 scripts/patchSubscriptionAdminAccountActivity.py
+          python3 scripts/fixSubscriptionAdminAccountActivityTest.py
       - name: Install and validate
         run: |
           npm ci
@@ -35,6 +37,6 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add subscriptionAdminDashboardRoutes.js lib/subscriptionAdminAccountsUi.js test/subscriptionAdminAccountActivity.test.js
-          git rm scripts/patchSubscriptionAdminAccountActivity.py .github/workflows/account-activity-admin.yml
+          git rm scripts/patchSubscriptionAdminAccountActivity.py scripts/fixSubscriptionAdminAccountActivityTest.py .github/workflows/account-activity-admin.yml
           git commit -m 'Add account activity analytics'
           git push origin HEAD:main
