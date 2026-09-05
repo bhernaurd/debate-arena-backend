@@ -1,0 +1,68 @@
+name: Apply subscription admin mobile layout
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/apply-subscription-admin-mobile.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  implement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Wire mobile enhancer last
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          p = Path('subscriptionAdminDashboardRoutes.js')
+          s = p.read_text()
+
+          import_anchor = "import {\n  enhanceSubscriptionAdminSubscribersHtml,\n} from './lib/subscriptionAdminSubscribersUi.js';"
+          mobile_import = "import {\n  enhanceSubscriptionAdminMobileHtml,\n} from './lib/subscriptionAdminMobileUi.js';"
+          if mobile_import not in s:
+              if s.count(import_anchor) != 1:
+                  raise SystemExit(f'Expected subscriber import once, found {s.count(import_anchor)}')
+              s = s.replace(import_anchor, import_anchor + '\n' + mobile_import)
+
+          open_anchor = "          ? enhanceSubscriptionAdminSubscribersHtml("
+          if "          ? enhanceSubscriptionAdminMobileHtml(" not in s:
+              if s.count(open_anchor) != 1:
+                  raise SystemExit(f'Expected enhancer opening once, found {s.count(open_anchor)}')
+              s = s.replace(
+                  open_anchor,
+                  "          ? enhanceSubscriptionAdminMobileHtml(\n              enhanceSubscriptionAdminSubscribersHtml("
+              )
+
+              close_anchor = "            )\n          : body;"
+              if s.count(close_anchor) != 1:
+                  raise SystemExit(f'Expected enhancer closing once, found {s.count(close_anchor)}')
+              s = s.replace(close_anchor, "            )\n            )\n          : body;")
+
+          p.write_text(s)
+          PY
+      - name: Install and validate
+        run: |
+          npm ci
+          npm run check
+          npm test
+      - name: Commit implementation
+        run: |
+          rm .github/workflows/apply-subscription-admin-mobile.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add subscriptionAdminDashboardRoutes.js .github/workflows/apply-subscription-admin-mobile.yml
+          git commit -m 'Apply mobile-only subscription admin layout'
+          git push
