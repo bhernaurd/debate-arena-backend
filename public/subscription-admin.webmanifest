@@ -1,0 +1,18 @@
+{
+  "id": "/subscription-admin",
+  "name": "Agora Subscriptions",
+  "short_name": "Agora Admin",
+  "start_url": "/subscription-admin",
+  "scope": "/subscription-admin",
+  "display": "standalone",
+  "background_color": "#08090c",
+  "theme_color": "#08090c",
+  "icons": [
+    {
+      "src": "/apple-touch-icon.png?v=3",
+      "sizes": "180x180",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
