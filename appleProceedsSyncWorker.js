@@ -80,25 +80,44 @@ if (enabled) {
       if (reason !== 'startup') return 7;
 
       try {
-        const downloadCoverage = await pool.query(`
-          SELECT
-            EXISTS (
-              SELECT 1
-              FROM app_store_sales_report_rows
-              WHERE apple_identifier = $1
-                AND product_type_identifier IN ('1', '1F', '1T')
-                AND COALESCE(units, 0) > 0
-            ) AS has_download_rows,
-            EXISTS (
-              SELECT 1
-              FROM app_store_sales_report_rows
-              WHERE apple_identifier = $1
-                AND product_type_identifier IN ('1', '1F', '1T')
-                AND COALESCE(units, 0) > 0
-                AND report_date >= (NOW() AT TIME ZONE 'America/Chicago')::date - 89
-                AND NOT (UPPER(COALESCE(country_code, '')) ~ '^[A-Z]{2,3}$')
-            ) AS has_missing_country_rows
-        `, [agoraAppleId]);
+        const [downloadCoverage, geographyDiagnostic] = await Promise.all([
+          pool.query(`
+            SELECT
+              EXISTS (
+                SELECT 1
+                FROM app_store_sales_report_rows
+                WHERE apple_identifier = $1
+                  AND product_type_identifier IN ('1', '1F', '1T')
+                  AND COALESCE(units, 0) > 0
+              ) AS has_download_rows,
+              EXISTS (
+                SELECT 1
+                FROM app_store_sales_report_rows
+                WHERE apple_identifier = $1
+                  AND product_type_identifier IN ('1', '1F', '1T')
+                  AND COALESCE(units, 0) > 0
+                  AND report_date >= (NOW() AT TIME ZONE 'America/Chicago')::date - 89
+                  AND NOT (UPPER(COALESCE(country_code, '')) ~ '^[A-Z]{2,3}$')
+              ) AS has_missing_country_rows
+          `, [agoraAppleId]),
+          pool.query(`
+            SELECT
+              COALESCE(NULLIF(BTRIM(country_code), ''), '(missing)') AS country_code,
+              ROUND(COALESCE(SUM(units), 0), 0)::int AS downloads
+            FROM app_store_sales_report_rows
+            WHERE apple_identifier = $1
+              AND product_type_identifier IN ('1', '1F', '1T')
+              AND COALESCE(units, 0) > 0
+              AND report_date >= (NOW() AT TIME ZONE 'America/Chicago')::date - 29
+            GROUP BY 1
+            ORDER BY downloads DESC, country_code ASC
+          `, [agoraAppleId]),
+        ]);
+
+        console.log('[AppleProceedsWorker] Geography diagnostic.', {
+          coverage: downloadCoverage.rows[0] || null,
+          last30Days: geographyDiagnostic.rows || [],
+        });
 
         if (
           !downloadCoverage.rows[0]?.has_download_rows ||
