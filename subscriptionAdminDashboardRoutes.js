@@ -147,6 +147,134 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
     });
   });
 
+  router.get('/data/accounts-activity', async (req, res) => {
+    try {
+      const allowedSorts = new Set(['newest', 'oldest', 'last_sign_in']);
+      const allowedPeriods = new Set(['all', 'today', '7d']);
+      const allowedAccess = new Set(['all', 'pro', 'free']);
+      const sort = allowedSorts.has(String(req.query.sort || '')) ? String(req.query.sort) : 'newest';
+      const period = allowedPeriods.has(String(req.query.period || '')) ? String(req.query.period) : 'all';
+      const access = allowedAccess.has(String(req.query.access || '')) ? String(req.query.access) : 'all';
+      const q = String(req.query.q || '').trim().slice(0, 160);
+      const params = [];
+      const where = [];
+      if (q) {
+        params.push(`%${q}%`);
+        const p = `$${params.length}`;
+        where.push(`(
+          a.id::text ILIKE ${p}
+          OR COALESCE(a.display_name, '') ILIKE ${p}
+          OR COALESCE(ai.email, '') ILIKE ${p}
+          OR COALESCE(gi.email, '') ILIKE ${p}
+          OR COALESCE(ar.creator_code, '') ILIKE ${p}
+          OR COALESCE(aff.display_name, '') ILIKE ${p}
+        )`);
+      }
+      if (period === 'today') {
+        where.push(`(a.created_at AT TIME ZONE 'America/Chicago')::date = (NOW() AT TIME ZONE 'America/Chicago')::date`);
+      } else if (period === '7d') {
+        where.push(`(a.created_at AT TIME ZONE 'America/Chicago')::date >= (NOW() AT TIME ZONE 'America/Chicago')::date - 6`);
+      }
+      if (access === 'pro') where.push(`COALESCE(sub.has_pro_access, FALSE) = TRUE`);
+      if (access === 'free') where.push(`COALESCE(sub.has_pro_access, FALSE) = FALSE`);
+      const orderBy = {
+        newest: 'a.created_at DESC, a.id DESC',
+        oldest: 'a.created_at ASC, a.id ASC',
+        last_sign_in: 'COALESCE(GREATEST(a.last_authenticated_at, ai.last_authenticated_at, gi.last_authenticated_at), a.created_at) DESC, a.created_at DESC',
+      }[sort];
+      const result = await historyPool.query(`
+        WITH latest_apple_identity AS (
+          SELECT DISTINCT ON (account_id)
+            account_id,
+            email,
+            is_private_email,
+            last_authenticated_at
+          FROM account_apple_identities
+          ORDER BY account_id, last_authenticated_at DESC NULLS LAST, created_at DESC
+        ),
+        latest_google_identity AS (
+          SELECT DISTINCT ON (account_id)
+            account_id,
+            email,
+            display_name,
+            last_authenticated_at
+          FROM account_google_identities
+          ORDER BY account_id, last_authenticated_at DESC NULLS LAST, created_at DESC
+        )
+        SELECT
+          a.id,
+          a.status,
+          COALESCE(NULLIF(BTRIM(a.display_name), ''), NULLIF(BTRIM(gi.display_name), '')) AS display_name,
+          COALESCE(ai.email, gi.email) AS email,
+          ai.is_private_email,
+          CASE
+            WHEN ai.account_id IS NOT NULL THEN 'Apple'
+            WHEN gi.account_id IS NOT NULL THEN 'Google'
+            ELSE 'Account'
+          END AS identity_source,
+          a.created_at,
+          a.updated_at,
+          GREATEST(a.last_authenticated_at, ai.last_authenticated_at, gi.last_authenticated_at) AS last_authenticated_at,
+          COALESCE(sub.has_pro_access, FALSE) AS has_pro_access,
+          CASE
+            WHEN COALESCE(sub.lifetime_active, FALSE) THEN 'Lifetime'
+            WHEN COALESCE(sub.trial_active, FALSE) THEN 'Trial'
+            WHEN COALESCE(sub.paid_active, FALSE) THEN 'Paid'
+            WHEN COALESCE(sub.has_pro_access, FALSE) THEN 'Pro'
+            ELSE 'Free'
+          END AS access_label,
+          ar.creator_code AS referral_code,
+          aff.display_name AS affiliate_display_name,
+          ar.claim_source AS referral_source,
+          ar.claimed_at AS referral_claimed_at
+        FROM accounts a
+        LEFT JOIN latest_apple_identity ai ON ai.account_id = a.id
+        LEFT JOIN latest_google_identity gi ON gi.account_id = a.id
+        LEFT JOIN affiliate_account_referrals ar ON ar.account_id = a.id
+        LEFT JOIN affiliates aff ON aff.id = ar.affiliate_id
+        LEFT JOIN LATERAL (
+          SELECT
+            BOOL_OR(has_pro_access) AS has_pro_access,
+            BOOL_OR(trial_active) AS trial_active,
+            BOOL_OR(recurring_revenue_active) AS paid_active,
+            BOOL_OR(is_lifetime_pro AND has_pro_access) AS lifetime_active
+          FROM subscription_admin_current_customers_v1
+          WHERE account_id = a.id
+            AND environment = 'Production'
+        ) sub ON TRUE
+        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+        ORDER BY ${orderBy}
+        LIMIT 200
+      `, params);
+      res.json({
+        sort,
+        period,
+        access,
+        query: q,
+        accounts: result.rows.map((row) => ({
+          id: row.id,
+          status: row.status,
+          displayName: row.display_name,
+          email: row.email,
+          isPrivateEmail: row.is_private_email,
+          identitySource: row.identity_source,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          lastAuthenticatedAt: row.last_authenticated_at,
+          hasProAccess: Boolean(row.has_pro_access),
+          accessLabel: row.access_label,
+          referralCode: row.referral_code,
+          affiliateDisplayName: row.affiliate_display_name,
+          referralSource: row.referral_source,
+          referralClaimedAt: row.referral_claimed_at,
+        })),
+      });
+    } catch (error) {
+      console.error('[subscription-admin] account activity failed', error);
+      res.status(500).json({ error: 'Failed to load account activity' });
+    }
+  });
+
   router.get('/data/accounts-summary', async (_req, res) => {
   try {
     const [summaryResult, monthlyResult, dailyResult] = await Promise.all([
