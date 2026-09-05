@@ -144,7 +144,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
 
   router.get('/data/accounts-summary', async (_req, res) => {
   try {
-    const [summaryResult, monthlyResult] = await Promise.all([
+    const [summaryResult, monthlyResult, dailyResult] = await Promise.all([
       historyPool.query(`
         SELECT
           COUNT(*) FILTER (WHERE status <> 'deleted')::int AS total_accounts,
@@ -153,7 +153,21 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
           COUNT(*) FILTER (
             WHERE to_char(created_at AT TIME ZONE 'America/Chicago', 'YYYY-MM') =
                   to_char(NOW() AT TIME ZONE 'America/Chicago', 'YYYY-MM')
-          )::int AS created_this_month
+          )::int AS created_this_month,
+          COUNT(*) FILTER (
+            WHERE (created_at AT TIME ZONE 'America/Chicago')::date =
+                  (NOW() AT TIME ZONE 'America/Chicago')::date
+          )::int AS created_today,
+          COUNT(*) FILTER (
+            WHERE (created_at AT TIME ZONE 'America/Chicago')::date >=
+                  (NOW() AT TIME ZONE 'America/Chicago')::date - 6
+          )::int AS created_last_7_days,
+          COUNT(*) FILTER (
+            WHERE (created_at AT TIME ZONE 'America/Chicago')::date >=
+                  (NOW() AT TIME ZONE 'America/Chicago')::date - 13
+              AND (created_at AT TIME ZONE 'America/Chicago')::date <
+                  (NOW() AT TIME ZONE 'America/Chicago')::date - 6
+          )::int AS created_previous_7_days
         FROM accounts
       `),
       historyPool.query(`
@@ -164,6 +178,29 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
         GROUP BY 1
         ORDER BY 1
       `),
+      historyPool.query(`
+        WITH days AS (
+          SELECT generate_series(
+            (NOW() AT TIME ZONE 'America/Chicago')::date - 89,
+            (NOW() AT TIME ZONE 'America/Chicago')::date,
+            INTERVAL '1 day'
+          )::date AS day
+        ), counts AS (
+          SELECT
+            (created_at AT TIME ZONE 'America/Chicago')::date AS day,
+            COUNT(*)::int AS created_accounts
+          FROM accounts
+          WHERE (created_at AT TIME ZONE 'America/Chicago')::date >=
+                (NOW() AT TIME ZONE 'America/Chicago')::date - 89
+          GROUP BY 1
+        )
+        SELECT
+          to_char(days.day, 'YYYY-MM-DD') AS day,
+          COALESCE(counts.created_accounts, 0)::int AS created_accounts
+        FROM days
+        LEFT JOIN counts USING (day)
+        ORDER BY days.day
+      `),
     ]);
     return res.json({
       success: true,
@@ -171,11 +208,19 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
       activeAccounts: Number(summaryResult.rows[0]?.active_accounts || 0),
       allTimeCreated: Number(summaryResult.rows[0]?.all_time_created || 0),
       createdThisMonth: Number(summaryResult.rows[0]?.created_this_month || 0),
+      createdToday: Number(summaryResult.rows[0]?.created_today || 0),
+      createdLast7Days: Number(summaryResult.rows[0]?.created_last_7_days || 0),
+      createdPrevious7Days: Number(summaryResult.rows[0]?.created_previous_7_days || 0),
+      currentDate: dailyResult.rows.at(-1)?.day || null,
       currentMonth: new Intl.DateTimeFormat('en-CA', {
         timeZone: 'America/Chicago',
         year: 'numeric',
         month: '2-digit',
       }).format(new Date()).replace('/', '-'),
+      days: dailyResult.rows.map((row) => ({
+        day: row.day,
+        createdAccounts: Number(row.created_accounts || 0),
+      })),
       months: monthlyResult.rows.map((row) => ({
         month: row.month,
         createdAccounts: Number(row.created_accounts || 0),
