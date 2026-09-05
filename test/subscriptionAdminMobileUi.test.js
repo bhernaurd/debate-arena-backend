@@ -23,9 +23,13 @@ test('mobile subscription admin enhancements stay scoped to mobile layout', () =
   assert.match(output, /@media \(max-width:760px\)/);
   assert.match(output, /grid-template-areas:"brand lock" "nav nav"/);
   assert.match(output, /\.nav:nth-child\(4\),\.nav:nth-child\(5\)\{grid-column:span 3;/);
-  assert.match(output, /#breakdownChart,#accountsDailyChart\{overflow-x:auto;/);
+  assert.match(output, /#breakdownChart,#accountsDailyChart,#accountsChart,#revenueTrendChart\{overflow-x:auto;/);
   assert.match(output, /#breakdownChart svg\{min-width:680px!important;/);
   assert.match(output, /#accountsDailyChart svg\{min-width:900px!important;/);
+  assert.match(output, /const chartIds = \['breakdownChart','accountsDailyChart','accountsChart','revenueTrendChart'\]/);
+  assert.match(output, /element\.scrollLeft = Math\.max\(0, element\.scrollWidth - element\.clientWidth\)/);
+  assert.match(output, /MutationObserver\(\(\) => alignCurrent\(element\)\)/);
+  assert.match(output, /\[data-view\],\[data-account-range\]/);
   assert.doesNotMatch(output, /#view-accounts:has\([^)]*\) #accountsDailyChart svg\{min-width:0!important;/);
   assert.doesNotMatch(output, /#breakdownChart svg\{min-width:0!important;/);
   assert.match(output, /\.desktop-sentinel\{display:block\}/);
