@@ -42,6 +42,25 @@ import {
 
 const { Pool } = pg;
 
+const APPLE_ALPHA2_TO_ALPHA3 = Object.freeze({
+  US: 'USA', CA: 'CAN', MX: 'MEX', BR: 'BRA', AR: 'ARG', CL: 'CHL', CO: 'COL', PE: 'PER', VE: 'VEN', UY: 'URY',
+  GB: 'GBR', IE: 'IRL', FR: 'FRA', DE: 'DEU', ES: 'ESP', PT: 'PRT', IT: 'ITA', NL: 'NLD', BE: 'BEL', CH: 'CHE',
+  AT: 'AUT', SE: 'SWE', NO: 'NOR', FI: 'FIN', DK: 'DNK', PL: 'POL', CZ: 'CZE', SK: 'SVK', HU: 'HUN', RO: 'ROU',
+  BG: 'BGR', GR: 'GRC', HR: 'HRV', SI: 'SVN', RS: 'SRB', UA: 'UKR', RU: 'RUS', TR: 'TUR', IL: 'ISR', SA: 'SAU',
+  AE: 'ARE', QA: 'QAT', KW: 'KWT', EG: 'EGY', MA: 'MAR', DZ: 'DZA', ZA: 'ZAF', NG: 'NGA', KE: 'KEN', ET: 'ETH',
+  GH: 'GHA', IN: 'IND', PK: 'PAK', BD: 'BGD', LK: 'LKA', NP: 'NPL', CN: 'CHN', HK: 'HKG', TW: 'TWN', JP: 'JPN',
+  KR: 'KOR', PH: 'PHL', ID: 'IDN', MY: 'MYS', SG: 'SGP', TH: 'THA', VN: 'VNM', KH: 'KHM', AU: 'AUS', NZ: 'NZL',
+  FJ: 'FJI', PG: 'PNG', KZ: 'KAZ', UZ: 'UZB', GE: 'GEO', AM: 'ARM', AZ: 'AZE', IS: 'ISL', EE: 'EST', LV: 'LVA',
+  LT: 'LTU', CY: 'CYP', MT: 'MLT', LU: 'LUX',
+});
+
+function dashboardCountryCode(value) {
+  const code = String(value || '').trim().toUpperCase();
+  if (/^[A-Z]{3}$/.test(code)) return code;
+  if (/^[A-Z]{2}$/.test(code)) return APPLE_ALPHA2_TO_ALPHA3[code] || code;
+  return null;
+}
+
 function enhanceDashboardHtml(html) {
   return String(html)
     .replace(
@@ -318,7 +337,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
       const result = await historyPool.query(`
         SELECT
           CASE
-            WHEN UPPER(COALESCE(country_code, '')) ~ '^[A-Z]{3}$'
+            WHEN UPPER(COALESCE(country_code, '')) ~ '^[A-Z]{2,3}$'
               THEN UPPER(country_code)
             ELSE NULL
           END AS country_code,
@@ -332,15 +351,19 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
 
       const rows = result.rows || [];
       const totalDownloads = rows.reduce((sum, row) => sum + Number(row.downloads || 0), 0);
-      const knownDownloads = rows
-        .filter((row) => row.country_code)
-        .reduce((sum, row) => sum + Number(row.downloads || 0), 0);
-      const countries = rows
-        .filter((row) => row.country_code)
-        .map((row) => ({
-          countryCode: row.country_code,
-          downloads: Number(row.downloads || 0),
-        }));
+      const countryDownloads = new Map();
+      for (const row of rows) {
+        const countryCode = dashboardCountryCode(row.country_code);
+        if (!countryCode) continue;
+        countryDownloads.set(
+          countryCode,
+          (countryDownloads.get(countryCode) || 0) + Number(row.downloads || 0)
+        );
+      }
+      const countries = [...countryDownloads.entries()]
+        .map(([countryCode, downloads]) => ({ countryCode, downloads }))
+        .sort((a, b) => b.downloads - a.downloads || a.countryCode.localeCompare(b.countryCode));
+      const knownDownloads = countries.reduce((sum, row) => sum + Number(row.downloads || 0), 0);
       const dataThroughDate = rows.reduce((latest, row) => {
         const value = row.data_through_date ? String(row.data_through_date).slice(0, 10) : null;
         return value && (!latest || value > latest) ? value : latest;
