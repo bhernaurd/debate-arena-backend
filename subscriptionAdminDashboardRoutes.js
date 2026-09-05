@@ -34,6 +34,9 @@ import {
   enhanceSubscriptionAdminSubscribersHtml,
 } from './lib/subscriptionAdminSubscribersUi.js';
 import {
+  enhanceSubscriptionAdminMobileHtml,
+} from './lib/subscriptionAdminMobileUi.js';
+import {
   getAppleSubscriptionVerificationState,
 } from './lib/appleSubscriptionVerificationState.js';
 
@@ -104,7 +107,8 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
     res.send = (body) => {
       const enhancedBody =
         typeof body === 'string'
-          ? enhanceSubscriptionAdminSubscribersHtml(
+          ? enhanceSubscriptionAdminMobileHtml(
+              enhanceSubscriptionAdminSubscribersHtml(
               enhanceSubscriptionAdminAutoRenewHtml(
               enhanceSubscriptionAdminAccountsHtml(
               enhanceSubscriptionAdminLifetimeHtml(
@@ -120,6 +124,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
               )
               )
               )
+            )
             )
           : body;
 
