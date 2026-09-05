@@ -85,11 +85,6 @@ function sanitizeMetadata(meta) {
   return meta;
 }
 
-function normalizeStorefrontCountryCode(value) {
-  if (value === undefined || value === null || value === '') return null;
-  const code = String(value).trim().toUpperCase();
-  return /^[A-Z]{3}$/.test(code) ? code : undefined;
-}
 
 export function isEntitlementUsable(row) {
   if (!row) return false;
@@ -248,25 +243,9 @@ export function createAnalyticsRouter(pool, options = {}) {
       }
 
       const userId = identity.userId;
-      const rawStorefrontCountryCode = req.body?.storefrontCountryCode;
-      const storefrontCountryCode = normalizeStorefrontCountryCode(rawStorefrontCountryCode);
 
-      if (rawStorefrontCountryCode != null && rawStorefrontCountryCode !== '' && storefrontCountryCode === undefined) {
-        return res.status(400).json({
-          success: false,
-          error: 'invalid storefrontCountryCode',
-        });
-      }
-
-      // Storefront country is retained in the app_opened event metadata. This keeps
-      // collection additive and lets a future account inherit pre-sign-in observations
-      // through its linked installation without requiring a schema migration first.
       await recordActiveDay(userId);
-      await recordEvent(
-        userId,
-        'app_opened',
-        storefrontCountryCode ? { storefrontCountryCode } : null
-      );
+      await recordEvent(userId, 'app_opened', null);
 
       return res.json({ success: true });
     } catch (err) {
