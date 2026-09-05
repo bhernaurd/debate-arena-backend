@@ -85,6 +85,12 @@ function sanitizeMetadata(meta) {
   return meta;
 }
 
+function normalizeStorefrontCountryCode(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const code = String(value).trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(code) ? code : undefined;
+}
+
 export function isEntitlementUsable(row) {
   if (!row) return false;
 
@@ -128,6 +134,19 @@ export function createAnalyticsRouter(pool, options = {}) {
        VALUES ($1, (now() AT TIME ZONE $2)::date)
        ON CONFLICT (user_id, active_date) DO NOTHING`,
       [userId, APP_TIMEZONE]
+    );
+  }
+
+  async function recordStorefrontCountry(userId, countryCode) {
+    if (!countryCode) return;
+    await pool.query(
+      `UPDATE account_installations
+       SET app_store_country_code = $2,
+           app_store_country_observed_at = NOW(),
+           updated_at = NOW()
+       WHERE installation_id = $1
+         AND unlinked_at IS NULL`,
+      [userId, countryCode]
     );
   }
 
@@ -242,9 +261,23 @@ export function createAnalyticsRouter(pool, options = {}) {
       }
 
       const userId = identity.userId;
+      const rawStorefrontCountryCode = req.body?.storefrontCountryCode;
+      const storefrontCountryCode = normalizeStorefrontCountryCode(rawStorefrontCountryCode);
 
+      if (rawStorefrontCountryCode != null && rawStorefrontCountryCode !== '' && storefrontCountryCode === undefined) {
+        return res.status(400).json({
+          success: false,
+          error: 'invalid storefrontCountryCode',
+        });
+      }
+
+      await recordStorefrontCountry(userId, storefrontCountryCode);
       await recordActiveDay(userId);
-      await recordEvent(userId, 'app_opened', null);
+      await recordEvent(
+        userId,
+        'app_opened',
+        storefrontCountryCode ? { storefrontCountryCode } : null
+      );
 
       return res.json({ success: true });
     } catch (err) {
