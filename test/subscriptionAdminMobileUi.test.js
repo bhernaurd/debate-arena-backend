@@ -15,6 +15,7 @@ test('mobile subscription admin enhancements stay scoped to mobile layout', () =
   assert.match(output, /viewport-fit=cover/);
   assert.match(output, /theme-color/);
   assert.match(output, /apple-mobile-web-app-capable/);
+  assert.match(output, /rel="manifest" href="\/subscription-admin\.webmanifest\?v=1"/);
   assert.match(output, /apple-touch-icon\.png\?v=3/);
   assert.match(output, /subscription-admin-icon\.png\?v=3/);
   assert.match(output, /background:url\('\/subscription-admin-icon\.png\?v=3'\) center\/cover no-repeat/);
@@ -22,6 +23,10 @@ test('mobile subscription admin enhancements stay scoped to mobile layout', () =
   assert.match(output, /@media \(max-width:760px\)/);
   assert.match(output, /grid-template-areas:"brand lock" "nav nav"/);
   assert.match(output, /\.nav:nth-child\(4\),\.nav:nth-child\(5\)\{grid-column:span 3;/);
-  assert.match(output, /#view-accounts:has\(\[data-account-range="7"\]\.active\) #accountsDailyChart svg\{min-width:0!important;/);
+  assert.match(output, /#breakdownChart,#accountsDailyChart\{overflow-x:auto;/);
+  assert.match(output, /#breakdownChart svg\{min-width:680px!important;/);
+  assert.match(output, /#accountsDailyChart svg\{min-width:900px!important;/);
+  assert.doesNotMatch(output, /#view-accounts:has\([^)]*\) #accountsDailyChart svg\{min-width:0!important;/);
+  assert.doesNotMatch(output, /#breakdownChart svg\{min-width:0!important;/);
   assert.match(output, /\.desktop-sentinel\{display:block\}/);
 });
