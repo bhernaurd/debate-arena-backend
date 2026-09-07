@@ -28,6 +28,14 @@ test('mobile subscription admin enhancements stay scoped to mobile layout', () =
   assert.match(output, /#breakdownChart,#accountsDailyChart,#accountsChart,#revenueTrendChart\{overflow-x:auto;/);
   assert.match(output, /#breakdownChart svg\{min-width:680px!important;/);
   assert.match(output, /#accountsDailyChart svg\{min-width:900px!important;/);
+  assert.match(output, /\.drawer\{position:fixed;inset:0;width:100vw;max-width:none;height:100dvh;/);
+  assert.match(output, /\.drawerhead\{position:sticky;top:0;/);
+  assert.match(output, /\.drawerhead>div\{min-width:0;flex:1;/);
+  assert.match(output, /\.drawerhead \.sub\{font-size:11px;line-height:1\.35;overflow-wrap:anywhere;word-break:break-all;/);
+  assert.match(output, /\.detailgrid\{grid-template-columns:1fr;gap:10px;margin-top:0;/);
+  assert.match(output, /\.detail span\{font-size:15px;line-height:1\.45;overflow-wrap:anywhere;/);
+  assert.match(output, /\.timeline\+\.timeline\{margin-top:30px;/);
+  assert.match(output, /\.event\{margin:0 0 10px;border:1px solid #242832;border-left:3px solid #3a404b;border-radius:12px;/);
   assert.match(output, /const chartIds = \['breakdownChart','accountsDailyChart','accountsChart','revenueTrendChart'\]/);
   assert.match(output, /element\.scrollLeft = Math\.max\(0, element\.scrollWidth - element\.clientWidth\)/);
   assert.match(output, /MutationObserver\(\(\) => alignCurrent\(element\)\)/);
