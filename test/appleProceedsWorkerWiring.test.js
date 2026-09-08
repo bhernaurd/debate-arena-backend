@@ -9,8 +9,10 @@ test('production entrypoint starts Apple proceeds worker', () => {
 
   assert.equal(pkg.scripts.start, 'node start.js');
   assert.match(start, /import '\.\/env\.js'/);
-  assert.match(start, /import '\.\/appleProceedsSyncWorker\.js'/);
-  assert.match(start, /import '\.\/server\.js'/);
+  assert.match(start, /await verifyRankedReadiness\(\)/);
+  assert.match(start, /await import\('\.\/appleProceedsSyncWorker\.js'\)/);
+  assert.match(start, /await import\('\.\/appleSubscriptionStatusReconciliationWorker\.js'\)/);
+  assert.match(start, /await import\('\.\/server\.js'\)/);
   assert.match(worker, /APP_STORE_CONNECT_REPORTS_ENABLED', true/);
   assert.match(worker, /recordNoReportChecks/);
   assert.match(worker, /MAX\(report_date\) AS imported_through/);
