@@ -34,10 +34,32 @@ import {
   enhanceSubscriptionAdminSubscribersHtml,
 } from './lib/subscriptionAdminSubscribersUi.js';
 import {
+  enhanceSubscriptionAdminMobileHtml,
+} from './lib/subscriptionAdminMobileUi.js';
+import {
   getAppleSubscriptionVerificationState,
 } from './lib/appleSubscriptionVerificationState.js';
 
 const { Pool } = pg;
+
+const APPLE_ALPHA2_TO_ALPHA3 = Object.freeze({
+  US: 'USA', CA: 'CAN', MX: 'MEX', BR: 'BRA', AR: 'ARG', CL: 'CHL', CO: 'COL', PE: 'PER', VE: 'VEN', UY: 'URY',
+  GB: 'GBR', IE: 'IRL', FR: 'FRA', DE: 'DEU', ES: 'ESP', PT: 'PRT', IT: 'ITA', NL: 'NLD', BE: 'BEL', CH: 'CHE',
+  AT: 'AUT', SE: 'SWE', NO: 'NOR', FI: 'FIN', DK: 'DNK', PL: 'POL', CZ: 'CZE', SK: 'SVK', HU: 'HUN', RO: 'ROU',
+  BG: 'BGR', GR: 'GRC', HR: 'HRV', SI: 'SVN', RS: 'SRB', UA: 'UKR', RU: 'RUS', TR: 'TUR', IL: 'ISR', SA: 'SAU',
+  AE: 'ARE', QA: 'QAT', KW: 'KWT', EG: 'EGY', MA: 'MAR', DZ: 'DZA', ZA: 'ZAF', NG: 'NGA', KE: 'KEN', ET: 'ETH',
+  GH: 'GHA', IN: 'IND', PK: 'PAK', BD: 'BGD', LK: 'LKA', NP: 'NPL', CN: 'CHN', HK: 'HKG', TW: 'TWN', JP: 'JPN',
+  KR: 'KOR', PH: 'PHL', ID: 'IDN', MY: 'MYS', SG: 'SGP', TH: 'THA', VN: 'VNM', KH: 'KHM', AU: 'AUS', NZ: 'NZL',
+  FJ: 'FJI', PG: 'PNG', KZ: 'KAZ', UZ: 'UZB', GE: 'GEO', AM: 'ARM', AZ: 'AZE', IS: 'ISL', EE: 'EST', LV: 'LVA',
+  LT: 'LTU', CY: 'CYP', MT: 'MLT', LU: 'LUX',
+});
+
+function dashboardCountryCode(value) {
+  const code = String(value || '').trim().toUpperCase();
+  if (/^[A-Z]{3}$/.test(code)) return code;
+  if (/^[A-Z]{2}$/.test(code)) return APPLE_ALPHA2_TO_ALPHA3[code] || code;
+  return null;
+}
 
 function enhanceDashboardHtml(html) {
   return String(html)
@@ -104,7 +126,8 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
     res.send = (body) => {
       const enhancedBody =
         typeof body === 'string'
-          ? enhanceSubscriptionAdminSubscribersHtml(
+          ? enhanceSubscriptionAdminMobileHtml(
+              enhanceSubscriptionAdminSubscribersHtml(
               enhanceSubscriptionAdminAutoRenewHtml(
               enhanceSubscriptionAdminAccountsHtml(
               enhanceSubscriptionAdminLifetimeHtml(
@@ -120,6 +143,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
               )
               )
               )
+            )
             )
           : body;
 
@@ -142,9 +166,227 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
     });
   });
 
+  router.get('/data/accounts-activity', async (req, res) => {
+    try {
+      const allowedSorts = new Set(['newest', 'oldest', 'last_sign_in', 'most_events']);
+      const allowedPeriods = new Set(['all', 'today', '7d']);
+      const allowedAccess = new Set(['all', 'pro', 'free']);
+      const sort = allowedSorts.has(String(req.query.sort || '')) ? String(req.query.sort) : 'newest';
+      const period = allowedPeriods.has(String(req.query.period || '')) ? String(req.query.period) : 'all';
+      const access = allowedAccess.has(String(req.query.access || '')) ? String(req.query.access) : 'all';
+      const q = String(req.query.q || '').trim().slice(0, 160);
+      const params = [];
+      const where = [];
+      if (q) {
+        params.push(`%${q}%`);
+        const p = `$${params.length}`;
+        where.push(`(
+          a.id::text ILIKE ${p}
+          OR COALESCE(a.display_name, '') ILIKE ${p}
+          OR COALESCE(ai.email, '') ILIKE ${p}
+          OR COALESCE(gi.email, '') ILIKE ${p}
+          OR COALESCE(ar.creator_code, '') ILIKE ${p}
+          OR COALESCE(aff.display_name, '') ILIKE ${p}
+        )`);
+      }
+      if (period === 'today') {
+        where.push(`(a.created_at AT TIME ZONE 'America/Chicago')::date = (NOW() AT TIME ZONE 'America/Chicago')::date`);
+      } else if (period === '7d') {
+        where.push(`(a.created_at AT TIME ZONE 'America/Chicago')::date >= (NOW() AT TIME ZONE 'America/Chicago')::date - 6`);
+      }
+      if (access === 'pro') where.push(`COALESCE(sub.has_pro_access, FALSE) = TRUE`);
+      if (access === 'free') where.push(`COALESCE(sub.has_pro_access, FALSE) = FALSE`);
+      const orderBy = {
+        newest: 'a.created_at DESC, a.id DESC',
+        oldest: 'a.created_at ASC, a.id ASC',
+        last_sign_in: 'COALESCE(GREATEST(a.last_authenticated_at, ai.last_authenticated_at, gi.last_authenticated_at), a.created_at) DESC, a.created_at DESC',
+        most_events: 'COALESCE(usage.total_events, 0) DESC, a.created_at DESC',
+      }[sort];
+      const result = await historyPool.query(`
+        WITH latest_apple_identity AS (
+          SELECT DISTINCT ON (account_id)
+            account_id,
+            email,
+            is_private_email,
+            last_authenticated_at
+          FROM account_apple_identities
+          ORDER BY account_id, last_authenticated_at DESC NULLS LAST, created_at DESC
+        ),
+        latest_google_identity AS (
+          SELECT DISTINCT ON (account_id)
+            account_id,
+            email,
+            display_name,
+            last_authenticated_at
+          FROM account_google_identities
+          ORDER BY account_id, last_authenticated_at DESC NULLS LAST, created_at DESC
+        )
+        SELECT
+          a.id,
+          a.status,
+          COALESCE(NULLIF(BTRIM(a.display_name), ''), NULLIF(BTRIM(gi.display_name), '')) AS display_name,
+          COALESCE(ai.email, gi.email) AS email,
+          ai.is_private_email,
+          CASE
+            WHEN ai.account_id IS NOT NULL THEN 'Apple'
+            WHEN gi.account_id IS NOT NULL THEN 'Google'
+            ELSE 'Account'
+          END AS identity_source,
+          a.created_at,
+          a.updated_at,
+          GREATEST(a.last_authenticated_at, ai.last_authenticated_at, gi.last_authenticated_at) AS last_authenticated_at,
+          COALESCE(sub.has_pro_access, FALSE) AS has_pro_access,
+          CASE
+            WHEN COALESCE(sub.lifetime_active, FALSE) THEN 'Lifetime'
+            WHEN COALESCE(sub.trial_active, FALSE) THEN 'Trial'
+            WHEN COALESCE(sub.paid_active, FALSE) THEN 'Paid'
+            WHEN COALESCE(sub.has_pro_access, FALSE) THEN 'Pro'
+            ELSE 'Free'
+          END AS access_label,
+          ar.creator_code AS referral_code,
+          aff.display_name AS affiliate_display_name,
+          ar.claim_source AS referral_source,
+          ar.claimed_at AS referral_claimed_at,
+          COALESCE(usage.total_events, 0)::int AS total_events,
+          usage.last_event_at
+        FROM accounts a
+        LEFT JOIN latest_apple_identity ai ON ai.account_id = a.id
+        LEFT JOIN latest_google_identity gi ON gi.account_id = a.id
+        LEFT JOIN affiliate_account_referrals ar ON ar.account_id = a.id
+        LEFT JOIN affiliates aff ON aff.id = ar.affiliate_id
+        LEFT JOIN LATERAL (
+          SELECT
+            COUNT(*)::int AS total_events,
+            MAX(e.created_at) AS last_event_at
+          FROM user_events e
+          WHERE e.user_id IN (
+            SELECT DISTINCT installation_id
+            FROM account_installations account_install
+            WHERE account_install.account_id = a.id
+          )
+            AND NOT EXISTS (
+              SELECT 1
+              FROM excluded_analytics_users excluded
+              WHERE excluded.user_id = e.user_id
+            )
+        ) usage ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT
+            BOOL_OR(has_pro_access) AS has_pro_access,
+            BOOL_OR(trial_active) AS trial_active,
+            BOOL_OR(recurring_revenue_active) AS paid_active,
+            BOOL_OR(is_lifetime_pro AND has_pro_access) AS lifetime_active
+          FROM subscription_admin_current_customers_v1
+          WHERE account_id = a.id
+            AND environment = 'Production'
+        ) sub ON TRUE
+        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+        ORDER BY ${orderBy}
+        LIMIT 200
+      `, params);
+      res.json({
+        sort,
+        period,
+        access,
+        query: q,
+        accounts: result.rows.map((row) => ({
+          id: row.id,
+          status: row.status,
+          displayName: row.display_name,
+          email: row.email,
+          isPrivateEmail: row.is_private_email,
+          identitySource: row.identity_source,
+          createdAt: row.created_at,
+          updatedAt: row.updated_at,
+          lastAuthenticatedAt: row.last_authenticated_at,
+          hasProAccess: Boolean(row.has_pro_access),
+          accessLabel: row.access_label,
+          referralCode: row.referral_code,
+          affiliateDisplayName: row.affiliate_display_name,
+          referralSource: row.referral_source,
+          referralClaimedAt: row.referral_claimed_at,
+          totalEvents: Number(row.total_events || 0),
+          lastEventAt: row.last_event_at,
+        })),
+      });
+    } catch (error) {
+      console.error('[subscription-admin] account activity failed', error);
+      res.status(500).json({ error: 'Failed to load account activity' });
+    }
+  });
+
+  router.get('/data/accounts-geography', async (req, res) => {
+    try {
+      const allowedPeriods = new Set(['7d', '30d', 'all']);
+      const period = allowedPeriods.has(String(req.query.period || ''))
+        ? String(req.query.period)
+        : '30d';
+      const agoraAppleId = String(process.env.AFFILIATE_APPLE_APP_ID || '6762416967').trim();
+      const params = [agoraAppleId];
+      const where = [
+        `apple_identifier = $1`,
+        `product_type_identifier IN ('1', '1F', '1T')`,
+        `COALESCE(units, 0) > 0`,
+      ];
+      if (period === '7d') {
+        where.push(`report_date >= (NOW() AT TIME ZONE 'America/Chicago')::date - 6`);
+      } else if (period === '30d') {
+        where.push(`report_date >= (NOW() AT TIME ZONE 'America/Chicago')::date - 29`);
+      }
+
+      const result = await historyPool.query(`
+        SELECT
+          CASE
+            WHEN UPPER(COALESCE(country_code, '')) ~ '^[A-Z]{2,3}$'
+              THEN UPPER(country_code)
+            ELSE NULL
+          END AS country_code,
+          ROUND(COALESCE(SUM(units), 0), 0)::int AS downloads,
+          MAX(report_date) AS data_through_date
+        FROM app_store_sales_report_rows
+        WHERE ${where.join(' AND ')}
+        GROUP BY 1
+        ORDER BY downloads DESC, country_code ASC NULLS LAST
+      `, params);
+
+      const rows = result.rows || [];
+      const totalDownloads = rows.reduce((sum, row) => sum + Number(row.downloads || 0), 0);
+      const countryDownloads = new Map();
+      for (const row of rows) {
+        const countryCode = dashboardCountryCode(row.country_code);
+        if (!countryCode) continue;
+        countryDownloads.set(
+          countryCode,
+          (countryDownloads.get(countryCode) || 0) + Number(row.downloads || 0)
+        );
+      }
+      const countries = [...countryDownloads.entries()]
+        .map(([countryCode, downloads]) => ({ countryCode, downloads }))
+        .sort((a, b) => b.downloads - a.downloads || a.countryCode.localeCompare(b.countryCode));
+      const knownDownloads = countries.reduce((sum, row) => sum + Number(row.downloads || 0), 0);
+      const dataThroughDate = rows.reduce((latest, row) => {
+        const value = row.data_through_date ? String(row.data_through_date).slice(0, 10) : null;
+        return value && (!latest || value > latest) ? value : latest;
+      }, null);
+
+      res.json({
+        period,
+        source: 'app_store_connect_sales_trends',
+        totalDownloads,
+        knownDownloads,
+        unknownDownloads: Math.max(0, totalDownloads - knownDownloads),
+        dataThroughDate,
+        countries,
+      });
+    } catch (error) {
+      console.error('[subscription-admin] aggregate download geography failed', error);
+      res.status(500).json({ error: 'Failed to load geographic interest' });
+    }
+  });
+
   router.get('/data/accounts-summary', async (_req, res) => {
   try {
-    const [summaryResult, monthlyResult] = await Promise.all([
+    const [summaryResult, monthlyResult, dailyResult] = await Promise.all([
       historyPool.query(`
         SELECT
           COUNT(*) FILTER (WHERE status <> 'deleted')::int AS total_accounts,
@@ -153,7 +395,21 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
           COUNT(*) FILTER (
             WHERE to_char(created_at AT TIME ZONE 'America/Chicago', 'YYYY-MM') =
                   to_char(NOW() AT TIME ZONE 'America/Chicago', 'YYYY-MM')
-          )::int AS created_this_month
+          )::int AS created_this_month,
+          COUNT(*) FILTER (
+            WHERE (created_at AT TIME ZONE 'America/Chicago')::date =
+                  (NOW() AT TIME ZONE 'America/Chicago')::date
+          )::int AS created_today,
+          COUNT(*) FILTER (
+            WHERE (created_at AT TIME ZONE 'America/Chicago')::date >=
+                  (NOW() AT TIME ZONE 'America/Chicago')::date - 6
+          )::int AS created_last_7_days,
+          COUNT(*) FILTER (
+            WHERE (created_at AT TIME ZONE 'America/Chicago')::date >=
+                  (NOW() AT TIME ZONE 'America/Chicago')::date - 13
+              AND (created_at AT TIME ZONE 'America/Chicago')::date <
+                  (NOW() AT TIME ZONE 'America/Chicago')::date - 6
+          )::int AS created_previous_7_days
         FROM accounts
       `),
       historyPool.query(`
@@ -164,6 +420,29 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
         GROUP BY 1
         ORDER BY 1
       `),
+      historyPool.query(`
+        WITH days AS (
+          SELECT generate_series(
+            (NOW() AT TIME ZONE 'America/Chicago')::date - 89,
+            (NOW() AT TIME ZONE 'America/Chicago')::date,
+            INTERVAL '1 day'
+          )::date AS day
+        ), counts AS (
+          SELECT
+            (created_at AT TIME ZONE 'America/Chicago')::date AS day,
+            COUNT(*)::int AS created_accounts
+          FROM accounts
+          WHERE (created_at AT TIME ZONE 'America/Chicago')::date >=
+                (NOW() AT TIME ZONE 'America/Chicago')::date - 89
+          GROUP BY 1
+        )
+        SELECT
+          to_char(days.day, 'YYYY-MM-DD') AS day,
+          COALESCE(counts.created_accounts, 0)::int AS created_accounts
+        FROM days
+        LEFT JOIN counts USING (day)
+        ORDER BY days.day
+      `),
     ]);
     return res.json({
       success: true,
@@ -171,11 +450,19 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
       activeAccounts: Number(summaryResult.rows[0]?.active_accounts || 0),
       allTimeCreated: Number(summaryResult.rows[0]?.all_time_created || 0),
       createdThisMonth: Number(summaryResult.rows[0]?.created_this_month || 0),
+      createdToday: Number(summaryResult.rows[0]?.created_today || 0),
+      createdLast7Days: Number(summaryResult.rows[0]?.created_last_7_days || 0),
+      createdPrevious7Days: Number(summaryResult.rows[0]?.created_previous_7_days || 0),
+      currentDate: dailyResult.rows.at(-1)?.day || null,
       currentMonth: new Intl.DateTimeFormat('en-CA', {
         timeZone: 'America/Chicago',
         year: 'numeric',
         month: '2-digit',
       }).format(new Date()).replace('/', '-'),
+      days: dailyResult.rows.map((row) => ({
+        day: row.day,
+        createdAccounts: Number(row.created_accounts || 0),
+      })),
       months: monthlyResult.rows.map((row) => ({
         month: row.month,
         createdAccounts: Number(row.created_accounts || 0),

@@ -35,10 +35,16 @@ test('Accounts has its own acquisition tab and is removed from Subscriber Analyt
   const html=renderFinalDashboard();
   assert.match(html,/data-view="accounts">Accounts<\/button>/);
   assert.match(html,/id="view-accounts"/);
+  assert.match(html,/<h2>Accounts created by day<\/h2>/);
   assert.match(html,/<h2>Accounts created by month<\/h2>/);
   assert.match(html,/metric\('Current accounts'/);
+  assert.match(html,/metric\('Created today'/);
   assert.match(html,/metric\('Created this month'/);
   assert.match(html,/metric\('All-time created'/);
+  assert.match(html,/data-account-range="7"/);
+  assert.match(html,/data-account-range="30"/);
+  assert.match(html,/data-account-range="90"/);
+  assert.match(html,/aria-label="Accounts created by day"/);
   assert.match(html,/aria-label="Accounts created by month"/);
   const breakdown=html.match(/<section id="view-breakdown"[^>]*>([\s\S]*?)<section id="view-customers"/i)?.[1]||'';
   assert.doesNotMatch(breakdown,/metric\('Accounts'/);
@@ -46,6 +52,6 @@ test('Accounts has its own acquisition tab and is removed from Subscriber Analyt
 test('rendered client stays valid',()=>{
   const script=renderFinalDashboard().match(/<script>\s*([\s\S]*?)\s*<\/script>/i)?.[1]||''; assert.ok(script); new vm.Script(script,{filename:'subscription-admin-client.js'});
 });
-test('account summary route tracks monthly creations from canonical accounts table',()=>{
-  const source=fs.readFileSync(new URL('../subscriptionAdminDashboardRoutes.js',import.meta.url),'utf8'); assert.match(source,/router\.get\('\/data\/accounts-summary'/); assert.match(source,/FROM accounts/); assert.match(source,/status <> 'deleted'/); assert.match(source,/created_at AT TIME ZONE 'America\/Chicago'/); assert.match(source,/createdAccounts/);
+test('account summary route tracks daily and monthly creations from canonical accounts table',()=>{
+  const source=fs.readFileSync(new URL('../subscriptionAdminDashboardRoutes.js',import.meta.url),'utf8'); assert.match(source,/router\.get\('\/data\/accounts-summary'/); assert.match(source,/FROM accounts/); assert.match(source,/status <> 'deleted'/); assert.match(source,/created_at AT TIME ZONE 'America\/Chicago'/); assert.match(source,/generate_series/); assert.match(source,/createdToday/); assert.match(source,/createdLast7Days/); assert.match(source,/createdPrevious7Days/); assert.match(source,/days: dailyResult\.rows/); assert.match(source,/createdAccounts/);
 });

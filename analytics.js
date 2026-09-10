@@ -85,6 +85,7 @@ function sanitizeMetadata(meta) {
   return meta;
 }
 
+
 export function isEntitlementUsable(row) {
   if (!row) return false;
 

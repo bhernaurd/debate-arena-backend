@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Agora Admin">
+  <rect width="512" height="512" rx="108" fill="#0A0D11"/>
+  <g fill="#DDB65A">
+    <path d="M105 208 256 116l151 92-14 23-137-83-137 83z"/>
+    <rect x="119" y="220" width="274" height="20" rx="5"/>
+    <rect x="142" y="257" width="56" height="18" rx="5"/>
+    <rect x="154" y="275" width="32" height="112" rx="5"/>
+    <rect x="142" y="387" width="56" height="18" rx="5"/>
+    <rect x="228" y="257" width="56" height="18" rx="5"/>
+    <rect x="240" y="275" width="32" height="112" rx="5"/>
+    <rect x="228" y="387" width="56" height="18" rx="5"/>
+    <rect x="314" y="257" width="56" height="18" rx="5"/>
+    <rect x="326" y="275" width="32" height="112" rx="5"/>
+    <rect x="314" y="387" width="56" height="18" rx="5"/>
+    <rect x="122" y="416" width="268" height="20" rx="5"/>
+  </g>
+</svg>

@@ -49,6 +49,7 @@ function financeRegions() {
 }
 
 const enabled = booleanEnvironment('APP_STORE_CONNECT_REPORTS_ENABLED', true);
+const agoraAppleId = cleanText(process.env.AFFILIATE_APPLE_APP_ID || '6762416967', 32);
 
 if (enabled) {
   const connectionString = process.env.DATABASE_URL?.trim();
@@ -79,6 +80,33 @@ if (enabled) {
       if (reason !== 'startup') return 7;
 
       try {
+        const downloadCoverage = await pool.query(`
+          SELECT
+            EXISTS (
+              SELECT 1
+              FROM app_store_sales_report_rows
+              WHERE apple_identifier = $1
+                AND product_type_identifier IN ('1', '1F', '1T')
+                AND COALESCE(units, 0) > 0
+            ) AS has_download_rows,
+            EXISTS (
+              SELECT 1
+              FROM app_store_sales_report_rows
+              WHERE apple_identifier = $1
+                AND product_type_identifier IN ('1', '1F', '1T')
+                AND COALESCE(units, 0) > 0
+                AND report_date >= (NOW() AT TIME ZONE 'America/Chicago')::date - 89
+                AND NOT (UPPER(COALESCE(country_code, '')) ~ '^[A-Z]{2,3}$')
+            ) AS has_missing_country_rows
+        `, [agoraAppleId]);
+
+        if (
+          !downloadCoverage.rows[0]?.has_download_rows ||
+          downloadCoverage.rows[0]?.has_missing_country_rows
+        ) {
+          return 90;
+        }
+
         const result = await pool.query(`
           SELECT MAX(report_date) AS imported_through
           FROM app_store_sales_report_imports

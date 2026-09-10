@@ -46,7 +46,7 @@ function securityHeaders(_req, res, next) {
   res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
   res.setHeader(
     'Content-Security-Policy',
-    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; font-src 'self'; manifest-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
   );
   return next();
 }
@@ -167,6 +167,8 @@ function renderLoginPage({ error = null, configured = true } = {}) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Agora Subscriptions</title>
+  <link rel="apple-touch-icon" sizes="180x180" href="/subscription-admin-icon.png?v=1" />
+  <link rel="icon" type="image/png" sizes="180x180" href="/subscription-admin-icon.png?v=1" />
   <style>
     :root { color-scheme: dark; }
     * { box-sizing: border-box; }
@@ -208,6 +210,8 @@ function renderDashboardPage({ sessionHours }) {
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Agora Subscriptions</title>
+  <link rel="apple-touch-icon" sizes="180x180" href="/subscription-admin-icon.png?v=1" />
+  <link rel="icon" type="image/png" sizes="180x180" href="/subscription-admin-icon.png?v=1" />
   <style>
     :root { color-scheme: dark; --bg:#08090c; --panel:#111318; --panel2:#15181e; --line:#242832; --text:#f3f1eb; --muted:#8d95a3; --gold:#d4b566; --good:#72d6a2; --warn:#efc56a; --bad:#ed7d86; }
     * { box-sizing: border-box; }
@@ -290,7 +294,7 @@ function renderDashboardPage({ sessionHours }) {
       <button class="nav" data-view="events">Events</button>
     </nav>
     <div class="sidebottom">
-      <form method="post" action="/subscription-admin/logout"><button class="logout" type="submit">Sign out</button></form>
+      <form method="post" action="/subscription-admin/logout"><button class="logout" type="submit">Lock</button></form>
     </div>
   </aside>
   <main>
