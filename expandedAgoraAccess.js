@@ -112,6 +112,26 @@ function philosopherIdFromMetadata(metadata) {
     return cleanString(normalized.philosopherId, 80).toLowerCase();
 }
 
+function normalizeClientPlatform(value) {
+    const normalized = cleanString(value, 32).toLowerCase();
+
+    if (normalized === 'android') return 'android';
+    if (normalized === 'ios') return 'ios';
+    return null;
+}
+
+function clientPlatformFromRequest(req) {
+    return normalizeClientPlatform(
+        req.get('x-client-platform') ||
+        req.query?.clientPlatform
+    );
+}
+
+function clientPlatformFromMetadata(metadata) {
+    const normalized = normalizeMetadata(metadata);
+    return normalizeClientPlatform(normalized.clientPlatform);
+}
+
 function iosVersionFromRequest(req) {
     const raw = req.get('x-ios-version') || req.query?.iosVersion;
     return cleanString(raw, 32) || null;
@@ -144,8 +164,31 @@ function phaseForRelease(release, now) {
 function evaluateReleaseClientCompatibility(
     release,
     iosVersion,
-    iosBuild
+    iosBuild,
+    clientPlatform = null
 ) {
+    // The release table's minimum-client fields currently describe iOS only.
+    // Android identifies itself explicitly and must not be compared against an
+    // unrelated App Store version/build threshold. Android release gating can
+    // be added independently when Android minimum-version fields exist.
+    if (clientPlatform === 'android') {
+        return {
+            satisfied: true,
+            reason: 'android_client_supported',
+            comparisonMode: 'platform',
+            clientVersion: null,
+            clientBuild: null,
+            minimumVersion:
+                release.required_minimum_ios_version ?? null,
+            minimumBuild:
+                parseOptionalPositiveInteger(release.minimum_ios_build),
+            minimumLegacyBuild:
+                parseOptionalPositiveInteger(
+                    release.required_minimum_legacy_ios_build
+                ),
+        };
+    }
+
     return evaluateMinimumIosClient({
         clientVersion: iosVersion,
         clientBuild: iosBuild,
@@ -227,7 +270,8 @@ async function getAnyReleaseRow(db, philosopherId) {
 // Older App Store builds may not send philosopherId on every debate job.
 // Once an enabled scheduled release has minimum_ios_build set, builds at or
 // above that threshold must send philosopherId; older or unknown builds remain
-// compatible.
+// compatible. Android has no legacy build in the field, so an explicit Android
+// client is required to send philosopherId whenever enforcement is enabled.
 async function philosopherIdRequiredForBuild(db, iosBuild) {
     if (!iosBuild) return false;
 
@@ -287,13 +331,15 @@ function buildReleaseStatus({
     usage,
     iosVersion,
     iosBuild,
+    clientPlatform,
     now,
 }) {
     const phase = phaseForRelease(release, now);
     const compatibility = evaluateReleaseClientCompatibility(
         release,
         iosVersion,
-        iosBuild
+        iosBuild,
+        clientPlatform
     );
     const clientSatisfied = compatibility.satisfied;
     const eligibilityCutoff = new Date(release.grace_eligibility_cutoff_at);
@@ -380,6 +426,7 @@ export async function getExpandedAgoraAccessSnapshot(
         userId,
         iosVersion = null,
         iosBuild = null,
+        clientPlatform = null,
     }
 ) {
     if (!isValidUserId(userId)) {
@@ -409,6 +456,7 @@ export async function getExpandedAgoraAccessSnapshot(
             usage: usageByPhilosopher.get(release.philosopher_id),
             iosVersion,
             iosBuild,
+            clientPlatform,
             now,
         })
     );
@@ -532,6 +580,7 @@ async function authorizeExpandedOpening(
         clientRequestId,
         iosVersion,
         iosBuild,
+        clientPlatform = null,
         isVerifiedPro,
         release: suppliedRelease = null,
     }
@@ -559,7 +608,8 @@ async function authorizeExpandedOpening(
     const compatibility = evaluateReleaseClientCompatibility(
         release,
         iosVersion,
-        iosBuild
+        iosBuild,
+        clientPlatform
     );
 
     if (!compatibility.satisfied) {
@@ -770,7 +820,9 @@ export async function authorizeAIJobCreate(
         };
     }
 
-    const philosopherId = philosopherIdFromMetadata(metadata);
+    const normalizedMetadata = normalizeMetadata(metadata);
+    const philosopherId = philosopherIdFromMetadata(normalizedMetadata);
+    const clientPlatform = clientPlatformFromMetadata(normalizedMetadata);
     const enforcementEnabled =
         expandedAgoraEnforcementEnabledForUser(userId);
 
@@ -779,7 +831,10 @@ export async function authorizeAIJobCreate(
 
         const mustSendPhilosopherId =
             enforcementEnabled &&
-            await philosopherIdRequiredForBuild(db, strictIosBuild);
+            (
+                clientPlatform === 'android' ||
+                await philosopherIdRequiredForBuild(db, strictIosBuild)
+            );
 
         if (mustSendPhilosopherId) {
             throw new ExpandedAgoraAccessError(
@@ -863,6 +918,7 @@ export async function authorizeAIJobCreate(
             clientRequestId,
             iosVersion,
             iosBuild,
+            clientPlatform,
             isVerifiedPro,
             release,
         });
@@ -1009,6 +1065,7 @@ export function createExpandedAgoraAccessRouter(pool) {
                     userId,
                     iosVersion: iosVersionFromRequest(req),
                     iosBuild: iosBuildFromRequest(req),
+                    clientPlatform: clientPlatformFromRequest(req),
                 });
 
             return res.json({

@@ -182,13 +182,13 @@ test(
 );
 
 test(
-    'PostgreSQL account access query includes permanent Lifetime Pro and prioritizes it',
+    'PostgreSQL account access query preserves manual, Lifetime, and Google Play priority',
     async () => {
-        let captured;
+        const captured = [];
 
         const pool = {
             async query(text, values) {
-                captured = { text, values };
+                captured.push({ text, values });
                 return { rows: [] };
             },
         };
@@ -203,27 +203,49 @@ test(
             checkedAt: CHECKED_AT,
         });
 
+        assert.equal(captured.length, 3);
+
+        const manualGrantQuery = captured[0];
+        const appStoreQuery = captured[1];
+        const playFallbackQuery = captured[2];
+
         assert.match(
-            captured.text,
+            manualGrantQuery.text,
+            /account_manual_pro_grants/
+        );
+        assert.match(
+            manualGrantQuery.text,
+            /grant\.revoked_at IS NULL/
+        );
+
+        assert.match(
+            appStoreQuery.text,
             /entitlement\.product_id = \$4/
         );
         assert.match(
-            captured.text,
+            appStoreQuery.text,
             /entitlement\.status = 'active'/
         );
         assert.match(
-            captured.text,
+            appStoreQuery.text,
             /THEN 0/
         );
         assert.equal(
-            captured.values[3],
+            appStoreQuery.values[3],
             AGORA_PRO_LIFETIME_PRODUCT_ID
         );
         assert.equal(
-            captured.values[1].includes(
+            appStoreQuery.values[1].includes(
                 AGORA_PRO_LIFETIME_PRODUCT_ID
             ),
             true
+        );
+
+        // If neither a manual grant nor an App Store/Lifetime row exists,
+        // the resolver intentionally falls through to Google Play.
+        assert.match(
+            playFallbackQuery.text,
+            /google_play_subscription_entitlements/
         );
     }
 );

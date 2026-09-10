@@ -141,6 +141,20 @@ function serializeOptionalDate(value, fieldName) {
     return value == null ? null : serializeDate(value, fieldName);
 }
 
+function serializeAccess(access) {
+    return {
+        tier: access.tier,
+        isPro: access.isPro,
+        timezone: access.timeZone,
+        challengeDate: access.challengeDate,
+        dailyPhilosopherId: access.dailyPhilosopherId,
+        dailyPhilosopherName: access.dailyPhilosopherName,
+        freeLadderStartAvailable: access.freeLadderStartAvailable,
+        windowStartsAt: serializeDate(access.windowStartsAt, 'access.windowStartsAt'),
+        windowExpiresAt: serializeDate(access.windowExpiresAt, 'access.windowExpiresAt'),
+    };
+}
+
 function serializeConfiguration(configuration) {
     return {
         isEnabled: configuration.isEnabled,
@@ -317,7 +331,11 @@ export function createAccountRankedLadderRouter({
     service,
     logger = console,
 } = {}) {
-    if (!service || typeof service.startLadderDebate !== 'function') {
+    if (
+        !service ||
+        typeof service.startLadderDebate !== 'function' ||
+        typeof service.getRankedAccess !== 'function'
+    ) {
         throw new Error('A valid account Ranked ladder service is required.');
     }
 
@@ -329,6 +347,28 @@ export function createAccountRankedLadderRouter({
         res.setHeader('X-Content-Type-Options', 'nosniff');
         next();
     });
+
+    router.post(
+        '/access',
+        asyncRoute(async (req, res) => {
+            const installationId = requireInstallationId(req);
+            const accessToken = requireBearerToken(req);
+            const body = requireBody(req);
+            const result = await service.getRankedAccess({
+                installationId,
+                accessToken,
+                timezone: requireText(body.timezone, 'timezone', 100),
+            });
+
+            return res.status(200).json({
+                success: true,
+                schemaVersion: result.schemaVersion,
+                accountId: result.accountId,
+                installationId: result.installationId,
+                access: serializeAccess(result.access),
+            });
+        })
+    );
 
     router.post(
         '/ladder/start',
@@ -343,6 +383,7 @@ export function createAccountRankedLadderRouter({
                 requestId: requireUUID(body.requestId, 'requestId'),
                 philosopherId: requireText(body.philosopherId, 'philosopherId', 100),
                 debateMode: requireText(body.debateMode, 'debateMode', 20),
+                timezone: requireText(body.timezone, 'timezone', 100),
                 language: resolveRequestLanguage(req),
             });
 
