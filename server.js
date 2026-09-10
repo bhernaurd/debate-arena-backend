@@ -105,14 +105,6 @@ function readBooleanEnvironmentVariable(
   }
 }
 
-const rankedRequiresProAccess =
-  readBooleanEnvironmentVariable(
-    'RANKED_REQUIRE_PRO',
-    {
-      defaultValue: true,
-    }
-  );
-
 const client = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
 });
@@ -420,38 +412,27 @@ const googlePlaySubscriptionService =
     pool,
   });
 
-const rankedProAccessService =
-  rankedRequiresProAccess
-    ? accountProAccessService
-    : Object.freeze({
-        async requireCurrentProAccess({
-          accountId,
-        } = {}) {
-          const cleanAccountId =
-            typeof accountId === 'string'
-              ? accountId.trim().toLowerCase()
-              : '';
+// Placement trials and active Ranked debates are available to every
+// authenticated account. New ladder starts apply the free-daily or Pro policy
+// inside AccountRankedLadderService.
+const rankedParticipantAccessService = Object.freeze({
+  async requireCurrentProAccess({ accountId } = {}) {
+    const cleanAccountId =
+      typeof accountId === 'string'
+        ? accountId.trim().toLowerCase()
+        : '';
 
-          if (!cleanAccountId) {
-            throw new Error(
-              'Ranked Pro testing bypass received an invalid accountId.'
-            );
-          }
+    if (!cleanAccountId) {
+      throw new Error('Ranked access received an invalid accountId.');
+    }
 
-          return Object.freeze({
-            accountId: cleanAccountId,
-            hasProAccess: true,
-            accessReason:
-              'ranked_testing_bypass',
-          });
-        },
-      });
-
-if (!rankedRequiresProAccess) {
-  console.warn(
-    '[Ranked] WARNING: Agora Pro access is bypassed because RANKED_REQUIRE_PRO=false. Restore true before release.'
-  );
-}
+    return Object.freeze({
+      accountId: cleanAccountId,
+      hasProAccess: true,
+      accessReason: 'ranked_authenticated_participant',
+    });
+  },
+});
 
 const rankedTopicGeneratorService =
   createRankedTopicGeneratorService();
@@ -460,7 +441,7 @@ const accountRankedPlacementService =
   createAccountRankedPlacementService({
     pool,
     accountAuthService,
-    proAccessService: rankedProAccessService,
+    proAccessService: rankedParticipantAccessService,
     topicGeneratorService: rankedTopicGeneratorService,
   });
 
@@ -474,7 +455,7 @@ const baseAccountRankedDebateService =
   createAccountRankedDebateService({
     pool,
     accountAuthService,
-    proAccessService: rankedProAccessService,
+    proAccessService: rankedParticipantAccessService,
     debateEngineService: rankedDebateEngineService,
   });
 
@@ -482,7 +463,7 @@ const accountRankedLadderService =
   createAccountRankedLadderService({
     pool,
     accountAuthService,
-    proAccessService: rankedProAccessService,
+    proAccessService: accountProAccessService,
     topicGeneratorService: rankedTopicGeneratorService,
     ratingService: rankedRatingService,
   });
@@ -492,7 +473,7 @@ const accountRankedDebateService =
     pool,
     baseService: baseAccountRankedDebateService,
     accountAuthService,
-    proAccessService: rankedProAccessService,
+    proAccessService: rankedParticipantAccessService,
     ratingService: rankedRatingService,
   });
 
