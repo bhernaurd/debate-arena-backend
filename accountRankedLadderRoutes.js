@@ -1,5 +1,4 @@
 import express from 'express';
-import rateLimit from 'express-rate-limit';
 import { resolveRequestLanguage } from './lib/languageSupport.js';
 
 import {
@@ -10,53 +9,6 @@ const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
 const UUID_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const INSTALLATION_ID_RE = /^[A-Za-z0-9-]{8,128}$/;
-const RANKED_ACCESS_SCHEMA_VERSION = 1;
-
-function readBooleanEnvironmentVariable(
-    name,
-    { defaultValue }
-) {
-    const rawValue = process.env[name];
-
-    if (rawValue == null || rawValue.trim() === '') {
-        return defaultValue;
-    }
-
-    switch (rawValue.trim().toLowerCase()) {
-    case 'true':
-    case '1':
-    case 'yes':
-    case 'on':
-        return true;
-
-    case 'false':
-    case '0':
-    case 'no':
-    case 'off':
-        return false;
-
-    default:
-        throw new Error(`${name} must be true or false.`);
-    }
-}
-
-const rankedFreeAccessEnabled =
-    readBooleanEnvironmentVariable(
-        'RANKED_FREE_ACCESS_ENABLED',
-        { defaultValue: false }
-    );
-
-let defaultAccessPolicyPromise = null;
-
-async function loadDefaultAccessPolicy() {
-    if (!defaultAccessPolicyPromise) {
-        defaultAccessPolicyPromise = import(
-            './lib/rankedFreeAccessPolicy.js'
-        ).then((module) => module.rankedFreeAccessPolicy);
-    }
-
-    return defaultAccessPolicyPromise;
-}
 
 class AccountRankedLadderRouteError extends Error {
     constructor(
@@ -173,38 +125,6 @@ function requireText(value, fieldName, maximumLength) {
     return value.trim();
 }
 
-function optionalText(value, fieldName, maximumLength) {
-    if (value == null || String(value).trim() === '') {
-        return null;
-    }
-
-    if (typeof value !== 'string' || value.length > maximumLength) {
-        fail(
-            'invalid_ranked_ladder_request',
-            `${fieldName} is invalid.`,
-            { status: 400 }
-        );
-    }
-
-    return value.trim();
-}
-
-function serializeAccess(access, freeAccessEnabled) {
-    return {
-        tier: access.tier,
-        isPro: access.isPro,
-        timezone: access.timezone,
-        challengeDate: access.challengeDate,
-        dailyPhilosopherId: access.dailyPhilosopherId,
-        dailyPhilosopherName: access.dailyPhilosopherName,
-        freeLadderStartAvailable:
-            access.isPro ||
-            (freeAccessEnabled && access.freeLadderStartAvailable),
-        windowStartsAt: access.windowStartsAt,
-        windowExpiresAt: access.windowExpiresAt,
-    };
-}
-
 function serializeDate(value, fieldName) {
     const date = value instanceof Date ? value : new Date(value);
 
@@ -219,6 +139,20 @@ function serializeDate(value, fieldName) {
 
 function serializeOptionalDate(value, fieldName) {
     return value == null ? null : serializeDate(value, fieldName);
+}
+
+function serializeAccess(access) {
+    return {
+        tier: access.tier,
+        isPro: access.isPro,
+        timezone: access.timeZone,
+        challengeDate: access.challengeDate,
+        dailyPhilosopherId: access.dailyPhilosopherId,
+        dailyPhilosopherName: access.dailyPhilosopherName,
+        freeLadderStartAvailable: access.freeLadderStartAvailable,
+        windowStartsAt: serializeDate(access.windowStartsAt, 'access.windowStartsAt'),
+        windowExpiresAt: serializeDate(access.windowExpiresAt, 'access.windowExpiresAt'),
+    };
 }
 
 function serializeConfiguration(configuration) {
@@ -344,8 +278,7 @@ function serializeSafeDetails(details) {
 function publicError(error) {
     if (
         error instanceof AccountRankedLadderError ||
-        error instanceof AccountRankedLadderRouteError ||
-        error?.name === 'RankedFreeAccessPolicyError'
+        error instanceof AccountRankedLadderRouteError
     ) {
         const details = serializeSafeDetails(error.details);
 
@@ -396,51 +329,15 @@ function logUnexpectedError(logger, error, req) {
 
 export function createAccountRankedLadderRouter({
     service,
-    accessPolicy = null,
-    freeAccessEnabled = rankedFreeAccessEnabled,
     logger = console,
 } = {}) {
-    if (!service || typeof service.startLadderDebate !== 'function') {
+    if (
+        !service ||
+        typeof service.startLadderDebate !== 'function' ||
+        typeof service.getRankedAccess !== 'function'
+    ) {
         throw new Error('A valid account Ranked ladder service is required.');
     }
-
-    if (typeof freeAccessEnabled !== 'boolean') {
-        throw new Error('freeAccessEnabled must be a boolean.');
-    }
-
-    if (
-        accessPolicy != null &&
-        (
-            typeof accessPolicy.authorizeAndGetAccess !== 'function' ||
-            typeof accessPolicy.authorizeAndReserveLadderStart !== 'function'
-        )
-    ) {
-        throw new Error('A valid Ranked free-access policy is required.');
-    }
-
-    let resolvedAccessPolicy = accessPolicy;
-
-    async function getAccessPolicy() {
-        if (!resolvedAccessPolicy) {
-            resolvedAccessPolicy = await loadDefaultAccessPolicy();
-        }
-
-        return resolvedAccessPolicy;
-    }
-
-    const accessLimiter = rateLimit({
-        windowMs: 60 * 1000,
-        max: 30,
-        standardHeaders: true,
-        legacyHeaders: false,
-        message: {
-            error: {
-                code: 'too_many_ranked_access_requests',
-                message: 'Too many Ranked access requests. Please try again shortly.',
-                retryable: true,
-            },
-        },
-    });
 
     const router = express.Router();
 
@@ -453,32 +350,22 @@ export function createAccountRankedLadderRouter({
 
     router.post(
         '/access',
-        accessLimiter,
         asyncRoute(async (req, res) => {
             const installationId = requireInstallationId(req);
             const accessToken = requireBearerToken(req);
             const body = requireBody(req);
-            const timezone = optionalText(
-                body.timezone,
-                'timezone',
-                100
-            );
-            const policy = await getAccessPolicy();
-            const result = await policy.authorizeAndGetAccess({
+            const result = await service.getRankedAccess({
                 installationId,
                 accessToken,
-                timezone,
+                timezone: requireText(body.timezone, 'timezone', 100),
             });
 
             return res.status(200).json({
                 success: true,
-                schemaVersion: RANKED_ACCESS_SCHEMA_VERSION,
+                schemaVersion: result.schemaVersion,
                 accountId: result.accountId,
                 installationId: result.installationId,
-                access: serializeAccess(
-                    result.access,
-                    freeAccessEnabled
-                ),
+                access: serializeAccess(result.access),
             });
         })
     );
@@ -489,64 +376,16 @@ export function createAccountRankedLadderRouter({
             const installationId = requireInstallationId(req);
             const accessToken = requireBearerToken(req);
             const body = requireBody(req);
-            const requestId = requireUUID(body.requestId, 'requestId');
-            const philosopherId = requireText(
-                body.philosopherId,
-                'philosopherId',
-                100
-            );
-            const debateMode = requireText(
-                body.debateMode,
-                'debateMode',
-                20
-            );
-            const timezone = optionalText(
-                body.timezone,
-                'timezone',
-                100
-            );
-
-            let reservedAccess = null;
-
-            // This is intentionally rollout-gated. While the flag is false,
-            // the live App Store client follows the exact pre-change start
-            // path. Enabling the flag adds the free-tier reservation before
-            // any ladder debate can be created, preserving one-start-per-day
-            // semantics across retries and multiple devices.
-            if (freeAccessEnabled) {
-                const policy = await getAccessPolicy();
-                reservedAccess =
-                    await policy.authorizeAndReserveLadderStart({
-                        installationId,
-                        accessToken,
-                        requestId,
-                        philosopherId,
-                        timezone,
-                    });
-            }
 
             const result = await service.startLadderDebate({
                 installationId,
                 accessToken,
-                requestId,
-                philosopherId,
-                debateMode,
+                requestId: requireUUID(body.requestId, 'requestId'),
+                philosopherId: requireText(body.philosopherId, 'philosopherId', 100),
+                debateMode: requireText(body.debateMode, 'debateMode', 20),
+                timezone: requireText(body.timezone, 'timezone', 100),
                 language: resolveRequestLanguage(req),
             });
-
-            if (
-                reservedAccess &&
-                (
-                    result.accountId !== reservedAccess.accountId ||
-                    result.installationId !== reservedAccess.installationId
-                )
-            ) {
-                fail(
-                    'ranked_access_identity_mismatch',
-                    'The Ranked access reservation returned an inconsistent account identity.',
-                    { status: 503, retryable: true }
-                );
-            }
 
             return res
                 .status(result.created ? 201 : 200)
