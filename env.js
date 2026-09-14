@@ -8,6 +8,10 @@
 
 import dotenv from 'dotenv';
 import { installAnthropicUsageTracking } from './lib/anthropicUsageTracking.js';
+import { installAnthropicCostOptimization } from './lib/anthropicCostOptimizer.js';
 
 dotenv.config();
+// Install usage tracking first so the optimizer's rewritten requests still flow
+// through the independent Postgres usage/cost ledger.
 installAnthropicUsageTracking();
+installAnthropicCostOptimization();
