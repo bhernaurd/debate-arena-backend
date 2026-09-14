@@ -7,4 +7,7 @@
 // module initializes.
 
 import dotenv from 'dotenv';
+import { installAnthropicUsageTracking } from './lib/anthropicUsageTracking.js';
+
 dotenv.config();
+installAnthropicUsageTracking();
