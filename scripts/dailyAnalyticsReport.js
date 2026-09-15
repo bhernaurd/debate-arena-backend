@@ -2,3 +2,4 @@
 // implementation lives in the account/flow/platform-aware report module.
 import './dailyAnalyticsReportV2.js';
 import './dailyClaudeCostReport.js';
+import './dailyPaywallReport.js';
