@@ -240,6 +240,59 @@ GROUP BY p.platform
 ORDER BY CASE p.platform WHEN 'ios' THEN 1 ELSE 2 END;
 `;
 
+const SEVEN_DAY_DETAIL_SQL = `
+WITH params AS (
+  SELECT
+    ((NOW() AT TIME ZONE 'America/Chicago')::date - 1)::date AS end_date,
+    ((NOW() AT TIME ZONE 'America/Chicago')::date - 7)::date AS start_date
+),
+days AS (
+  SELECT generate_series(params.start_date, params.end_date, INTERVAL '1 day')::date AS active_date
+  FROM params
+),
+installation_accounts AS (
+  SELECT DISTINCT ON (installation_id) installation_id, account_id
+  FROM account_installations
+  ORDER BY installation_id, (unlinked_at IS NULL) DESC, updated_at DESC, linked_at DESC
+),
+excluded_accounts AS (
+  SELECT DISTINCT ia.account_id
+  FROM excluded_analytics_users x
+  JOIN installation_accounts ia ON ia.installation_id = x.user_id
+),
+account_activity AS (
+  SELECT DISTINCT uad.active_date, ia.account_id
+  FROM user_activity_days uad
+  JOIN installation_accounts ia ON ia.installation_id = uad.user_id
+  WHERE NOT EXISTS (SELECT 1 FROM excluded_analytics_users x WHERE x.user_id = uad.user_id)
+    AND NOT EXISTS (SELECT 1 FROM excluded_accounts ea WHERE ea.account_id = ia.account_id)
+),
+first_seen AS (
+  SELECT account_id, MIN(active_date) AS first_active_date
+  FROM account_activity
+  GROUP BY account_id
+),
+daily_active AS (
+  SELECT active_date, COUNT(DISTINCT account_id) AS daily_active_users
+  FROM account_activity
+  GROUP BY active_date
+),
+daily_new AS (
+  SELECT first_active_date AS active_date, COUNT(DISTINCT account_id) AS new_users
+  FROM first_seen
+  GROUP BY first_active_date
+)
+SELECT
+  TO_CHAR(days.active_date, 'MM-DD-YYYY Dy') AS report_date,
+  COALESCE(daily_active.daily_active_users, 0) AS daily_active_users,
+  COALESCE(daily_new.new_users, 0) AS new_users,
+  COALESCE(daily_active.daily_active_users, 0) - COALESCE(daily_new.new_users, 0) AS returning_users
+FROM days
+LEFT JOIN daily_active ON days.active_date = daily_active.active_date
+LEFT JOIN daily_new ON days.active_date = daily_new.active_date
+ORDER BY days.active_date DESC;
+`;
+
 function trackingWarnings(row) {
   const warnings = [];
   const raw = toNumber(row.raw_events);
@@ -254,10 +307,31 @@ function trackingWarnings(row) {
   return warnings;
 }
 
+function buildSevenDayMessage(rows) {
+  const sevenDayLines = rows.map((day) => [
+    `<b>${day.report_date}</b>`,
+    `Daily Active Users: ${toNumber(day.daily_active_users)}`,
+    `New users: ${toNumber(day.new_users)}`,
+    `Returning users: ${toNumber(day.returning_users)}`,
+  ].join('\n'));
+
+  return [
+    `📊 <b>7-Day User Activity Report</b>`,
+    ``,
+    `<b>Last 7 completed Central-time days</b>`,
+    ``,
+    sevenDayLines.join('\n\n'),
+  ].join('\n');
+}
+
 async function main() {
   const client = await pool.connect();
   try {
-    const [summaryResult, platformResult] = await Promise.all([client.query(SQL), client.query(PLATFORM_SQL)]);
+    const [summaryResult, platformResult, sevenDayResult] = await Promise.all([
+      client.query(SQL),
+      client.query(PLATFORM_SQL),
+      client.query(SEVEN_DAY_DETAIL_SQL),
+    ]);
     const row = summaryResult.rows[0];
     if (!row) throw new Error('Daily analytics query returned no row.');
 
@@ -287,10 +361,25 @@ async function main() {
     if (warnings.length > 0) lines.push('', '<b>⚠️ TRACKING</b>', ...warnings);
 
     const message = lines.join('\n');
+    const sevenDayMessage = buildSevenDayMessage(sevenDayResult.rows);
     const subject = `The Agora Daily Report — ${row.report_date_label}`;
+    const telegramDelivery = (async () => {
+      await sendTelegramMessage(message);
+      await sendTelegramMessage(sevenDayMessage);
+      return { success: true };
+    })();
     const deliveries = await Promise.allSettled([
-      sendTelegramMessage(message),
-      sendAnalyticsEmail({ subject, reportText: plainText(message) }),
+      telegramDelivery,
+      sendAnalyticsEmail({
+        subject,
+        reportText: [
+          plainText(message),
+          '',
+          '────────────────────────',
+          '',
+          plainText(sevenDayMessage),
+        ].join('\n'),
+      }),
     ]);
     const failed = deliveries.filter((result) => result.status === 'rejected');
     if (failed.length === deliveries.length) throw failed[0].reason;
