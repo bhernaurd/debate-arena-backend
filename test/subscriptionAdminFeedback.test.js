@@ -87,3 +87,14 @@ test('feedback can be permanently deleted from the private dashboard', () => {
     /Delete this feedback permanently\? This cannot be undone\./
   );
 });
+
+
+test('feedback table exposes an inline trash action beside review controls', () => {
+  assert.match(feedbackUiSource, /feedback-row-actions/);
+  assert.match(feedbackUiSource, /data-feedback-delete/);
+  assert.match(feedbackUiSource, /aria-label="Delete feedback"/);
+  assert.match(
+    feedbackUiSource,
+    /Delete this feedback permanently\? This cannot be undone\./
+  );
+});
