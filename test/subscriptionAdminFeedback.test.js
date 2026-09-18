@@ -67,3 +67,23 @@ test('feedback dashboard shows an unread badge and summary metrics', () => {
   assert.match(feedbackUiSource, /Feature ideas/);
   assert.match(feedbackUiSource, /Bugs/);
 });
+
+
+test('feedback can be permanently deleted from the private dashboard', () => {
+  assert.match(
+    dashboardSource,
+    /router\.delete\('\/data\/feedback\/:feedbackId'/
+  );
+  assert.match(
+    dashboardSource,
+    /DELETE FROM founder_feedback/
+  );
+  assert.match(
+    feedbackUiSource,
+    /Delete feedback/
+  );
+  assert.match(
+    feedbackUiSource,
+    /Delete this feedback permanently\? This cannot be undone\./
+  );
+});
