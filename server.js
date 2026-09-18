@@ -29,7 +29,7 @@ import { createAccountRankedPlacementRouter } from './accountRankedPlacementRout
 import { createAccountRankedDebateRouter } from './accountRankedDebateRoutes.js';
 import { createAccountRankedLadderRouter } from './accountRankedLadderRoutes.js';
 import { createRankedPhilosopherEligibilityRouter } from './rankedPhilosopherEligibilityRoutes.js';
-import { createAiContentReportRouter } from './aiContentReportRoutes.js';
+import { createAiContentReportRouter } from './aiContentReportRoutes.js';\nimport { createFounderFeedbackRouter } from './founderFeedbackRoutes.js';
 import { createAccountAuthService } from './lib/accountAuthService.js';
 import { createAccountDebateHistoryService } from './lib/accountDebateHistoryService.js';
 import { createAccountAchievementService } from './lib/accountAchievementService.js';
@@ -256,6 +256,20 @@ const accountAchievementLimiter = rateLimit({
     error: {
       code: 'too_many_achievement_sync_requests',
       message: 'Too many achievement sync requests. Please try again shortly.',
+      retryable: true,
+    },
+  },
+});
+
+const founderFeedbackLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'too_many_feedback_submissions',
+      message: 'Too many feedback submissions. Please try again shortly.',
       retryable: true,
     },
   },
@@ -493,6 +507,15 @@ app.use(
   accountAchievementLimiter,
   createAccountAchievementRouter({
     service: accountAchievementService,
+  })
+);
+
+app.use(
+  '/api/account/feedback',
+  founderFeedbackLimiter,
+  createFounderFeedbackRouter({
+    pool,
+    accountAuthService,
   })
 );
 
