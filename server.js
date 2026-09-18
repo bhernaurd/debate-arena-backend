@@ -29,7 +29,8 @@ import { createAccountRankedPlacementRouter } from './accountRankedPlacementRout
 import { createAccountRankedDebateRouter } from './accountRankedDebateRoutes.js';
 import { createAccountRankedLadderRouter } from './accountRankedLadderRoutes.js';
 import { createRankedPhilosopherEligibilityRouter } from './rankedPhilosopherEligibilityRoutes.js';
-import { createAiContentReportRouter } from './aiContentReportRoutes.js';\nimport { createFounderFeedbackRouter } from './founderFeedbackRoutes.js';
+import { createAiContentReportRouter } from './aiContentReportRoutes.js';
+import { createFounderFeedbackRouter } from './founderFeedbackRoutes.js';
 import { createAccountAuthService } from './lib/accountAuthService.js';
 import { createAccountDebateHistoryService } from './lib/accountDebateHistoryService.js';
 import { createAccountAchievementService } from './lib/accountAchievementService.js';
