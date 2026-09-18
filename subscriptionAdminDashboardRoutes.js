@@ -37,6 +37,9 @@ import {
   enhanceSubscriptionAdminMobileHtml,
 } from './lib/subscriptionAdminMobileUi.js';
 import {
+  enhanceSubscriptionAdminFeedbackHtml,
+} from './lib/subscriptionAdminFeedbackUi.js';
+import {
   getAppleSubscriptionVerificationState,
 } from './lib/appleSubscriptionVerificationState.js';
 
@@ -126,7 +129,8 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
     res.send = (body) => {
       const enhancedBody =
         typeof body === 'string'
-          ? enhanceSubscriptionAdminMobileHtml(
+          ? enhanceSubscriptionAdminFeedbackHtml(
+              enhanceSubscriptionAdminMobileHtml(
               enhanceSubscriptionAdminSubscribersHtml(
               enhanceSubscriptionAdminAutoRenewHtml(
               enhanceSubscriptionAdminAccountsHtml(
@@ -145,6 +149,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
               )
             )
             )
+              )
           : body;
 
       return originalSend(enhancedBody);
@@ -480,7 +485,240 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
   }
 });
 
-router.get('/data/history', async (_req, res) => {
+
+  router.get('/data/feedback', async (req, res) => {
+    try {
+      const allowedStatuses = new Set(['all', 'new', 'reviewed']);
+      const allowedCategories = new Set([
+        'all',
+        'general',
+        'feature_idea',
+        'bug',
+        'other',
+      ]);
+
+      const status = allowedStatuses.has(String(req.query.status || ''))
+        ? String(req.query.status)
+        : 'all';
+      const category = allowedCategories.has(String(req.query.category || ''))
+        ? String(req.query.category)
+        : 'all';
+      const q = String(req.query.q || '').trim().slice(0, 200);
+      const parsedLimit = Number.parseInt(String(req.query.limit || '200'), 10);
+      const limit = Number.isFinite(parsedLimit)
+        ? Math.max(1, Math.min(200, parsedLimit))
+        : 200;
+
+      const params = [];
+      const where = [];
+
+      if (status === 'new') {
+        where.push('f.reviewed_at IS NULL');
+      } else if (status === 'reviewed') {
+        where.push('f.reviewed_at IS NOT NULL');
+      }
+
+      if (category !== 'all') {
+        params.push(category);
+        where.push(\`f.category = $\${params.length}\`);
+      }
+
+      if (q) {
+        params.push(\`%\${q}%\`);
+        const p = \`$\${params.length}\`;
+        where.push(\`(
+          f.message ILIKE \${p}
+          OR f.account_id::text ILIKE \${p}
+          OR COALESCE(a.display_name, '') ILIKE \${p}
+          OR COALESCE(ai.email, '') ILIKE \${p}
+          OR COALESCE(gi.email, '') ILIKE \${p}
+          OR COALESCE(gi.display_name, '') ILIKE \${p}
+        )\`);
+      }
+
+      params.push(limit);
+      const limitParam = \`$\${params.length}\`;
+
+      const [feedbackResult, summaryResult] = await Promise.all([
+        historyPool.query(
+          \`
+            WITH latest_apple_identity AS (
+              SELECT DISTINCT ON (account_id)
+                account_id,
+                email
+              FROM account_apple_identities
+              ORDER BY
+                account_id,
+                last_authenticated_at DESC NULLS LAST,
+                created_at DESC
+            ),
+            latest_google_identity AS (
+              SELECT DISTINCT ON (account_id)
+                account_id,
+                email,
+                display_name
+              FROM account_google_identities
+              ORDER BY
+                account_id,
+                last_authenticated_at DESC NULLS LAST,
+                created_at DESC
+            )
+            SELECT
+              f.id,
+              f.account_id,
+              f.installation_id,
+              f.category,
+              f.message,
+              f.client_platform,
+              f.app_version,
+              f.app_build,
+              f.created_at,
+              f.reviewed_at,
+              COALESCE(
+                NULLIF(BTRIM(a.display_name), ''),
+                NULLIF(BTRIM(gi.display_name), '')
+              ) AS display_name,
+              COALESCE(ai.email, gi.email) AS email
+            FROM founder_feedback f
+            JOIN accounts a
+              ON a.id = f.account_id
+            LEFT JOIN latest_apple_identity ai
+              ON ai.account_id = f.account_id
+            LEFT JOIN latest_google_identity gi
+              ON gi.account_id = f.account_id
+            \${where.length ? \`WHERE \${where.join(' AND ')}\` : ''}
+            ORDER BY f.created_at DESC, f.id DESC
+            LIMIT \${limitParam}
+          \`,
+          params
+        ),
+        historyPool.query(\`
+          SELECT
+            COUNT(*)::int AS total,
+            COUNT(*) FILTER (
+              WHERE reviewed_at IS NULL
+            )::int AS new_count,
+            COUNT(*) FILTER (
+              WHERE category = 'feature_idea'
+            )::int AS feature_ideas,
+            COUNT(*) FILTER (
+              WHERE category = 'bug'
+            )::int AS bugs
+          FROM founder_feedback
+        \`),
+      ]);
+
+      const summary = summaryResult.rows[0] || {};
+
+      return res.json({
+        success: true,
+        status,
+        category,
+        query: q,
+        summary: {
+          total: Number(summary.total || 0),
+          new: Number(summary.new_count || 0),
+          featureIdeas: Number(summary.feature_ideas || 0),
+          bugs: Number(summary.bugs || 0),
+        },
+        feedback: feedbackResult.rows.map((row) => ({
+          id: String(row.id),
+          accountId: row.account_id,
+          installationId: row.installation_id,
+          category: row.category,
+          message: row.message,
+          clientPlatform: row.client_platform,
+          appVersion: row.app_version,
+          appBuild: row.app_build == null ? null : Number(row.app_build),
+          createdAt: row.created_at,
+          reviewedAt: row.reviewed_at,
+          displayName: row.display_name,
+          email: row.email,
+        })),
+      });
+    } catch (error) {
+      console.error(
+        '[SubscriptionDashboardFeedback] Failed:',
+        error?.message || error
+      );
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'subscription_feedback_failed',
+          message: 'Feedback is temporarily unavailable.',
+        },
+      });
+    }
+  });
+
+  router.post('/data/feedback/:feedbackId/reviewed', async (req, res) => {
+    try {
+      const feedbackId = String(req.params.feedbackId || '').trim();
+      if (!/^\d{1,20}$/.test(feedbackId)) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'invalid_feedback_id',
+            message: 'Feedback ID is invalid.',
+          },
+        });
+      }
+
+      if (typeof req.body?.reviewed !== 'boolean') {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'invalid_feedback_review_status',
+            message: 'reviewed must be true or false.',
+          },
+        });
+      }
+
+      const result = await historyPool.query(
+        \`
+          UPDATE founder_feedback
+          SET reviewed_at = CASE
+            WHEN $2::boolean
+              THEN COALESCE(reviewed_at, NOW())
+            ELSE NULL
+          END
+          WHERE id = $1
+          RETURNING id, reviewed_at
+        \`,
+        [feedbackId, req.body.reviewed]
+      );
+
+      if (result.rowCount !== 1) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'feedback_not_found',
+            message: 'Feedback was not found.',
+          },
+        });
+      }
+
+      return res.json({
+        success: true,
+        feedbackId: String(result.rows[0].id),
+        reviewedAt: result.rows[0].reviewed_at,
+      });
+    } catch (error) {
+      console.error(
+        '[SubscriptionDashboardFeedback] Review update failed:',
+        error?.message || error
+      );
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'subscription_feedback_update_failed',
+          message: 'Feedback status could not be updated.',
+        },
+      });
+    }
+  });
+
+  router.get('/data/history', async (_req, res) => {
     try {
       const history = await loadSubscriptionAdminHistory(historyPool);
       return res.json({
