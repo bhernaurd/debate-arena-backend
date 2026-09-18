@@ -520,28 +520,28 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
 
       if (category !== 'all') {
         params.push(category);
-        where.push(\`f.category = $\${params.length}\`);
+        where.push(`f.category = $${params.length}`);
       }
 
       if (q) {
-        params.push(\`%\${q}%\`);
-        const p = \`$\${params.length}\`;
-        where.push(\`(
-          f.message ILIKE \${p}
-          OR f.account_id::text ILIKE \${p}
-          OR COALESCE(a.display_name, '') ILIKE \${p}
-          OR COALESCE(ai.email, '') ILIKE \${p}
-          OR COALESCE(gi.email, '') ILIKE \${p}
-          OR COALESCE(gi.display_name, '') ILIKE \${p}
-        )\`);
+        params.push(`%${q}%`);
+        const p = `$${params.length}`;
+        where.push(`(
+          f.message ILIKE ${p}
+          OR f.account_id::text ILIKE ${p}
+          OR COALESCE(a.display_name, '') ILIKE ${p}
+          OR COALESCE(ai.email, '') ILIKE ${p}
+          OR COALESCE(gi.email, '') ILIKE ${p}
+          OR COALESCE(gi.display_name, '') ILIKE ${p}
+        )`);
       }
 
       params.push(limit);
-      const limitParam = \`$\${params.length}\`;
+      const limitParam = `$${params.length}`;
 
       const [feedbackResult, summaryResult] = await Promise.all([
         historyPool.query(
-          \`
+          `
             WITH latest_apple_identity AS (
               SELECT DISTINCT ON (account_id)
                 account_id,
@@ -586,13 +586,13 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
               ON ai.account_id = f.account_id
             LEFT JOIN latest_google_identity gi
               ON gi.account_id = f.account_id
-            \${where.length ? \`WHERE \${where.join(' AND ')}\` : ''}
+            ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
             ORDER BY f.created_at DESC, f.id DESC
-            LIMIT \${limitParam}
-          \`,
+            LIMIT ${limitParam}
+          `,
           params
         ),
-        historyPool.query(\`
+        historyPool.query(`
           SELECT
             COUNT(*)::int AS total,
             COUNT(*) FILTER (
@@ -605,7 +605,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
               WHERE category = 'bug'
             )::int AS bugs
           FROM founder_feedback
-        \`),
+        `),
       ]);
 
       const summary = summaryResult.rows[0] || {};
@@ -675,7 +675,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
       }
 
       const result = await historyPool.query(
-        \`
+        `
           UPDATE founder_feedback
           SET reviewed_at = CASE
             WHEN $2::boolean
@@ -684,7 +684,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
           END
           WHERE id = $1
           RETURNING id, reviewed_at
-        \`,
+        `,
         [feedbackId, req.body.reviewed]
       );
 
