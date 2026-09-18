@@ -718,6 +718,59 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
     }
   });
 
+  router.delete('/data/feedback/:feedbackId', async (req, res) => {
+    try {
+      const feedbackId = String(req.params.feedbackId || '').trim();
+
+      if (!/^\d{1,20}$/.test(feedbackId)) {
+        return res.status(400).json({
+          success: false,
+          error: {
+            code: 'invalid_feedback_id',
+            message: 'Feedback ID is invalid.',
+          },
+        });
+      }
+
+      const result = await historyPool.query(
+        `
+          DELETE FROM founder_feedback
+          WHERE id = $1
+          RETURNING id
+        `,
+        [feedbackId]
+      );
+
+      if (result.rowCount !== 1) {
+        return res.status(404).json({
+          success: false,
+          error: {
+            code: 'feedback_not_found',
+            message: 'Feedback was not found.',
+          },
+        });
+      }
+
+      return res.json({
+        success: true,
+        feedbackId: String(result.rows[0].id),
+        deleted: true,
+      });
+    } catch (error) {
+      console.error(
+        '[SubscriptionDashboardFeedback] Delete failed:',
+        error?.message || error
+      );
+      return res.status(500).json({
+        success: false,
+        error: {
+          code: 'subscription_feedback_delete_failed',
+          message: 'Feedback could not be deleted.',
+        },
+      });
+    }
+  });
+
   router.get('/data/history', async (_req, res) => {
     try {
       const history = await loadSubscriptionAdminHistory(historyPool);
