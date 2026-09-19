@@ -21,17 +21,18 @@ const EXPECTED = [
     ['camus', 'Albert Camus'],
     ['dostoevsky', 'Fyodor Dostoevsky'],
     ['kierkegaard', 'Søren Kierkegaard'],
+    ['schopenhauer', 'Arthur Schopenhauer'],
 ];
 
 test(
-    'contains the nine canonical Ranked philosophers',
+    'contains the ten canonical Ranked philosophers',
     () => {
         const philosophers =
             listRankedPhilosophers();
 
         assert.equal(
             philosophers.length,
-            9
+            10
         );
 
         assert.deepEqual(
@@ -46,7 +47,7 @@ test(
 
         assert.equal(
             rankedPhilosopherCatalogConstants.count,
-            9
+            10
         );
 
         assert.deepEqual(
@@ -152,6 +153,90 @@ test(
                     philosopher.id === 'kierkegaard'
             ),
             true
+        );
+    }
+);
+
+test(
+    'keeps Schopenhauer canonical while release-gating new Ranked starts until his Pro launch',
+    () => {
+        assert.equal(
+            findRankedPhilosopher(
+                'schopenhauer'
+            )?.name,
+            'Arthur Schopenhauer'
+        );
+
+        assert.equal(
+            isRankedPhilosopherID(
+                'schopenhauer',
+                new Date('2026-09-19T09:59:59Z')
+            ),
+            false
+        );
+
+        assert.equal(
+            isRankedPhilosopherID(
+                'schopenhauer',
+                new Date('2026-09-19T10:00:00Z')
+            ),
+            true
+        );
+
+        assert.equal(
+            listEligibleRankedPhilosophers(
+                new Date('2026-09-19T10:00:00Z')
+            ).some(
+                (philosopher) =>
+                    philosopher.id === 'schopenhauer'
+            ),
+            true
+        );
+    }
+);
+
+test(
+    'Schopenhauer carries a server-owned identity and scoring lens',
+    async () => {
+        const {
+            findRankedPhilosopherPrompt,
+        } = await import(
+            '../lib/rankedPhilosopherPrompts.js'
+        );
+
+        const prompt =
+            findRankedPhilosopherPrompt(
+                'schopenhauer'
+            );
+
+        assert.equal(
+            prompt?.name,
+            'Arthur Schopenhauer'
+        );
+
+        assert.match(
+            prompt?.systemPrompt ?? '',
+            /The World as Will and Representation/
+        );
+
+        assert.match(
+            prompt?.systemPrompt ?? '',
+            /blind, aimless striving/i
+        );
+
+        assert.match(
+            prompt?.systemPrompt ?? '',
+            /compassion is the basis of genuine morality/i
+        );
+
+        assert.match(
+            prompt?.systemPrompt ?? '',
+            /suicide is not the denial of the will-to-live/i
+        );
+
+        assert.match(
+            prompt?.systemPrompt ?? '',
+            /SCHOPENHAUER SCORING LENS/
         );
     }
 );
