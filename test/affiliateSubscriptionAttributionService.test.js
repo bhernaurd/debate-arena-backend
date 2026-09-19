@@ -241,14 +241,28 @@ test('shared affiliate offer with no account creator-code claim stays unassigned
 });
 
 
-test('automatic handoffs can only match purchases inside the handoff validity window', async () => {
+test('automatic handoffs require the same installation and the latest redeem-start window', async () => {
   const source = await readFile(
     new URL('../lib/affiliateSubscriptionAttributionService.js', import.meta.url),
     'utf8'
   );
 
-  const matches = source.match(/AND \$3 <= handoff\.expires_at/g) || [];
-  assert.equal(matches.length, 2);
+  assert.match(
+    source,
+    /WHERE handoff\.installation_id = \$1/
+  );
+  assert.match(
+    source,
+    /handoff\.last_redemption_started_at <= \$3/
+  );
+  assert.match(
+    source,
+    /AND \$3 <= handoff\.expires_at/
+  );
+  assert.doesNotMatch(
+    source,
+    /WHERE handoff\.account_id = \$1/
+  );
 });
 
 
@@ -262,6 +276,7 @@ test('automatic handoffs require an active affiliate and active creator code at 
     status: 'claimed',
     claimed_at: new Date('2026-08-14T20:01:00Z'),
     redemption_started_at: new Date('2026-08-14T19:59:00Z'),
+    last_redemption_started_at: new Date('2026-08-14T19:59:00Z'),
     normalized_apple_offer_identifier: SHARED_OFFER,
     affiliate_status: 'inactive',
     code_status: 'active',
@@ -294,6 +309,7 @@ test('claimed installation handoff takes priority and attributes without manual 
     status: 'claimed',
     claimed_at: new Date('2026-08-14T20:01:00Z'),
     redemption_started_at: new Date('2026-08-14T19:59:00Z'),
+    last_redemption_started_at: new Date('2026-08-14T19:59:00Z'),
     normalized_apple_offer_identifier: SHARED_OFFER,
   };
 
@@ -329,6 +345,7 @@ test('a handoff consumed by a same-affiliate attribution race is marked attribut
     status: 'claimed',
     claimed_at: new Date('2026-08-14T20:01:00Z'),
     redemption_started_at: new Date('2026-08-14T19:59:00Z'),
+    last_redemption_started_at: new Date('2026-08-14T19:59:00Z'),
     normalized_apple_offer_identifier: SHARED_OFFER,
   };
   const raceAttribution = {
@@ -369,6 +386,7 @@ test('a handoff that loses a different-affiliate attribution race is superseded 
     status: 'claimed',
     claimed_at: new Date('2026-08-14T20:01:00Z'),
     redemption_started_at: new Date('2026-08-14T19:59:00Z'),
+    last_redemption_started_at: new Date('2026-08-14T19:59:00Z'),
     normalized_apple_offer_identifier: SHARED_OFFER,
   };
   const raceAttribution = {
@@ -400,7 +418,7 @@ test('a handoff that loses a different-affiliate attribution race is superseded 
   assert.equal(state.alerts.length, 1);
 });
 
-test('conflicting account-level handoffs are left unassigned for review instead of guessed', async () => {
+test('account-only handoff evidence is never used for automatic creator attribution', async () => {
   const { state, client, pool } = makeHarness({
     claim: false,
     handoffs: [
@@ -413,6 +431,7 @@ test('conflicting account-level handoffs are left unassigned for review instead 
         status: 'claimed',
         claimed_at: new Date('2026-08-14T20:01:00Z'),
         redemption_started_at: new Date('2026-08-14T19:58:00Z'),
+        last_redemption_started_at: new Date('2026-08-14T19:58:00Z'),
         normalized_apple_offer_identifier: SHARED_OFFER,
       },
       {
@@ -424,6 +443,7 @@ test('conflicting account-level handoffs are left unassigned for review instead 
         status: 'claimed',
         claimed_at: new Date('2026-08-14T20:02:00Z'),
         redemption_started_at: new Date('2026-08-14T19:59:00Z'),
+        last_redemption_started_at: new Date('2026-08-14T19:59:00Z'),
         normalized_apple_offer_identifier: SHARED_OFFER,
       },
     ],
@@ -437,7 +457,7 @@ test('conflicting account-level handoffs are left unassigned for review instead 
     transaction: offerTransaction(),
   });
 
-  assert.equal(result.status, 'handoff_ambiguous_needs_review');
+  assert.equal(result.status, 'awaiting_creator_code_claim');
   assert.equal(result.attributed, false);
   assert.equal(state.attribution, null);
   assert.equal(state.alerts.length, 1);
@@ -491,6 +511,7 @@ test('production Apple transactions cannot be attributed to sandbox/test affilia
     status: 'claimed',
     claimed_at: new Date('2026-08-14T20:01:00Z'),
     redemption_started_at: new Date('2026-08-14T19:59:00Z'),
+    last_redemption_started_at: new Date('2026-08-14T19:59:00Z'),
     expires_at: new Date('2026-08-21T19:59:00Z'),
     normalized_apple_offer_identifier: SHARED_OFFER,
     affiliate_status: 'active',
@@ -526,6 +547,7 @@ test('sandbox Apple transactions can use test affiliate handoffs but production 
     status: 'claimed',
     claimed_at: new Date('2026-08-14T20:01:00Z'),
     redemption_started_at: new Date('2026-08-14T19:59:00Z'),
+    last_redemption_started_at: new Date('2026-08-14T19:59:00Z'),
     expires_at: new Date('2026-08-21T19:59:00Z'),
     normalized_apple_offer_identifier: SHARED_OFFER,
     affiliate_status: 'active',
@@ -642,6 +664,7 @@ test('exact installation context never falls back to another device account hand
       status: 'claimed',
       claimed_at: new Date('2026-08-14T19:59:00Z'),
       redemption_started_at: new Date('2026-08-14T19:58:00Z'),
+      last_redemption_started_at: new Date('2026-08-14T19:58:00Z'),
       expires_at: new Date('2026-08-21T19:58:00Z'),
       superseded_at: null,
       attributed_original_transaction_id: null,
@@ -683,6 +706,7 @@ test('public App Clip rollout never auto-attributes from account-only handoff ev
       status: 'claimed',
       claimed_at: new Date('2026-08-14T19:59:00Z'),
       redemption_started_at: new Date('2026-08-14T19:58:00Z'),
+      last_redemption_started_at: new Date('2026-08-14T19:58:00Z'),
       expires_at: new Date('2026-08-21T19:58:00Z'),
       superseded_at: null,
       attributed_original_transaction_id: null,
