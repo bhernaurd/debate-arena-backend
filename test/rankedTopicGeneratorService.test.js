@@ -204,6 +204,59 @@ test(
 );
 
 test(
+    'generates a Schopenhauer Ranked topic after his release gate',
+    async () => {
+        let request;
+
+        const service =
+            createRankedTopicGeneratorService({
+                messageClient:
+                    async (input) => {
+                        request = input;
+                        return response(
+                            'Can satisfying your strongest desire give lasting happiness if another desire soon replaces it?',
+                            'Desire and satisfaction',
+                            'If every satisfaction merely clears the stage for another want, on what ground do you still call desire a path to happiness?'
+                        );
+                    },
+                now:
+                    () =>
+                        new Date(
+                            '2026-09-19T10:00:00Z'
+                        ),
+            });
+
+        const result =
+            await service.generateTopic({
+                philosopherId:
+                    'schopenhauer',
+                debateMode:
+                    'balanced',
+            });
+
+        assert.equal(
+            result.philosopherId,
+            'schopenhauer'
+        );
+
+        assert.equal(
+            result.philosopherName,
+            'Arthur Schopenhauer'
+        );
+
+        assert.match(
+            request.messages[0].content,
+            /SCHOPENHAUER SCORING LENS/
+        );
+
+        assert.match(
+            request.messages[0].content,
+            /never romanticize suicide, self-harm, death, despair, anxiety, or suffering/i
+        );
+    }
+);
+
+test(
     'rejects invalid Ranked debate modes',
     async () => {
         const service =
