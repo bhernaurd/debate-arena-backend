@@ -41,6 +41,9 @@ import {
 import {
     applyAgoraAiSafetyPolicyToAnthropicPayload,
 } from './lib/aiSafetyPolicy.js';
+import {
+    ensureExpandedPhilosopherSystemPrompt,
+} from './lib/expandedPhilosopherPrompts.js';
 
 const router = express.Router();
 const { Pool } = pg;
@@ -1338,15 +1341,24 @@ router.post('/api/ai-jobs', async (req, res) => {
             });
         }
 
-        const payload = {
-            messages: normalizedMessages,
-            systemPrompt: cleanSystemPrompt,
-        };
-
         const safeMetadata =
             metadata && typeof metadata === 'object' && !Array.isArray(metadata)
                 ? metadata
                 : {};
+
+        const effectiveSystemPrompt =
+            ensureExpandedPhilosopherSystemPrompt({
+                philosopherId: safeMetadata.philosopherId,
+                systemPrompt: cleanSystemPrompt,
+            });
+
+        const canonicalExpandedPromptApplied =
+            effectiveSystemPrompt !== cleanSystemPrompt;
+
+        const payload = {
+            messages: normalizedMessages,
+            systemPrompt: effectiveSystemPrompt,
+        };
 
         // Verify both supported server-authoritative Pro paths before opening a
         // database transaction. App Store clients may provide signed StoreKit
@@ -1499,6 +1511,7 @@ router.post('/api/ai-jobs', async (req, res) => {
                                     : 'free_no_verified_entitlement'))),
 
                     expandedAgoraAccessReason: accessDecision.reason,
+                    canonicalExpandedPromptApplied,
                 }),
             ]
         );
