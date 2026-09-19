@@ -490,6 +490,84 @@ async function storedVerifiedProAccess(
     };
 }
 
+
+async function storedVerifiedProAccessForInstallation(
+    userId
+) {
+    if (!isValidUserId(userId)) {
+        return null;
+    }
+
+    const result = await pool.query(
+        `
+        SELECT
+            se.original_transaction_id,
+            se.status,
+            se.is_trial,
+            se.product_id,
+            se.environment,
+            se.expires_date,
+            se.grace_period_expires_date
+        FROM subscription_entitlements se
+        WHERE EXISTS (
+            SELECT 1
+            FROM subscription_installation_links link
+            WHERE link.original_transaction_id =
+                    se.original_transaction_id
+              AND link.environment = se.environment
+              AND link.user_id = $1
+        )
+          AND (
+            (
+                se.status IN ('trial', 'active')
+                AND se.expires_date > NOW()
+            )
+            OR (
+                se.status = 'grace_period'
+                AND se.grace_period_expires_date > NOW()
+            )
+          )
+        ORDER BY
+            CASE WHEN se.environment = 'Production' THEN 0 ELSE 1 END,
+            se.updated_at DESC
+        LIMIT 1
+        `,
+        [userId]
+    );
+
+    const entitlement = result.rows[0];
+
+    if (!entitlement) {
+        return null;
+    }
+
+    const isTrial = entitlement.is_trial === true;
+    const isGracePeriod =
+        entitlement.status === 'grace_period';
+    const effectiveExpiry = isGracePeriod
+        ? entitlement.grace_period_expires_date
+        : entitlement.expires_date;
+
+    return {
+        isVerifiedPro: true,
+        reason: isGracePeriod
+            ? 'verified_installation_grace_period'
+            : 'verified_installation_entitlement',
+        analyticsAccessTier:
+            isTrial ? 'trial' : 'paid_pro',
+        isTrial,
+        environment: entitlement.environment,
+        productId: entitlement.product_id,
+        originalTransactionId:
+            entitlement.original_transaction_id,
+        expiresDate: effectiveExpiry
+            ? new Date(effectiveExpiry).getTime()
+            : null,
+        verificationSource:
+            'verified_installation_subscription_database',
+    };
+}
+
 async function verifyProAccessForJob(
     jobType,
     proTransactionJWS,
@@ -521,6 +599,23 @@ async function verifyProAccessForJob(
 
         if (storedVerification) {
             verification = storedVerification;
+        }
+    }
+
+    // Some StoreKit sessions can temporarily omit currentEntitlements even
+    // though this installation previously proved and synced an active purchase.
+    // Fall back only to the server's own signed-transaction-derived database
+    // link for this installation. Client-reported Pro metadata is still never
+    // accepted as access proof.
+    if (verification.isVerifiedPro !== true) {
+        const installationVerification =
+            await storedVerifiedProAccessForInstallation(
+                userId
+            );
+
+        if (installationVerification) {
+            verification =
+                installationVerification;
         }
     }
 
