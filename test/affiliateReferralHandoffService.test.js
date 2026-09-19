@@ -132,6 +132,7 @@ function makePool() {
           state.handoff.redemption_started_at || new Date();
         state.handoff.last_redemption_started_at = new Date();
         state.handoff.redemption_start_count += 1;
+        state.handoff.expires_at = params[1];
         return { rows: [state.handoff], rowCount: 1 };
       }
 
@@ -288,11 +289,23 @@ test('referral creates a hashed pending handoff; open does not claim it; redeem-
     error => error?.code === 'affiliate_handoff_not_redeemed'
   );
 
+  const redemptionStartedAtMs = Date.now();
   const redemption = await service.beginRedemption(rawToken);
   assert.equal(redemption.handoff.status, 'redemption_started');
   assert.equal(
     new URL(redemption.redemptionUrl).searchParams.get('code'),
     'MAXAGORA'
+  );
+
+  const redemptionExpiresAtMs =
+    new Date(state.handoff.expires_at).getTime();
+  assert.ok(
+    redemptionExpiresAtMs >=
+      redemptionStartedAtMs + (59 * 60 * 1000)
+  );
+  assert.ok(
+    redemptionExpiresAtMs <=
+      Date.now() + (60 * 60 * 1000) + 5_000
   );
 
   const claimed = await service.claimHandoff({
@@ -307,6 +320,30 @@ test('referral creates a hashed pending handoff; open does not claim it; redeem-
   assert.equal(state.handoff.installation_id, INSTALLATION_ID);
   assert.equal(state.handoff.account_id, ACCOUNT_ID);
   assert.equal(state.superseded.length, 1);
+});
+
+
+test('redeem-start shrinks a long-lived handoff to the configured short attribution window', async () => {
+  const { state, pool } = makePool();
+  const service = createAffiliateReferralHandoffService({
+    pool,
+    appAppleId: '6762416967',
+    appClipBundleId: 'com.bhernaurd.TheAgora.Clip',
+    ttlMs: 7 * 24 * 60 * 60 * 1000,
+    redemptionWindowMs: 60 * 60 * 1000,
+  });
+
+  const created = await service.createForTesting({ code: 'MAXAGORA' });
+  const rawToken = created.handoffToken;
+  const longExpiry = new Date(state.handoff.expires_at).getTime();
+
+  await service.beginRedemption(rawToken);
+
+  const shortExpiry = new Date(state.handoff.expires_at).getTime();
+
+  assert.ok(shortExpiry < longExpiry);
+  assert.ok(shortExpiry <= Date.now() + (60 * 60 * 1000) + 5_000);
+  assert.ok(shortExpiry >= Date.now() + (59 * 60 * 1000));
 });
 
 
