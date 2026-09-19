@@ -10,7 +10,7 @@
 //  question_normalized, theme, difficulty, source, generated_at, used_at).
 //
 // This version:
-// - Supports the Standard Six + Albert Camus + Fyodor Dostoevsky + Søren Kierkegaard
+// - Supports the Standard Six + Albert Camus + Fyodor Dostoevsky + Søren Kierkegaard + Arthur Schopenhauer
 // - Uses Claude-generated questions, not static fallback questions
 // - Uses Haiku for question generation
 // - Bypasses the Anthropic SDK/fetch layer because Railway was failing with:
@@ -85,6 +85,9 @@ const PHILOSOPHER_ALIASES = {
     'kierkegaard': 'Søren Kierkegaard',
     'søren kierkegaard': 'Søren Kierkegaard',
     'soren kierkegaard': 'Søren Kierkegaard',
+
+    'schopenhauer': 'Arthur Schopenhauer',
+    'arthur schopenhauer': 'Arthur Schopenhauer',
 };
 
 const PHILOSOPHER_THEMES = {
@@ -114,6 +117,9 @@ const PHILOSOPHER_THEMES = {
 
     'Søren Kierkegaard':
         'the single individual, possibility and actuality, choice and responsibility, anxiety and freedom, despair and becoming a self, aesthetic ethical and religious existence, Religiousness A and B, inward appropriation without relativism, faith and the God-man paradox, infinite resignation, repetition, the crowd and the public, commanded neighbor-love, Christendom, admiration versus imitation, risk, commitment, and living what one claims to believe',
+
+    'Arthur Schopenhauer':
+        'world as representation, will as blind striving, desire and dissatisfaction, suffering and boredom, freedom and motives, character, compassion, egoism, the principle of individuation, aesthetic contemplation, music, pessimism without nihilism, denial of the will, ascetic resignation, animal ethics, love and the species',
 };
 
 const RECENT_EXCLUSION_COUNT = 20;
