@@ -11,7 +11,7 @@ const AFFILIATE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const ACCOUNT_ID = '11111111-1111-4111-8111-111111111111';
 const INSTALLATION_ID = '11111111-aaaa-4aaa-8aaa-111111111111';
 
-function makePool() {
+function makePool({ newerIntent = null } = {}) {
   const state = {
     affiliate: {
       id: AFFILIATE_ID,
@@ -26,6 +26,7 @@ function makePool() {
     click: null,
     handoff: null,
     superseded: [],
+    newerIntent,
   };
 
   const client = {
@@ -132,7 +133,19 @@ function makePool() {
           state.handoff.redemption_started_at || new Date();
         state.handoff.last_redemption_started_at = new Date();
         state.handoff.redemption_start_count += 1;
+        state.handoff.expires_at = params[1];
         return { rows: [state.handoff], rowCount: 1 };
+      }
+
+      if (
+        text.includes('SELECT id') &&
+        text.includes('FROM affiliate_referral_handoffs') &&
+        text.includes('COALESCE(') &&
+        text.includes('> $3')
+      ) {
+        return state.newerIntent
+          ? { rows: [{ id: state.newerIntent.id }], rowCount: 1 }
+          : { rows: [], rowCount: 0 };
       }
 
       if (
@@ -288,11 +301,23 @@ test('referral creates a hashed pending handoff; open does not claim it; redeem-
     error => error?.code === 'affiliate_handoff_not_redeemed'
   );
 
+  const redemptionStartedAtMs = Date.now();
   const redemption = await service.beginRedemption(rawToken);
   assert.equal(redemption.handoff.status, 'redemption_started');
   assert.equal(
     new URL(redemption.redemptionUrl).searchParams.get('code'),
     'MAXAGORA'
+  );
+
+  const redemptionExpiresAtMs =
+    new Date(state.handoff.expires_at).getTime();
+  assert.ok(
+    redemptionExpiresAtMs >=
+      redemptionStartedAtMs + (59 * 60 * 1000)
+  );
+  assert.ok(
+    redemptionExpiresAtMs <=
+      Date.now() + (60 * 60 * 1000) + 5_000
   );
 
   const claimed = await service.claimHandoff({
@@ -307,6 +332,30 @@ test('referral creates a hashed pending handoff; open does not claim it; redeem-
   assert.equal(state.handoff.installation_id, INSTALLATION_ID);
   assert.equal(state.handoff.account_id, ACCOUNT_ID);
   assert.equal(state.superseded.length, 1);
+});
+
+
+test('redeem-start shrinks a long-lived handoff to the configured short attribution window', async () => {
+  const { state, pool } = makePool();
+  const service = createAffiliateReferralHandoffService({
+    pool,
+    appAppleId: '6762416967',
+    appClipBundleId: 'com.bhernaurd.TheAgora.Clip',
+    ttlMs: 7 * 24 * 60 * 60 * 1000,
+    redemptionWindowMs: 60 * 60 * 1000,
+  });
+
+  const created = await service.createForTesting({ code: 'MAXAGORA' });
+  const rawToken = created.handoffToken;
+  const longExpiry = new Date(state.handoff.expires_at).getTime();
+
+  await service.beginRedemption(rawToken);
+
+  const shortExpiry = new Date(state.handoff.expires_at).getTime();
+
+  assert.ok(shortExpiry < longExpiry);
+  assert.ok(shortExpiry <= Date.now() + (60 * 60 * 1000) + 5_000);
+  assert.ok(shortExpiry >= Date.now() + (59 * 60 * 1000));
 });
 
 
@@ -374,6 +423,31 @@ test('reclaiming an attributed handoff can bind the same account without superse
   assert.equal(claimed.accountBound, true);
   assert.equal(state.handoff.account_id, ACCOUNT_ID);
   assert.equal(state.superseded.length, 0);
+});
+
+
+test('a stale claim cannot replace a newer creator redemption intent on the same installation', async () => {
+  const newerIntentId = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd';
+  const { state, pool } = makePool({
+    newerIntent: { id: newerIntentId },
+  });
+  const service = createAffiliateReferralHandoffService({
+    pool,
+    appAppleId: '6762416967',
+    appClipBundleId: 'com.bhernaurd.TheAgora.Clip',
+  });
+
+  const created = await service.createForTesting({ code: 'MAXAGORA' });
+  const rawToken = created.handoffToken;
+  await service.beginRedemption(rawToken);
+
+  const claimed = await service.claimHandoff({
+    rawToken,
+    installationId: INSTALLATION_ID,
+  });
+
+  assert.equal(claimed.status, 'superseded');
+  assert.equal(state.handoff.status, 'superseded');
 });
 
 
