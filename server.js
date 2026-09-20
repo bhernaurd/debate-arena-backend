@@ -60,6 +60,38 @@ import './aiJobWorker.js';
 const { Pool } = pg;
 
 const app = express();
+const APPLE_APP_SITE_ASSOCIATION = Object.freeze({
+  appclips: {
+    apps: [
+      'H38V5Q5VNH.com.bhernaurd.TheAgora.Clip',
+    ],
+  },
+  applinks: {
+    details: [
+      {
+        appIDs: [
+          'H38V5Q5VNH.com.bhernaurd.TheAgora',
+        ],
+        components: [
+          {
+            '/': '/r/*',
+            comment: 'The Agora creator referral links',
+          },
+        ],
+      },
+    ],
+  },
+});
+
+function sendAppleAppSiteAssociation(_req, res) {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
+  return res.status(200).send(JSON.stringify(APPLE_APP_SITE_ASSOCIATION));
+}
+
+app.get('/.well-known/apple-app-site-association', sendAppleAppSiteAssociation);
+app.get('/apple-app-site-association', sendAppleAppSiteAssociation);
+
 app.all('/tiktoksEj6XzEmPpvavjyCl6uI5SXIFhGYJ6hC.txt', (req, res) => {
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   res.setHeader('Cache-Control', 'no-store');
