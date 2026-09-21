@@ -325,12 +325,11 @@ function buildSevenDayMessage(rows) {
 }
 
 async function main() {
-  const client = await pool.connect();
   try {
     const [summaryResult, platformResult, sevenDayResult] = await Promise.all([
-      client.query(SQL),
-      client.query(PLATFORM_SQL),
-      client.query(SEVEN_DAY_DETAIL_SQL),
+      pool.query(SQL),
+      pool.query(PLATFORM_SQL),
+      pool.query(SEVEN_DAY_DETAIL_SQL),
     ]);
     const row = summaryResult.rows[0];
     if (!row) throw new Error('Daily analytics query returned no row.');
@@ -385,7 +384,6 @@ async function main() {
     if (failed.length === deliveries.length) throw failed[0].reason;
     console.log('[dailyAnalyticsReportV2] Delivery results:', deliveries);
   } finally {
-    client.release();
     await pool.end();
   }
 }
