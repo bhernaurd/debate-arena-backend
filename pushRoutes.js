@@ -206,7 +206,7 @@ async function pruneOlderTokensForSameTarget(client, {
     return result.rowCount;
 }
 
-async function upsertPushToken(pool, {
+export async function upsertPushToken(pool, {
     deviceToken,
     platform,
     timezone,
@@ -232,6 +232,40 @@ async function upsertPushToken(pool, {
     try {
         await client.query('BEGIN');
 
+        // A device token is the legacy primary key while the current registration
+        // identity is (install_id, apns_environment). During upgrades/reinstalls,
+        // an existing token can still be attached to an older installation ID.
+        // Serialize migrations for the same token, remove only that stale token
+        // row, and then let the installation/environment upsert remain canonical.
+        // This prevents push_tokens_pkey collisions without creating duplicate
+        // delivery targets.
+        await client.query(
+            'SELECT pg_advisory_xact_lock(hashtext($1))',
+            [deviceToken]
+        );
+
+        const displacedToken = await client.query(
+            `DELETE FROM push_tokens
+             WHERE device_token = $1
+               AND (
+                    install_id IS DISTINCT FROM $2
+                    OR apns_environment IS DISTINCT FROM $3
+               )
+             RETURNING
+                user_id,
+                last_completed_challenge_id,
+                last_completed_challenge_date`,
+            [
+                deviceToken,
+                finalInstallId,
+                finalEnvironment,
+            ]
+        );
+
+        const displaced = displacedToken.rows[0] || null;
+        const effectiveRegistrationUserId =
+            finalUserId || displaced?.user_id || null;
+
         const result = await client.query(
             `INSERT INTO push_tokens (
                 device_token,
@@ -245,6 +279,8 @@ async function upsertPushToken(pool, {
                 apns_environment,
                 language_code,
                 language_preference,
+                last_completed_challenge_id,
+                last_completed_challenge_date,
                 registered_at,
                 updated_at,
                 created_at,
@@ -264,6 +300,8 @@ async function upsertPushToken(pool, {
                 $9,
                 $10,
                 $11,
+                $12,
+                $13,
                 now(),
                 now(),
                 now(),
@@ -294,12 +332,14 @@ async function upsertPushToken(pool, {
                 timezone,
                 finalNotificationsEnabled,
                 finalInstallId,
-                finalUserId,
+                effectiveRegistrationUserId,
                 normalizeText(appVersion),
                 normalizeText(buildNumber),
                 finalEnvironment,
                 finalLanguage,
                 finalLanguagePreference,
+                displaced?.last_completed_challenge_id || null,
+                displaced?.last_completed_challenge_date || null,
             ]
         );
 
