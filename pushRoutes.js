@@ -244,6 +244,19 @@ export async function upsertPushToken(pool, {
             [deviceToken]
         );
 
+        const canonicalTarget = await client.query(
+            `SELECT user_id
+             FROM push_tokens
+             WHERE install_id = $1
+               AND apns_environment = $2
+             LIMIT 1
+             FOR UPDATE`,
+            [
+                finalInstallId,
+                finalEnvironment,
+            ]
+        );
+
         const displacedToken = await client.query(
             `DELETE FROM push_tokens
              WHERE device_token = $1
@@ -262,9 +275,13 @@ export async function upsertPushToken(pool, {
             ]
         );
 
+        const canonical = canonicalTarget.rows[0] || null;
         const displaced = displacedToken.rows[0] || null;
         const effectiveRegistrationUserId =
-            finalUserId || displaced?.user_id || null;
+            finalUserId ||
+            canonical?.user_id ||
+            displaced?.user_id ||
+            null;
 
         const result = await client.query(
             `INSERT INTO push_tokens (
