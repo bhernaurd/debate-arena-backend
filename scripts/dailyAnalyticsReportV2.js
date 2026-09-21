@@ -380,8 +380,13 @@ async function main() {
         ].join('\n'),
       }),
     ]);
-    const failed = deliveries.filter((result) => result.status === 'rejected');
-    if (failed.length === deliveries.length) throw failed[0].reason;
+    const [telegramResult, emailResult] = deliveries;
+    if (telegramResult.status === 'rejected') {
+      throw telegramResult.reason;
+    }
+    if (emailResult.status === 'rejected') {
+      console.error('[dailyAnalyticsReportV2] Email delivery failed:', emailResult.reason);
+    }
     console.log('[dailyAnalyticsReportV2] Delivery results:', deliveries);
   } finally {
     await pool.end();
