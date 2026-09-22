@@ -30,7 +30,7 @@ CREATE TABLE account_mirror_cycles (
     questionnaire_completed_at TIMESTAMPTZ,
 
     questionnaire_version TEXT NOT NULL DEFAULT 'mirror-questionnaire-v1',
-    archetype_model_version TEXT NOT NULL DEFAULT 'mirror-archetypes-v1',
+    archetype_model_version TEXT NOT NULL DEFAULT 'mirror-archetypes-v2',
     evidence_engine_version TEXT NOT NULL DEFAULT 'mirror-evidence-engine-v1',
     extractor_version TEXT NOT NULL DEFAULT 'mirror-debate-evidence-v1',
     analysis_prompt_version TEXT NOT NULL DEFAULT 'mirror-analysis-v1',
