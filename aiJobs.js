@@ -95,6 +95,7 @@ const MODEL_BY_JOB_TYPE = {
     daily_reply: DEFAULT_CLAUDE_MODEL,
     debate_report: DEFAULT_CLAUDE_MODEL,
     debate_report_insight: DEFAULT_CLAUDE_MODEL,
+    mirror_baseline_analysis: PRO_CLAUDE_MODEL,
 };
 
 const MAX_TOKENS_BY_JOB_TYPE = {
@@ -104,6 +105,7 @@ const MAX_TOKENS_BY_JOB_TYPE = {
     daily_reply: 900,
     debate_report: 2200,
     debate_report_insight: 850,
+    mirror_baseline_analysis: 1800,
 };
 
 const TEMPERATURE_BY_JOB_TYPE = {
@@ -113,6 +115,7 @@ const TEMPERATURE_BY_JOB_TYPE = {
     daily_reply: 0.7,
     debate_report: 0.25,
     debate_report_insight: 0.25,
+    mirror_baseline_analysis: 0.2,
 };
 
 // Standard Balanced debates use a smaller one-call output budget so replies
@@ -144,6 +147,10 @@ const PRO_MODEL_JOB_TYPES = new Set([
     'debate_reply',
     'daily_opening',
     'daily_reply',
+]);
+
+const PRO_ONLY_JOB_TYPES = new Set([
+    'mirror_baseline_analysis',
 ]);
 
 // During the migration, a server-verified App Store transaction always grants
@@ -1365,7 +1372,7 @@ export async function processQueuedAIJobs(limit = 3) {
             ORDER BY
                 CASE
                     WHEN job_type IN ('debate_opening', 'debate_reply', 'daily_opening', 'daily_reply') THEN 0
-                    WHEN job_type = 'debate_report' THEN 1
+                    WHEN job_type IN ('debate_report', 'mirror_baseline_analysis') THEN 1
                     WHEN job_type = 'debate_report_insight' THEN 2
                     ELSE 3
                 END ASC,
@@ -1480,6 +1487,17 @@ router.post('/api/ai-jobs', async (req, res) => {
 
         const hasExpandedAgoraProAccess =
             hasServerVerifiedPro || isTestProBypass;
+
+        if (
+            PRO_ONLY_JOB_TYPES.has(cleanJobType) &&
+            !hasExpandedAgoraProAccess
+        ) {
+            throw new ExpandedAgoraAccessError(
+                'Agora Pro is required for The Mirror.',
+                403,
+                'mirror_pro_required'
+            );
+        }
 
         const clientReportedPro =
             String(safeMetadata.accessTier || '').trim().toLowerCase() === 'pro' ||
