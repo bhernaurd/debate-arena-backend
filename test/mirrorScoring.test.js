@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+    MIRROR_ARCHETYPE_SWITCH_LEAD,
     MIRROR_DIMENSIONS,
     MIRROR_QUESTION_IDS,
     buildMirrorExplorationTargets,
@@ -93,6 +94,75 @@ test('archetype matching is deterministic', () => {
     const second = matchMirrorArchetypes(scores);
     assert.deepEqual(first, second);
     assert.equal(first.primary.id, 'sovereign');
+});
+
+
+test('recurring Mirror retains the incumbent archetype when a challenger only narrowly leads', () => {
+    const scores = {
+        autonomy_obligation: 79,
+        principles_consequences: 25,
+        meaning_discovered_created: 64,
+        universalism_contextualism: 74,
+        determinism_agency: 46,
+        certainty_revisability: 51,
+    };
+
+    const raw = matchMirrorArchetypes(scores);
+    assert.equal(raw.primary.id, 'sovereign');
+
+    const stabilized = matchMirrorArchetypes(scores, {
+        previousPrimaryArchetypeId: 'pragmatist',
+    });
+
+    assert.equal(MIRROR_ARCHETYPE_SWITCH_LEAD, 3);
+    assert.equal(stabilized.primary.id, 'pragmatist');
+    assert.equal(stabilized.secondary.id, 'sovereign');
+    assert.equal(stabilized.blendStatus, 'blended');
+    assert.equal(stabilized.stability.hysteresisApplied, true);
+    assert.ok(stabilized.stability.challengerLead > 0);
+    assert.ok(
+        stabilized.stability.challengerLead <
+        stabilized.stability.switchLeadThreshold
+    );
+});
+
+test('recurring Mirror switches archetype once the challenger establishes a meaningful lead', () => {
+    const scores = {
+        autonomy_obligation: 85,
+        principles_consequences: 40,
+        meaning_discovered_created: 60,
+        universalism_contextualism: 65,
+        determinism_agency: 50,
+        certainty_revisability: 50,
+    };
+
+    const result = matchMirrorArchetypes(scores, {
+        previousPrimaryArchetypeId: 'pragmatist',
+    });
+
+    assert.equal(result.primary.id, 'sovereign');
+    assert.equal(result.stability.hysteresisApplied, false);
+    assert.ok(
+        result.stability.challengerLead >=
+        result.stability.switchLeadThreshold
+    );
+});
+
+test('starting Mirror archetype selection never applies hysteresis', () => {
+    const scores = {
+        autonomy_obligation: 79,
+        principles_consequences: 25,
+        meaning_discovered_created: 64,
+        universalism_contextualism: 74,
+        determinism_agency: 46,
+        certainty_revisability: 51,
+    };
+
+    const result = matchMirrorArchetypes(scores);
+
+    assert.equal(result.primary.id, 'sovereign');
+    assert.equal(result.stability.previousPrimaryArchetypeId, null);
+    assert.equal(result.stability.hysteresisApplied, false);
 });
 
 
