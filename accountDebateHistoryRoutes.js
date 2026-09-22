@@ -266,6 +266,7 @@ function logUnexpectedError(logger, error, req) {
 export function createAccountDebateHistoryRouter({
     service,
     logger = console,
+    onSynced = null,
 } = {}) {
     if (
         !service ||
@@ -364,6 +365,22 @@ export function createAccountDebateHistoryRouter({
                 schemaVersion: body.schemaVersion,
                 debates: body.debates,
             });
+
+            if (typeof onSynced === 'function') {
+                Promise.resolve(onSynced({
+                    accountId: result.accountId,
+                    installationId: result.installationId,
+                    results: result.results,
+                })).catch((error) => {
+                    logger?.error?.(
+                        '[AccountDebateHistory] Post-sync hook failed.',
+                        {
+                            errorName: error?.name ?? 'Error',
+                            errorCode: error?.code ?? 'unknown_error',
+                        }
+                    );
+                });
+            }
 
             return res.status(200).json({
                 success: true,
