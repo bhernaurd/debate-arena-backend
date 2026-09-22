@@ -22,6 +22,7 @@ import { createAffiliateRouter } from './affiliateRoutes.js';
 import { createAccountAuthRouter } from './accountAuthRoutes.js';
 import { createAccountSubscriptionEntitlementRouter } from './accountSubscriptionEntitlementRoutes.js';
 import { createAccountDebateHistoryRouter } from './accountDebateHistoryRoutes.js';
+import { createAccountMirrorRouter } from './accountMirrorRoutes.js';
 import { createAccountAchievementRouter } from './accountAchievementRoutes.js';
 import { createAccountDailyChallengeProgressRouter } from './accountDailyChallengeProgressRoutes.js';
 import { createAccountRankedProfileRouter } from './accountRankedProfileRoutes.js';
@@ -33,6 +34,7 @@ import { createAiContentReportRouter } from './aiContentReportRoutes.js';
 import { createFounderFeedbackRouter } from './founderFeedbackRoutes.js';
 import { createAccountAuthService } from './lib/accountAuthService.js';
 import { createAccountDebateHistoryService } from './lib/accountDebateHistoryService.js';
+import { createAccountMirrorService } from './lib/accountMirrorService.js';
 import { createAccountAchievementService } from './lib/accountAchievementService.js';
 import { createAccountDailyChallengeProgressService } from './lib/accountDailyChallengeProgressService.js';
 import { createAccountRankedProfileService } from './lib/accountRankedProfileService.js';
@@ -294,6 +296,20 @@ const accountAchievementLimiter = rateLimit({
   },
 });
 
+const accountMirrorLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: {
+      code: 'too_many_mirror_requests',
+      message: 'Too many Mirror requests. Please try again shortly.',
+      retryable: true,
+    },
+  },
+});
+
 const founderFeedbackLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 5,
@@ -459,6 +475,13 @@ const googlePlaySubscriptionService =
     pool,
   });
 
+const accountMirrorService =
+  createAccountMirrorService({
+    pool,
+    accountAuthService,
+    proAccessService: accountProAccessService,
+  });
+
 // Placement trials and active Ranked debates are available to every
 // authenticated account. New ladder starts apply the free-daily or Pro policy
 // inside AccountRankedLadderService.
@@ -532,6 +555,8 @@ app.use(
   '/api/account/history',
   createAccountDebateHistoryRouter({
     service: accountDebateHistoryService,
+    onSynced: ({ accountId }) =>
+      accountMirrorService.handleDebateHistorySync({ accountId }),
   })
 );
 
@@ -540,6 +565,14 @@ app.use(
   accountAchievementLimiter,
   createAccountAchievementRouter({
     service: accountAchievementService,
+  })
+);
+
+app.use(
+  '/api/account/mirror',
+  accountMirrorLimiter,
+  createAccountMirrorRouter({
+    service: accountMirrorService,
   })
 );
 
