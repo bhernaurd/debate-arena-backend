@@ -145,6 +145,29 @@ export function createAccountMirrorRouter({ service, logger = console } = {}) {
         return res.status(200).json({ success: true, ...serialize(result) });
     }));
 
+    router.patch('/evidence/:kind/:evidenceItemId', asyncRoute(async (req, res) => {
+        const body = requireObjectBody(req);
+        if (typeof body.excluded !== 'boolean') {
+            fail(
+                'invalid_mirror_evidence_exclusion',
+                'excluded must be a boolean.',
+                { status: 400 }
+            );
+        }
+
+        const result = await service.setEvidenceExclusion({
+            ...authInput(req),
+            kind: req.params.kind,
+            evidenceItemId: req.params.evidenceItemId,
+            excluded: body.excluded,
+        });
+
+        return res.status(200).json({
+            success: true,
+            ...serialize(result),
+        });
+    }));
+
     router.post('/test/make-eligible-now', asyncRoute(async (req, res) => {
         const result = await service.testMakeEligibleNow(authInput(req));
         return res.status(200).json({ success: true, ...serialize(result) });
