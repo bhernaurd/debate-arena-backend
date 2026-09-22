@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
     MIRROR_DIMENSIONS,
     MIRROR_QUESTION_IDS,
+    buildMirrorExplorationTargets,
     calculateDebateAdjustments,
     finalMirrorScores,
     matchMirrorArchetypes,
@@ -92,4 +93,91 @@ test('archetype matching is deterministic', () => {
     const second = matchMirrorArchetypes(scores);
     assert.deepEqual(first, second);
     assert.equal(first.primary.id, 'sovereign');
+});
+
+
+test('exploration targets prioritize underexplored dimensions and real tensions', () => {
+    const questionnaire = {
+        autonomy_obligation: 78,
+        principles_consequences: 70,
+        meaning_discovered_created: 55,
+        universalism_contextualism: 50,
+        determinism_agency: 62,
+        certainty_revisability: 67,
+    };
+    const adjustments = calculateDebateAdjustments([
+        {
+            dimension: 'autonomy_obligation',
+            pole: 'obligation',
+            stanceStrength: 1,
+            confidence: 1,
+            contextBucket: 'family_and_relationships',
+            validated: true,
+            sourceId: 'a1',
+        },
+        {
+            dimension: 'autonomy_obligation',
+            pole: 'obligation',
+            stanceStrength: 0.9,
+            confidence: 0.95,
+            contextBucket: 'morality_and_duty',
+            validated: true,
+            sourceId: 'a2',
+        },
+        {
+            dimension: 'principles_consequences',
+            pole: 'principles',
+            stanceStrength: 0.8,
+            confidence: 0.95,
+            contextBucket: 'morality_and_duty',
+            validated: true,
+            sourceId: 'p1',
+        },
+    ], []);
+    const finalScores = finalMirrorScores(questionnaire, adjustments);
+    const targets = buildMirrorExplorationTargets({
+        questionnaireScoreMap: questionnaire,
+        finalScoreMap: finalScores,
+        adjustmentMap: adjustments,
+        signals: [
+            {
+                dimension: 'autonomy_obligation',
+                contextBucket: 'family_and_relationships',
+            },
+            {
+                dimension: 'autonomy_obligation',
+                contextBucket: 'morality_and_duty',
+            },
+            {
+                dimension: 'principles_consequences',
+                contextBucket: 'morality_and_duty',
+            },
+        ],
+    });
+
+    assert.ok(targets.length >= 2);
+    assert.equal(targets[0].kind, 'underexplored_dimension');
+    assert.ok(
+        targets.some((target) =>
+            target.kind === 'questionnaire_debate_tension' &&
+            target.dimension === 'autonomy_obligation'
+        )
+    );
+});
+
+test('exploration targets never exceed three recommendations', () => {
+    const questionnaire = Object.fromEntries(
+        MIRROR_DIMENSIONS.map((dimension) => [dimension, 80])
+    );
+    const adjustments = calculateDebateAdjustments([], []);
+    const finalScores = finalMirrorScores(questionnaire, adjustments);
+    const targets = buildMirrorExplorationTargets({
+        questionnaireScoreMap: questionnaire,
+        finalScoreMap: finalScores,
+        adjustmentMap: adjustments,
+        signals: [],
+    });
+
+    assert.ok(targets.length <= 3);
+    assert.equal(targets[0].kind, 'underexplored_dimension');
 });
