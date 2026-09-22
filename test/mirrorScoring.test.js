@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
     MIRROR_ARCHETYPE_SWITCH_LEAD,
+    MIRROR_RECOMMENDATION_PHILOSOPHERS,
     MIRROR_DIMENSIONS,
     MIRROR_QUESTION_IDS,
     buildMirrorExplorationTargets,
@@ -250,4 +251,78 @@ test('exploration targets never exceed three recommendations', () => {
 
     assert.ok(targets.length <= 3);
     assert.equal(targets[0].kind, 'underexplored_dimension');
+});
+
+
+test('Mirror exploration targets receive deterministic live philosopher recommendations', () => {
+    const questionnaire = {
+        autonomy_obligation: 76,
+        principles_consequences: 64,
+        meaning_discovered_created: 58,
+        universalism_contextualism: 61,
+        determinism_agency: 70,
+        certainty_revisability: 55,
+    };
+    const adjustments = calculateDebateAdjustments([], []);
+    const finalScores = finalMirrorScores(questionnaire, adjustments);
+
+    const first = buildMirrorExplorationTargets({
+        questionnaireScoreMap: questionnaire,
+        finalScoreMap: finalScores,
+        adjustmentMap: adjustments,
+        signals: [],
+        cycleNumber: 2,
+    });
+    const second = buildMirrorExplorationTargets({
+        questionnaireScoreMap: questionnaire,
+        finalScoreMap: finalScores,
+        adjustmentMap: adjustments,
+        signals: [],
+        cycleNumber: 2,
+    });
+
+    assert.deepEqual(first, second);
+    assert.ok(first.length >= 1);
+    assert.ok(first.every((target) => target.suggestedPhilosopher));
+    assert.equal(
+        new Set(first.map((target) => target.suggestedPhilosopher)).size,
+        first.length
+    );
+
+    for (const target of first) {
+        assert.ok(
+            MIRROR_RECOMMENDATION_PHILOSOPHERS[target.dimension]
+                .includes(target.suggestedPhilosopher)
+        );
+    }
+});
+
+test('Mirror recommendation philosopher rotation changes across cycles', () => {
+    const questionnaire = Object.fromEntries(
+        MIRROR_DIMENSIONS.map((dimension) => [dimension, 75])
+    );
+    const adjustments = calculateDebateAdjustments([], []);
+    const finalScores = finalMirrorScores(questionnaire, adjustments);
+
+    const cycleTwo = buildMirrorExplorationTargets({
+        questionnaireScoreMap: questionnaire,
+        finalScoreMap: finalScores,
+        adjustmentMap: adjustments,
+        signals: [],
+        cycleNumber: 2,
+    });
+    const cycleThree = buildMirrorExplorationTargets({
+        questionnaireScoreMap: questionnaire,
+        finalScoreMap: finalScores,
+        adjustmentMap: adjustments,
+        signals: [],
+        cycleNumber: 3,
+    });
+
+    assert.ok(cycleTwo.length >= 1);
+    assert.ok(cycleThree.length >= 1);
+    assert.notEqual(
+        cycleTwo[0].suggestedPhilosopher,
+        cycleThree[0].suggestedPhilosopher
+    );
 });
