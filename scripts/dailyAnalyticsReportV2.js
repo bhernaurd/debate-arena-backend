@@ -141,6 +141,31 @@ flow_conversion AS (
   SELECT (SELECT COUNT(*) FROM philosopher_flows) AS philosopher_flows,
          (SELECT COUNT(*) FROM matched_flows) AS matched_flows
 ),
+mirror_2_eligible_accounts AS (
+  SELECT DISTINCT c.account_id
+  FROM account_mirror_cycles c
+  CROSS JOIN bounds b
+  WHERE c.cycle_number = 2
+    AND c.questionnaire_eligible_at < b.end_time
+    AND NOT EXISTS (SELECT 1 FROM excluded_accounts ea WHERE ea.account_id = c.account_id)
+),
+mirror_retention AS (
+  SELECT
+    COUNT(*) AS mirror_2_eligible_accounts,
+    COUNT(*) FILTER (
+      WHERE EXISTS (
+        SELECT 1
+        FROM account_mirror_cycles completed
+        CROSS JOIN bounds b
+        WHERE completed.account_id = eligible.account_id
+          AND completed.cycle_number = 2
+          AND completed.status = 'completed'
+          AND completed.questionnaire_completed_at IS NOT NULL
+          AND completed.questionnaire_completed_at < b.end_time
+      )
+    ) AS mirror_2_completed_accounts
+  FROM mirror_2_eligible_accounts eligible
+),
 ranked AS (
   SELECT COUNT(DISTINCT d.id) AS ranked_debates, COUNT(DISTINCT d.account_id) AS ranked_users
   FROM account_ranked_debates d CROSS JOIN bounds b
@@ -205,9 +230,11 @@ SELECT rl.label AS report_date_label,
   s.*, fc.philosopher_flows, fc.matched_flows, r.ranked_debates, r.ranked_users,
   ps.paid_pro, ps.trial_pro, t.raw_events, t.account_linked_events,
   t.philosopher_missing_flow, t.normal_starts_missing_flow,
-  sd.active_7d, sd.previous_active_7d, ROUND(sd.avg_dau_7d, 1) AS avg_dau_7d
+  sd.active_7d, sd.previous_active_7d, ROUND(sd.avg_dau_7d, 1) AS avg_dau_7d,
+  mr.mirror_2_eligible_accounts, mr.mirror_2_completed_accounts
 FROM report_label rl CROSS JOIN activity a CROSS JOIN summary s CROSS JOIN flow_conversion fc
-CROSS JOIN ranked r CROSS JOIN pro_summary ps CROSS JOIN tracking t CROSS JOIN seven_day sd;
+CROSS JOIN ranked r CROSS JOIN pro_summary ps CROSS JOIN tracking t CROSS JOIN seven_day sd
+CROSS JOIN mirror_retention mr;
 `;
 
 const PLATFORM_SQL = `
@@ -377,7 +404,8 @@ async function main() {
       `Modern Cases: ${toNumber(row.modern_cases_users)} opened • ${toNumber(row.modern_cases_completers)} completed a case`,
       `Where Do You Stand?: ${toNumber(row.stance_users)} opened • ${toNumber(row.stance_completers)} answered a statement`,
       `Mirror: ${toNumber(row.mirror_users)} opened • ${toNumber(row.mirror_questionnaire_starters)} questionnaire starts • ${toNumber(row.mirror_questionnaire_completers)} submits`,
-      `Mirror completions: #1 ${toNumber(row.mirror_1_completers)} • #2 ${toNumber(row.mirror_2_completers)} • #3 ${toNumber(row.mirror_3_completers)} • ${toNumber(row.mirror_readers_50)} read 50%+`, ``,
+      `Mirror completions: #1 ${toNumber(row.mirror_1_completers)} • #2 ${toNumber(row.mirror_2_completers)} • #3 ${toNumber(row.mirror_3_completers)} • ${toNumber(row.mirror_readers_50)} read 50%+`,
+      `Starting Mirror → Mirror #2: ${toNumber(row.mirror_2_completed_accounts)}/${toNumber(row.mirror_2_eligible_accounts)} (${percent(row.mirror_2_completed_accounts, row.mirror_2_eligible_accounts)})`, ``,
       `<b>AGORA PRO</b>`, `${toNumber(row.paid_pro)} paid • ${toNumber(row.trial_pro)} trial`,
     ];
     if (platformLines.length > 0) lines.push('', '<b>PLATFORM</b>', ...platformLines);
