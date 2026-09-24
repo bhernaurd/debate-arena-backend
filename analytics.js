@@ -36,6 +36,26 @@ const ALLOWED_EVENTS = new Set([
   'restore_started',
   'restore_completed',
   'restore_failed',
+
+  // Learn ecosystem
+  'learn_hub_viewed',
+  'learn_card_opened',
+  'learn_item_started',
+  'learn_item_completed',
+  'learn_course_completed',
+
+  // The Mirror funnel
+  'mirror_questionnaire_started',
+  'mirror_questionnaire_completed',
+  'mirror_analysis_generation_started',
+  'mirror_analysis_generated',
+  'mirror_analysis_failed',
+  'mirror_analysis_read_depth',
+  'mirror_detail_expanded',
+  'mirror_evidence_opened',
+  'mirror_recommendation_tapped',
+  'mirror_next_eligible_seen',
+  'mirror_completed',
 ]);
 
 const USER_ID_RE = /^[A-Za-z0-9-]{8,128}$/;
