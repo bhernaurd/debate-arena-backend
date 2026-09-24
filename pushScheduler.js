@@ -19,6 +19,8 @@ const { Pool } = pg;
 
 const DEFAULT_TIMEZONE = 'America/Chicago';
 const DAILY_UNLOCK_HOUR = 5;
+const MIRROR_READY_HOUR = 17;
+const MIRROR_READY_MINUTE = 30;
 
 const SEND_SLOTS = {
     9: 'morning',
@@ -238,7 +240,32 @@ async function ensureSchedulerTables() {
         ON push_notification_deliveries (target_key, challenge_id, challenge_date, time_of_day);
     `);
 
-    console.log('[PushScheduler] Delivery log table ready');
+    await pool.query(`
+        CREATE TABLE IF NOT EXISTS mirror_ready_push_deliveries (
+            cycle_id UUID NOT NULL
+                REFERENCES account_mirror_cycles(id)
+                ON DELETE CASCADE,
+            account_id UUID NOT NULL
+                REFERENCES accounts(id)
+                ON DELETE CASCADE,
+            target_key TEXT NOT NULL,
+            device_token TEXT NOT NULL,
+            timezone TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'claimed',
+            claimed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            sent_at TIMESTAMPTZ,
+            updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+            error TEXT,
+            PRIMARY KEY (account_id, cycle_id)
+        );
+    `);
+
+    await pool.query(`
+        CREATE INDEX IF NOT EXISTS idx_mirror_ready_push_deliveries_status
+        ON mirror_ready_push_deliveries (status, updated_at);
+    `);
+
+    console.log('[PushScheduler] Delivery log tables ready');
 }
 
 async function getEnabledPushTokens() {
@@ -491,6 +518,208 @@ function hasCompletedChallenge(record, challenge) {
     return Boolean(completedDate && completedDate === challenge.date);
 }
 
+
+async function getDueMirrorReadyRecords(now) {
+    const env = schedulerApnsEnvironment();
+
+    const result = await pool.query(
+        `
+        SELECT DISTINCT ON (cycle.account_id)
+            cycle.id AS cycle_id,
+            cycle.account_id,
+            cycle.cycle_number,
+            cycle.questionnaire_eligible_at,
+            token.device_token,
+            token.platform,
+            token.timezone,
+            token.install_id,
+            token.user_id,
+            token.app_version,
+            token.build_number,
+            token.apns_environment,
+            token.language_code,
+            token.last_registered_at,
+            token.updated_at
+        FROM account_mirror_cycles AS cycle
+        JOIN account_installations AS installation
+          ON installation.account_id = cycle.account_id
+         AND installation.unlinked_at IS NULL
+        JOIN push_tokens AS token
+          ON token.install_id = installation.installation_id
+        WHERE cycle.cycle_number > 1
+          AND cycle.status = 'collecting'
+          AND cycle.questionnaire_started_at IS NULL
+          AND cycle.questionnaire_completed_at IS NULL
+          AND cycle.questionnaire_eligible_at <= now()
+          AND token.notifications_enabled = TRUE
+          AND (
+                (COALESCE(token.platform, 'ios') = 'ios' AND token.apns_environment = $1)
+                OR token.platform = 'android'
+          )
+        ORDER BY
+            cycle.account_id,
+            token.last_registered_at DESC NULLS LAST,
+            token.updated_at DESC NULLS LAST
+        `,
+        [env]
+    );
+
+    const due = [];
+
+    for (const row of result.rows) {
+        const zone = safeTimezone(row.timezone);
+        const localNow = now.setZone(zone);
+
+        if (
+            localNow.hour !== MIRROR_READY_HOUR ||
+            localNow.minute !== MIRROR_READY_MINUTE
+        ) {
+            continue;
+        }
+
+        due.push({
+            cycleId: String(row.cycle_id),
+            accountId: String(row.account_id),
+            cycleNumber: Number(row.cycle_number),
+            questionnaireEligibleAt: row.questionnaire_eligible_at,
+            deviceToken: row.device_token,
+            platform: normalizePushPlatform(row.platform),
+            timezone: zone,
+            installId: row.install_id || null,
+            userId: row.user_id || null,
+            appVersion: row.app_version || null,
+            buildNumber: row.build_number || null,
+            apnsEnvironment: row.apns_environment || null,
+            language: normalizeLanguageCode(row.language_code),
+            targetKey: `mirror:account:${row.account_id}`,
+            localTime: localNow.toFormat('yyyy-MM-dd HH:mm ZZZZ'),
+        });
+    }
+
+    return due;
+}
+
+async function claimMirrorReadyDelivery(record) {
+    const result = await pool.query(
+        `
+        INSERT INTO mirror_ready_push_deliveries (
+            cycle_id,
+            account_id,
+            target_key,
+            device_token,
+            timezone,
+            status,
+            claimed_at,
+            updated_at
+        )
+        VALUES ($1::uuid, $2::uuid, $3, $4, $5, 'claimed', now(), now())
+        ON CONFLICT (account_id, cycle_id) DO NOTHING
+        RETURNING cycle_id
+        `,
+        [
+            record.cycleId,
+            record.accountId,
+            record.targetKey,
+            record.deviceToken,
+            record.timezone,
+        ]
+    );
+
+    return result.rowCount === 1;
+}
+
+async function markMirrorReadyDeliverySent(record) {
+    await pool.query(
+        `
+        UPDATE mirror_ready_push_deliveries
+        SET status='sent', sent_at=now(), updated_at=now(), error=NULL
+        WHERE account_id=$1::uuid AND cycle_id=$2::uuid
+        `,
+        [record.accountId, record.cycleId]
+    );
+}
+
+async function markMirrorReadyDeliveryFailed(record, error) {
+    await pool.query(
+        `
+        UPDATE mirror_ready_push_deliveries
+        SET status='failed', updated_at=now(), error=$3
+        WHERE account_id=$1::uuid AND cycle_id=$2::uuid
+        `,
+        [
+            record.accountId,
+            record.cycleId,
+            String(error || 'Unknown error').slice(0, 500),
+        ]
+    );
+}
+
+async function sendDueMirrorReadyPushes() {
+    const now = DateTime.utc();
+
+    let dueRecords;
+    try {
+        dueRecords = await getDueMirrorReadyRecords(now);
+    } catch (err) {
+        console.error('[PushScheduler] Failed to resolve Mirror-ready recipients:', err.message);
+        return;
+    }
+
+    if (dueRecords.length === 0) {
+        return;
+    }
+
+    let sent = 0;
+    let duplicate = 0;
+    let failed = 0;
+
+    for (const record of dueRecords) {
+        const claimed = await claimMirrorReadyDelivery(record);
+        if (!claimed) {
+            duplicate++;
+            continue;
+        }
+
+        const title = 'Your Mirror evolves with you';
+        const body =
+            'Your next reflection is ready. See what has stayed, shifted, or become clearer in your philosophy.';
+
+        const outcome = await sendPushForPlatform({
+            platform: record.platform,
+            deviceToken: record.deviceToken,
+            title,
+            body,
+            data: {
+                source: 'mirror',
+                type: 'mirror_ready',
+                mirrorCycleId: record.cycleId,
+                mirrorCycleNumber: String(record.cycleNumber),
+                deepLink: 'theagora://mirror',
+            },
+        });
+
+        if (outcome?.ok === true) {
+            sent++;
+            await markMirrorReadyDeliverySent(record);
+            await markTokenSuccess(record.deviceToken);
+
+            console.log(
+                `[PushScheduler] Sent Mirror-ready push for account=${record.accountId} ` +
+                `cycle=${record.cycleNumber} timezone=${record.timezone} local=${record.localTime}`
+            );
+        } else {
+            failed++;
+            const reason = outcome?.reason || 'Push provider returned failure';
+            await markMirrorReadyDeliveryFailed(record, reason);
+            await markTokenFailure(record.deviceToken, outcome);
+        }
+    }
+
+    console.log(
+        `[PushScheduler] Mirror-ready run complete — sent: ${sent}, duplicates: ${duplicate}, failed: ${failed}`
+    );
+}
+
 async function sendDueLocalPushes() {
     const now = DateTime.utc();
     const env = schedulerApnsEnvironment();
@@ -700,10 +929,14 @@ cron.schedule(
         sendDueLocalPushes().catch((err) => {
             console.error('[PushScheduler] Local scheduler error:', err.message);
         });
+
+        sendDueMirrorReadyPushes().catch((err) => {
+            console.error('[PushScheduler] Mirror-ready scheduler error:', err.message);
+        });
     },
     { timezone: 'UTC' }
 );
 
 console.log(
-    '[PushScheduler] Cross-platform local-time cron registered — checks every 15 minutes for 9 AM / 2 PM / 8 PM in each device timezone'
+    '[PushScheduler] Cross-platform local-time cron registered — Daily Challenge at 9 AM / 2 PM / 8 PM and Mirror-ready at 5:30 PM in each device timezone'
 );
