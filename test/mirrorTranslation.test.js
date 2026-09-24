@@ -100,3 +100,35 @@ test('translation merge changes prose but preserves protocol fields and array sh
     assert.equal(result.meaningfulChanges.length, 1);
     assert.deepEqual(result.stablePatterns, []);
 });
+
+test('translation merge cannot invent prose for an empty canonical field', () => {
+    const source = {
+        schemaVersion: 'mirror-analysis-v7',
+        summary: { headline: 'Canonical headline', overview: '' },
+        reflection: '',
+        archetypeAnalysis: { summary: '', changeExplanation: null },
+        dimensions: [],
+        meaningfulChanges: [],
+        stablePatterns: [],
+        questionnaireDebateAgreements: [],
+        tensions: [],
+        reconsideredBeliefs: [],
+        philosophicalConnections: [],
+        evidenceBreadthInterpretation: '',
+        nextQuestions: [],
+        recommendations: [],
+    };
+    const translated = {
+        summary: { headline: 'Cabeçalho traduzido', overview: 'Invented overview' },
+        reflection: 'Invented reflection',
+        archetypeAnalysis: { summary: 'Invented archetype summary' },
+        evidenceBreadthInterpretation: 'Invented breadth',
+    };
+
+    const result = mergeTranslatedMirrorAnalysis(source, translated);
+    assert.equal(result.summary.headline, 'Cabeçalho traduzido');
+    assert.equal(result.summary.overview, '');
+    assert.equal(result.reflection, '');
+    assert.equal(result.archetypeAnalysis.summary, '');
+    assert.equal(result.evidenceBreadthInterpretation, '');
+});
