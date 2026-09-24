@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="index,follow">
-  <title>Privacy Policy | The Agora: Philosophy Debates</title>
-  <meta name="description" content="Privacy Policy for The Agora: Philosophy Debates, developed by Bhernaurd Maghirang.">
+  <title>Privacy Policy | The Agora: Learn Philosophy</title>
+  <meta name="description" content="Privacy Policy for The Agora: Learn Philosophy.">
   <style>
     :root {
       color-scheme: dark;
@@ -14,169 +14,535 @@
       --text: #f4efe3;
       --muted: #b8af9e;
       --gold: #d8b35a;
+      --wine: #8a365f;
       --border: rgba(216,179,90,.27);
     }
     * { box-sizing: border-box; }
+    html { background: var(--bg); }
     body {
       margin: 0;
-      background: radial-gradient(circle at 50% -12%, rgba(216,179,90,.13), transparent 36rem), var(--bg);
+      background:
+        radial-gradient(circle at 50% -10%, rgba(138,54,95,.16), transparent 30rem),
+        radial-gradient(circle at 50% 0%, rgba(216,179,90,.10), transparent 42rem),
+        var(--bg);
       color: var(--text);
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       line-height: 1.62;
     }
-    main { width: min(820px, calc(100% - 32px)); margin: 0 auto; padding: 60px 0 72px; }
-    .eyebrow { color: var(--gold); font-size: .76rem; font-weight: 750; letter-spacing: .16em; text-transform: uppercase; }
-    h1, h2 { font-family: Georgia, "Times New Roman", serif; font-weight: 500; }
-    h1 { font-size: clamp(2.2rem, 7vw, 3.65rem); line-height: 1.05; margin: 10px 0 12px; }
-    h2 { font-size: 1.4rem; margin: 0 0 10px; }
-    .updated, .lead, .muted { color: var(--muted); }
-    .lead { font-size: 1.06rem; margin: 18px 0 30px; }
+    main {
+      width: min(860px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 56px 0 72px;
+    }
+    .eyebrow {
+      color: var(--gold);
+      font-size: .76rem;
+      font-weight: 750;
+      letter-spacing: .16em;
+      text-transform: uppercase;
+    }
+    h1, h2, h3 {
+      font-family: Georgia, "Times New Roman", serif;
+      font-weight: 500;
+    }
+    h1 {
+      font-size: clamp(2.25rem, 7vw, 3.75rem);
+      line-height: 1.05;
+      margin: 10px 0 12px;
+    }
+    h2 {
+      font-size: 1.48rem;
+      margin: 0 0 14px;
+    }
+    h3 {
+      font-size: 1.08rem;
+      margin: 22px 0 8px;
+      color: #f8f2e7;
+    }
+    .updated, .lead { color: var(--muted); }
+    .lead { font-size: 1.03rem; margin: 18px 0 30px; }
     section {
       background: linear-gradient(180deg, rgba(255,255,255,.024), transparent), var(--card);
       border: 1px solid var(--border);
-      border-radius: 17px;
-      padding: 23px;
+      border-radius: 18px;
+      padding: 24px;
       margin: 16px 0;
+      box-shadow: 0 16px 44px rgba(0,0,0,.16);
     }
-    p { margin: 9px 0; }
-    ul { padding-left: 1.3rem; margin: 10px 0 0; }
+    p { margin: 10px 0; }
+    ul { padding-left: 1.3rem; margin: 10px 0 14px; }
     li + li { margin-top: 7px; }
-    a { color: #efd58f; }
-    .note { border-left: 3px solid var(--gold); padding-left: 14px; color: var(--muted); }
-    footer { color: #8f8779; text-align: center; font-size: .85rem; margin-top: 30px; }
+    a { color: #efd58f; text-underline-offset: 2px; }
+    strong { color: #fff9ee; }
+    footer {
+      color: #8f8779;
+      text-align: center;
+      font-size: .85rem;
+      margin-top: 30px;
+    }
+    @media (max-width: 560px) {
+      main { width: min(100% - 22px, 860px); padding-top: 34px; }
+      section { padding: 19px; border-radius: 16px; }
+    }
   </style>
 </head>
 <body>
 <main>
-  <div class="eyebrow">The Agora: Philosophy Debates</div>
+  <div class="eyebrow">The Agora: Learn Philosophy</div>
   <h1>Privacy Policy</h1>
-  <div class="updated">Last updated: September 2, 2026</div>
-  <p class="lead">
-    This Privacy Policy explains how <strong>The Agora: Philosophy Debates</strong> ("The Agora"), developed and operated by <strong>Bhernaurd Maghirang</strong>, collects, uses, processes, and protects information when you use the iOS or Android app and related services.
-  </p>
+  <div class="updated">Last updated: September 24, 2026</div>
+  <p class="lead">Our current privacy practices for The Agora on supported platforms.</p>
 
   <section>
-    <h2>1. Information we collect</h2>
-    <p>Depending on the features you use, The Agora may collect or process the following categories of information:</p>
+    <h2>Overview</h2>
+    <p>The Agora: Learn Philosophy (“The Agora,” “we,” “us,” or “our”) is an interactive philosophy application that allows users to learn philosophy, debate AI-generated representations of philosophers, participate in challenges and Ranked debates, explore philosophical questions and cases, build an AI-assisted philosophical profile through The Mirror, track progress, and access subscription features.</p>
+    <p>This Privacy Policy explains what information The Agora collects, how it is used, when it is shared, how long it may be retained, and the choices available to you.</p>
+    <p>We do not sell your personal information. We do not use your information for third-party targeted advertising or cross-app advertising tracking.</p>
+  </section>
+
+  <section>
+    <h2>Information We Collect</h2>
+    <h3>Account and Authentication Information</h3>
+    <p>The Agora uses account authentication so your progress and supported app data can be associated with your account.</p>
+    <p>When you use Sign in with Apple, we may receive information from Apple such as:</p>
     <ul>
-      <li><strong>Account and identity information.</strong> When you sign in, the applicable identity provider may provide an account identifier and profile information. Android Google sign-in may provide a Google subject identifier, email address, email-verification status, display name, and profile-picture URL. iOS Sign in with Apple may provide Apple identity information and, when made available by Apple, a display name.</li>
-      <li><strong>App-generated identifiers and session information.</strong> The app creates a random installation identifier used to associate an installation with app functionality, account sessions, subscription ownership, abuse prevention, and synchronization. Authentication access and refresh tokens are used to maintain signed-in sessions. Server-side security metadata may include hashed IP-address and user-agent values.</li>
-      <li><strong>Debate and other user content.</strong> This can include debate messages and positions you submit, selected topics and philosophers, generated-question requests, Daily Challenge activity, and information needed to create replies, scores, reports, or shareable results.</li>
-      <li><strong>AI response safety reports.</strong> If you use the in-app Report action on an AI-generated philosopher response, The Agora processes the selected report reason, a bounded copy of that specific AI response, the related debate/message identifiers, philosopher, debate type, account/installation association, and basic app platform/version metadata. The report does not intentionally include unrelated conversation messages.</li>
-      <li><strong>Progress and app activity.</strong> This can include debate history, reports, scores, achievements, streaks, Daily Challenge progress, Ranked placement/rating/progress, feature interactions, and account-linked synchronization state.</li>
-      <li><strong>Purchase and subscription information.</strong> The Agora processes store-provided subscription and purchase state needed to determine Pro access, such as product, plan or offer identifiers, trial/renewal state, expiration, transaction or order identifiers, and store ownership information. On Android, raw Google Play purchase tokens are used transiently for verification; the backend stores a SHA-256 fingerprint rather than the raw purchase token.</li>
-      <li><strong>Notification information.</strong> If notifications are enabled or configured, Android may process an FCM push token, installation identifier, app version/build, timezone, selected/effective language, notification-permission state, reminder preference, and Daily Challenge completion information. Apple notification services may process the corresponding iOS notification information.</li>
-      <li><strong>Language, device, and app configuration.</strong> This can include the app platform, app version/build, selected language or device-language setting, timezone, and settings required to provide localized or device-specific functionality.</li>
-      <li><strong>Referral and affiliate information.</strong> If you arrive through a creator or referral link, The Agora may process the referral/affiliate code and attribution source so the referral can be credited. Android may also use Google Play Install Referrer for this purpose.</li>
-      <li><strong>Diagnostics and security information.</strong> The Agora may process technical error, reliability, performance, security, fraud-prevention, and request metadata necessary to operate and protect the service.</li>
+      <li>A unique Apple account identifier used for authentication</li>
+      <li>Your name, if Apple provides it</li>
+      <li>Your email address or Apple Private Relay email address, if Apple provides it</li>
+      <li>Information indicating whether an email address is verified or uses Apple’s private email relay</li>
+      <li>Authentication credentials and tokens required to securely maintain your account session and support account functions</li>
     </ul>
-  </section>
-
-  <section>
-    <h2>2. How we use information</h2>
-    <p>We use information described above to:</p>
+    <p>The Agora does not receive your Apple Account password.</p>
+    <p>Where Sign in with Google is supported, we may receive information from Google such as:</p>
     <ul>
-      <li>provide debates, philosopher responses, generated questions, scoring, Debate Reports, Daily Challenges, Ranked features, achievements, history, and cross-device account functionality;</li>
-      <li>review user-submitted AI response reports for safety, abuse prevention, model/output quality, and product improvement;</li>
-      <li>authenticate users, maintain secure sessions, and prevent account or subscription misuse;</li>
-      <li>verify App Store and Google Play purchases and maintain accurate Pro entitlements across supported devices;</li>
-      <li>deliver notifications that you enable and maintain your notification preferences;</li>
-      <li>localize the service and provide appropriate app/device behavior;</li>
-      <li>attribute eligible referrals and administer the affiliate program;</li>
-      <li>operate, troubleshoot, secure, improve, and understand the performance and reliability of The Agora; and</li>
-      <li>comply with applicable legal obligations and enforce our terms.</li>
+      <li>A unique Google account identifier used for authentication</li>
+      <li>Your name</li>
+      <li>Your email address</li>
+      <li>Profile information made available through the authentication process</li>
+      <li>Authentication credentials and tokens required to securely maintain your account session and support account functions</li>
     </ul>
-  </section>
-
-  <section>
-    <h2>3. Artificial intelligence processing</h2>
-    <p>
-      The Agora uses artificial intelligence to provide philosopher responses, debate feedback, scoring-related output, reports, insights, generated questions, and related educational functionality. Content needed to fulfill these requests, including relevant debate text and instructions, may be sent from The Agora's backend to <strong>Anthropic</strong> for processing through its API.
-    </p>
-    <p>
-      We use AI providers as service providers to perform functionality on our behalf. You should avoid including information in a debate that you do not want processed as part of the AI request. AI output can be inaccurate and should not be treated as professional, medical, legal, financial, or other expert advice.
-    </p>
-  </section>
-
-  <section>
-    <h2>4. Service providers and platform providers</h2>
-    <p>We may provide information to service/platform providers when necessary to operate The Agora, including:</p>
+    <p>The Agora does not receive your Google Account password.</p>
+    <p>We may also create and store an internal Agora account identifier associated with your account.</p>
+    <h3>App and Installation Identifiers</h3>
+    <p>The app creates a randomly generated installation identifier.</p>
+    <p>We use this identifier to associate activity with a particular installation, including:</p>
     <ul>
-      <li><strong>Anthropic</strong> for AI processing described above;</li>
-      <li><strong>Google</strong> for Google sign-in, Google Play Billing and purchase verification, Firebase Cloud Messaging, and Android platform services;</li>
-      <li><strong>Apple</strong> for Sign in with Apple, App Store purchases/subscriptions, offer redemption, and Apple notification/platform services;</li>
-      <li><strong>hosting, database, email/notification, and infrastructure providers</strong> used to securely operate The Agora's backend and administrative services.</li>
+      <li>Account sessions</li>
+      <li>AI requests</li>
+      <li>Subscription access</li>
+      <li>Creator-code and referral activity</li>
+      <li>Notification delivery</li>
+      <li>Technical and security events</li>
+      <li>App usage and analytics</li>
     </ul>
-    <p>We may also disclose information when required by law, to protect users or the service, to investigate fraud or abuse, or as part of a business transfer subject to applicable legal requirements.</p>
+    <p>The installation identifier does not itself contain your name, email address, account password, or payment-card information.</p>
+    <h3>Debate, AI, and User Content</h3>
+    <p>When you use The Agora, we may process and store content associated with your debates and other interactive philosophical features, including:</p>
+    <ul>
+      <li>Messages you send during debates</li>
+      <li>Debate topics and prompts</li>
+      <li>Philosopher selections</li>
+      <li>Debate mode and difficulty selections</li>
+      <li>AI-generated responses</li>
+      <li>Scores and scoring feedback</li>
+      <li>Debate reports</li>
+      <li>Strengths, weaknesses, improvement suggestions, and related analysis</li>
+      <li>Daily Challenge responses</li>
+      <li>Ranked debate content and results</li>
+      <li>Other philosophical responses or content you intentionally submit to supported interactive features</li>
+    </ul>
+    <p>Your debate content and relevant context are transmitted to our backend and, when necessary to provide AI functionality, to our AI service provider.</p>
+    <p>Signed-in debate history may also be stored on our servers so that it can be restored, synchronized, analyzed for supported features, or made available across supported sessions or devices.</p>
+    <p>Some information may additionally remain stored locally on your device.</p>
+    <p>Please avoid including highly sensitive personal information in debate messages unless you are comfortable with that information being processed as described in this Privacy Policy.</p>
+    <h3>The Mirror and Philosophical Profile</h3>
+    <p>The Mirror is an AI-assisted feature that creates and updates a philosophical profile based on information you provide and qualifying philosophical activity within The Agora.</p>
+    <p>When you use The Mirror, we may process and store information such as:</p>
+    <ul>
+      <li>Your responses to the Mirror questionnaire</li>
+      <li>Philosophical positions, reasoning, and other relevant content from qualifying debates</li>
+      <li>Relevant Daily Challenge activity</li>
+      <li>Relevant Ranked debate activity</li>
+      <li>Evidence selected from qualifying philosophical activity for use in a Mirror analysis</li>
+      <li>Evidence you exclude or otherwise manage within The Mirror</li>
+      <li>Philosophical dimensions and profile coordinates</li>
+      <li>Archetype information and related profile data</li>
+      <li>AI-generated summaries and interpretations</li>
+      <li>Patterns, tensions, changes, or recurring themes identified in qualifying philosophical activity</li>
+      <li>Philosophical connections and recommendations</li>
+      <li>Questions suggested for further reflection or debate</li>
+      <li>Historical Mirror snapshots</li>
+      <li>Comparisons between Mirror analyses over time</li>
+      <li>The language in which a Mirror analysis was originally generated</li>
+      <li>Translated versions of generated Mirror analysis when you view The Mirror in another supported language</li>
+    </ul>
+    <p>The Mirror may generate inferences about your philosophical positions, values, reasoning patterns, or how those positions appear to change over time based on the content used in the analysis.</p>
+    <p>The Mirror is intended as an educational and philosophical reflection tool. It is not intended to provide a psychological, psychiatric, medical, or other clinical diagnosis.</p>
+    <p>We use Mirror information to:</p>
+    <ul>
+      <li>Create your initial philosophical profile</li>
+      <li>Generate subsequent Mirror analyses</li>
+      <li>Identify patterns or changes across qualifying philosophical activity</li>
+      <li>Explain evidence that contributed to an analysis</li>
+      <li>Maintain your Mirror history</li>
+      <li>Compare current and previous philosophical profiles</li>
+      <li>Generate relevant questions or philosophical recommendations</li>
+      <li>Display generated Mirror analysis in supported languages</li>
+    </ul>
+    <p>Mirror questionnaire responses and qualifying philosophical content may be transmitted to our AI service provider when necessary to generate a Mirror analysis.</p>
+    <p>When you view an existing Mirror in another supported language, the previously generated analysis may also be transmitted to our AI service provider for translation.</p>
+    <p>Translated versions of a Mirror are stored separately from the original analysis. Translation does not recalculate or intentionally alter the underlying philosophical profile, dimension values, evidence, archetype data, or historical snapshot.</p>
+    <p>A translated Mirror may be cached so that the same translation does not need to be generated again each time you return to that language.</p>
+    <p>Historical Mirror snapshots may be stored with your account so that you can review how your philosophical profile has developed over time.</p>
+    <h3>Learn Philosophy Activity</h3>
+    <p>The Agora includes educational features such as Philosophy 101, Thought Experiments, Modern Philosophy Cases, Where Do You Stand?, and other learning experiences.</p>
+    <p>Depending on the feature, information associated with these experiences may include:</p>
+    <ul>
+      <li>Lesson progress and completion</li>
+      <li>Content you have opened or completed</li>
+      <li>Choices made within thought experiments</li>
+      <li>Responses to philosophical cases or statements</li>
+      <li>Progress through learning experiences</li>
+    </ul>
+    <p>Some Learn Philosophy progress and responses may be stored locally on your device rather than associated with your server-side account.</p>
+    <p>We may also collect general feature-interaction analytics, such as whether a learning feature was opened, started, or completed.</p>
+    <h3>Account Progress and App Activity</h3>
+    <p>We may collect and store information about your activity and progress in The Agora, including:</p>
+    <ul>
+      <li>App opens and feature interactions</li>
+      <li>Debate starts and completions</li>
+      <li>Philosopher selections</li>
+      <li>Topic selections</li>
+      <li>Debate modes and difficulty levels</li>
+      <li>Debate scores</li>
+      <li>Debate reports</li>
+      <li>Share-card activity</li>
+      <li>Daily Challenge activity</li>
+      <li>Learn Philosophy activity</li>
+      <li>Streaks</li>
+      <li>Achievements</li>
+      <li>Ranked placement progress</li>
+      <li>Ranked rating points, rank, and division</li>
+      <li>Ranked debate results</li>
+      <li>Peak rank and related Ranked statistics</li>
+      <li>Mirror eligibility and completion status</li>
+      <li>Feature unlocks and access status</li>
+    </ul>
+    <p>We use this information to provide the app’s features, maintain your progress, understand how the app is used, and improve the experience.</p>
+    <h3>Analytics and Technical Information</h3>
+    <p>We may collect technical and usage information such as:</p>
+    <ul>
+      <li>App version and build number</li>
+      <li>Device platform</li>
+      <li>Installation identifier</li>
+      <li>Feature interactions</li>
+      <li>AI-request timing and status</li>
+      <li>Error and failure information</li>
+      <li>Subscription and paywall interactions</li>
+      <li>Session and authentication events</li>
+      <li>Network or security information, such as an IP address or a hashed representation of an IP address</li>
+      <li>User-agent or similar technical information, including hashed representations where applicable</li>
+    </ul>
+    <p>We use this information to operate The Agora, detect technical problems, maintain security, prevent abuse, understand feature usage, and improve performance.</p>
+    <h3>Subscription and Purchase Information</h3>
+    <p>Purchases and subscriptions are processed by the applicable app marketplace.</p>
+    <p>On Apple platforms, purchases and subscriptions are processed by Apple through the App Store.</p>
+    <p>Where Google Play purchases are supported, purchases and subscriptions may be processed by Google through Google Play.</p>
+    <p>We may receive or store information associated with a subscription or purchase, including:</p>
+    <ul>
+      <li>Subscription product identifier</li>
+      <li>Transaction or purchase identifier</li>
+      <li>Original transaction identifier, where applicable</li>
+      <li>Subscription status</li>
+      <li>Trial status</li>
+      <li>Purchase and renewal status</li>
+      <li>Expiration status</li>
+      <li>Cancellation or revocation information</li>
+      <li>Automatic-renewal status</li>
+      <li>Storefront or marketplace</li>
+      <li>Currency</li>
+      <li>Subscription price information</li>
+      <li>Offer or promotion information associated with the transaction</li>
+    </ul>
+    <p>We use this information to verify and provide Agora Pro access, restore purchases, process subscription status changes, support customers, prevent fraud, and maintain financial records.</p>
+    <p>We do not receive or store your payment-card number or full payment credentials. Payment processing is handled by the applicable app marketplace.</p>
+    <h3>Creator Codes, Referral Information, and Affiliate Attribution</h3>
+    <p>The Agora may allow you to enter a Creator Code or arrive through a creator referral link.</p>
+    <p>If you interact with a creator referral or Creator Code, we may collect and process information such as:</p>
+    <ul>
+      <li>The Creator Code</li>
+      <li>Referral or handoff identifiers</li>
+      <li>Referral-link interaction information</li>
+      <li>The referring creator</li>
+      <li>Your installation identifier</li>
+      <li>Your Agora account identifier, when available</li>
+      <li>The time a creator offer was opened or selected</li>
+      <li>Attribution status</li>
+      <li>Subscription transaction identifiers or offer information needed to verify whether a qualifying subscription occurred</li>
+    </ul>
+    <p>Creator Codes are used to identify and credit the creator who referred you and to support attribution of eligible subscription offers or conversions.</p>
+    <p>Creator Codes do not independently process payments or unlock a subscription. Subscription purchases and eligible offers are processed through the applicable app marketplace.</p>
+    <p>We do not use creator attribution information to build advertising profiles about you or to track your activity across unrelated companies’ apps and websites for targeted advertising.</p>
+    <h3>Feedback and Support</h3>
+    <p>If you send feedback, submit a report, or contact us for support, we may collect:</p>
+    <ul>
+      <li>The content of your message</li>
+      <li>Your Agora account identifier, when submitted while signed in</li>
+      <li>Relevant app or technical information</li>
+      <li>Any information you voluntarily include in your message</li>
+    </ul>
+    <p>We use this information to respond to you, investigate issues, review feedback, improve The Agora, and maintain the safety and reliability of the service.</p>
+    <h3>Push Notifications</h3>
+    <p>If you allow push notifications, we may receive and store:</p>
+    <ul>
+      <li>A push-notification device token</li>
+      <li>Notification preferences</li>
+      <li>Device platform information needed for notification delivery</li>
+      <li>Information needed to determine which notifications should be sent</li>
+    </ul>
+    <p>We use this information to deliver features such as Daily Challenge notifications, Mirror-related notifications, and other app-related notifications.</p>
+    <p>You can change notification permissions at any time through your device settings.</p>
   </section>
 
   <section>
-    <h2>5. Data sharing and sale</h2>
-    <p>
-      The Agora does <strong>not sell personal information</strong>. We do not use personal information collected through the app for third-party behavioral advertising. Data may be transferred to service providers acting on our behalf as described in this policy, or when a transfer is necessary for a feature you intentionally use.
-    </p>
+    <h2>How We Use Information</h2>
+    <p>We may use the information described above to:</p>
+    <ul>
+      <li>Create and maintain your Agora account</li>
+      <li>Authenticate your account and maintain secure sessions</li>
+      <li>Restore your account and supported app data</li>
+      <li>Generate philosopher responses</li>
+      <li>Generate debate scores, insights, and reports</li>
+      <li>Store and synchronize debate history</li>
+      <li>Provide Learn Philosophy features</li>
+      <li>Maintain learning progress</li>
+      <li>Provide Daily Challenges</li>
+      <li>Maintain achievements and streaks</li>
+      <li>Operate Ranked debates and Ranked progression</li>
+      <li>Create your initial AI-assisted philosophical profile through The Mirror</li>
+      <li>Generate subsequent Mirror analyses</li>
+      <li>Maintain historical Mirror snapshots</li>
+      <li>Compare philosophical-profile information over time</li>
+      <li>Identify patterns and changes in qualifying philosophical activity</li>
+      <li>Explain evidence used in Mirror analysis</li>
+      <li>Generate Mirror recommendations and questions</li>
+      <li>Translate generated Mirror analysis into supported languages</li>
+      <li>Cache previously generated Mirror translations</li>
+      <li>Verify and provide Agora Pro access</li>
+      <li>Process and reconcile subscription status</li>
+      <li>Restore purchases</li>
+      <li>Attribute qualifying creator referrals and subscription conversions</li>
+      <li>Deliver push notifications</li>
+      <li>Respond to feedback and support requests</li>
+      <li>Diagnose technical problems</li>
+      <li>Monitor service reliability</li>
+      <li>Prevent misuse, fraud, and security threats</li>
+      <li>Measure feature usage and app performance</li>
+      <li>Improve existing features</li>
+      <li>Develop new features</li>
+      <li>Maintain financial and operational records</li>
+      <li>Comply with applicable legal obligations</li>
+    </ul>
+    <p>We do not use your debate content, Mirror information, or philosophical profile to target third-party advertising to you.</p>
   </section>
 
   <section>
-    <h2>6. Security</h2>
-    <p>
-      The Agora uses HTTPS/TLS for network communication and applies technical and organizational safeguards appropriate to the information processed. Sensitive account sessions are stored using platform-appropriate secure storage where implemented. Store purchase credentials are verified server-side before authoritative subscription access is granted. No security measure can guarantee absolute security.
-    </p>
+    <h2>Artificial Intelligence Processing</h2>
+    <p>The Agora uses third-party artificial intelligence services to provide core app functionality.</p>
+    <p>When you participate in a debate, use The Mirror, request a translation of generated Mirror content, or use another AI-powered feature, information sent to our AI provider may include:</p>
+    <ul>
+      <li>Your debate messages</li>
+      <li>Debate topics</li>
+      <li>Relevant previous messages or debate context</li>
+      <li>The selected philosopher</li>
+      <li>Debate mode and related instructions</li>
+      <li>Mirror questionnaire responses</li>
+      <li>Qualifying philosophical activity used as Mirror evidence</li>
+      <li>Relevant historical Mirror information</li>
+      <li>Existing generated Mirror analysis when translation is requested</li>
+      <li>Information needed to generate scoring, responses, insights, reports, philosophical-profile analysis, recommendations, or translations</li>
+    </ul>
+    <p>This information is sent because it is necessary to generate the AI functionality you request or to provide AI-powered features associated with your account.</p>
+    <p>The Agora currently uses Anthropic to provide AI-generated debate responses and related analysis, including Mirror analysis and supported Mirror translations.</p>
+    <p>Do not submit information to an AI-powered feature that you do not want processed by the services described in this Privacy Policy.</p>
   </section>
 
   <section>
-    <h2>7. Retention</h2>
-    <p>
-      We retain account-linked information while needed to provide the service, maintain account history/progress, secure the service, meet legitimate business or legal requirements, or until it is deleted in accordance with this policy. Some operational records may be retained for a limited period for security, fraud prevention, dispute resolution, financial reporting, or legal compliance.
-    </p>
-    <p>
-      Apple and Google separately control records held in your App Store, Apple, Google, or Google Play account under their own policies.
-    </p>
+    <h2>Third-Party Service Providers</h2>
+    <p>We use third-party service providers to operate The Agora. Information may be transmitted to or processed by these providers only as necessary for the services they provide.</p>
+    <p>These providers include:</p>
+    <h3>Anthropic</h3>
+    <p>Anthropic provides artificial intelligence processing used to generate philosopher responses, scoring, debate analysis, reports, Mirror analyses, and translations of generated Mirror content.</p>
+    <p>Relevant debate content, Mirror questionnaire responses, qualifying philosophical evidence, historical Mirror context, and generated Mirror analysis may be transmitted to Anthropic when necessary to provide the AI-powered functionality you request.</p>
+    <h3>Apple</h3>
+    <p>Apple provides services including:</p>
+    <ul>
+      <li>Sign in with Apple</li>
+      <li>App Store purchases</li>
+      <li>Subscription processing</li>
+      <li>Subscription verification and offer redemption</li>
+      <li>Push notifications through Apple Push Notification service</li>
+    </ul>
+    <p>Apple processes information according to its own privacy policies and terms.</p>
+    <h3>Google</h3>
+    <p>Where supported, Google may provide services including:</p>
+    <ul>
+      <li>Google account authentication</li>
+      <li>Google Play purchases and subscription processing</li>
+      <li>Subscription verification</li>
+      <li>Push-notification infrastructure on supported platforms</li>
+    </ul>
+    <p>Google processes information according to its own privacy policies and terms.</p>
+    <h3>Railway</h3>
+    <p>Railway provides infrastructure used to host portions of The Agora’s backend services and database systems.</p>
+    <p>Information stored or processed by our backend may therefore be processed using Railway-hosted infrastructure.</p>
+    <p>We may also use additional infrastructure or operational service providers where reasonably necessary to maintain, secure, monitor, or support The Agora.</p>
+    <p>We require service providers to process information only for appropriate purposes and to protect information consistent with applicable contractual and legal requirements.</p>
   </section>
 
   <section>
-    <h2>8. Account and data deletion</h2>
-    <p>
-      You can request deletion of your Agora account and associated account data from inside the app. You can also request deletion outside the app through our <a href="/account-deletion/">Account Deletion page</a>.
-    </p>
-    <p>
-      Once account ownership is verified, The Agora deletes the account and associated user data except information that must be retained for legitimate security, fraud-prevention, financial, dispute-resolution, or legal obligations. Account deletion does not itself cancel an active App Store or Google Play subscription; subscription billing must be managed through the store where you subscribed.
-    </p>
+    <h2>Advertising and Tracking</h2>
+    <p>The Agora does not sell personal information.</p>
+    <p>The Agora does not use your information for third-party targeted advertising.</p>
+    <p>The Agora does not use your debate content, Mirror information, or philosophical profile to create third-party advertising profiles.</p>
+    <p>The Agora does not use creator or referral attribution to track your activity across unrelated companies’ applications or websites for targeted advertising.</p>
+    <p>If our practices change in the future in a way that constitutes tracking under applicable platform rules or law, we will update our disclosures and request any required permission before beginning that activity.</p>
   </section>
 
   <section>
-    <h2>9. Notifications and choices</h2>
-    <p>
-      You control notification permission through your device settings and can change supported reminder preferences in The Agora. You can also manage your App Store or Google Play subscription through the applicable store and delete your Agora account as described above.
-    </p>
+    <h2>Data Storage</h2>
+    <p>Information may be stored:</p>
+    <ul>
+      <li>Locally on your device</li>
+      <li>In The Agora’s backend database</li>
+      <li>In systems operated by service providers acting on our behalf</li>
+    </ul>
+    <p>Signed-in account data may be stored server-side so that supported information can remain associated with your Agora account.</p>
+    <p>Server-stored information may include:</p>
+    <ul>
+      <li>Debate history</li>
+      <li>Account progress</li>
+      <li>Achievements</li>
+      <li>Daily Challenge activity</li>
+      <li>Ranked information</li>
+      <li>Mirror questionnaire responses</li>
+      <li>Mirror evidence records</li>
+      <li>Philosophical-profile data</li>
+      <li>Mirror analyses and historical snapshots</li>
+      <li>Cached Mirror translations</li>
+      <li>Subscription records</li>
+      <li>Creator attribution records</li>
+      <li>AI-request records</li>
+      <li>Technical metadata</li>
+    </ul>
+    <p>Some Learn Philosophy progress and responses may be maintained locally on your device.</p>
   </section>
 
   <section>
-    <h2>10. Children</h2>
-    <p>
-      The Agora is not intended to be a child-directed service. If we learn that personal information has been collected in violation of applicable child-privacy law, we will take appropriate steps to delete or otherwise address it.
-    </p>
+    <h2>Data Retention</h2>
+    <p>We retain different categories of information for different periods depending on why the information is needed.</p>
+    <p>Information may be retained for as long as reasonably necessary to:</p>
+    <ul>
+      <li>Provide The Agora</li>
+      <li>Maintain your account</li>
+      <li>Synchronize your progress</li>
+      <li>Maintain Mirror history and supported longitudinal comparisons</li>
+      <li>Complete and troubleshoot AI requests</li>
+      <li>Maintain cached Mirror translations</li>
+      <li>Maintain subscription access</li>
+      <li>Prevent fraud and abuse</li>
+      <li>Maintain security</li>
+      <li>Process creator attribution</li>
+      <li>Provide customer support</li>
+      <li>Maintain financial and accounting records</li>
+      <li>Resolve disputes</li>
+      <li>Enforce agreements</li>
+      <li>Comply with applicable law</li>
+    </ul>
+    <p>Historical Mirror snapshots may remain associated with your account so that The Mirror can show previous analyses and changes over time.</p>
+    <p>Cached Mirror translations may be retained so that a previously translated analysis can be displayed again without requiring a new AI translation request.</p>
+    <p>When information is no longer reasonably necessary for these purposes, we may delete, anonymize, or aggregate it.</p>
+    <p>Certain records may need to remain after account deletion. For example, transaction, subscription, fraud-prevention, creator-attribution, financial, security, or legal records may be retained where reasonably necessary or legally required.</p>
+    <p>Information that has been aggregated or de-identified so that it can no longer reasonably be associated with you may also be retained.</p>
+    <p>Backup copies may remain for a limited period until they are overwritten or rotated through ordinary backup processes.</p>
   </section>
 
   <section>
-    <h2>11. Changes to this policy</h2>
-    <p>
-      We may update this Privacy Policy as the service, providers, or legal requirements change. The "Last updated" date at the top of this page identifies the current version. Material changes will be communicated when required by applicable law or platform policy.
-    </p>
+    <h2>Account Deletion</h2>
+    <p>You can initiate deletion of your Agora account directly within the app through <strong>Settings → Account → Delete Account</strong>.</p>
+    <p>Account deletion is designed to permanently remove eligible account-associated information, including information such as:</p>
+    <ul>
+      <li>Your Agora account</li>
+      <li>Synchronized debate history</li>
+      <li>Achievements and progress</li>
+      <li>Daily Challenge progress</li>
+      <li>Ranked account progress</li>
+      <li>Mirror questionnaire responses</li>
+      <li>Mirror evidence associated with your account</li>
+      <li>Philosophical-profile data</li>
+      <li>Mirror analyses and historical snapshots</li>
+      <li>Associated cached Mirror translations</li>
+    </ul>
+    <p>This is subject to the retention exceptions described in this Privacy Policy.</p>
+    <p>Deleting your Agora account does not automatically cancel an active subscription through the App Store or another app marketplace. Subscriptions must be managed through the marketplace through which they were purchased.</p>
+    <p>Certain information may be retained after account deletion where necessary for purposes such as financial reporting, transaction verification, fraud prevention, security, legal compliance, or resolution of disputes.</p>
+    <p>You may also contact us regarding a privacy or deletion request at:</p>
+    <p><a href="mailto:support.theagora@gmail.com">support.theagora@gmail.com</a></p>
+    <p>We may need information sufficient to verify your identity and locate the relevant records before fulfilling certain requests.</p>
   </section>
 
   <section>
-    <h2>12. Contact</h2>
-    <p>
-      Developer: <strong>Bhernaurd Maghirang</strong><br>
-      App: <strong>The Agora: Philosophy Debates</strong>
-    </p>
-    <p>
-      For privacy questions or requests, use the <a href="https://theagora.app/">Contact Us form on The Agora website</a>. For account deletion, use the dedicated <a href="/account-deletion/">Account Deletion page</a>.
-    </p>
+    <h2>Your Privacy Choices and Rights</h2>
+    <p>Depending on where you live, you may have rights regarding your personal information, which can include the right to:</p>
+    <ul>
+      <li>Request access to information associated with you</li>
+      <li>Request correction of inaccurate information</li>
+      <li>Request deletion of eligible information</li>
+      <li>Request information about how your data is used</li>
+      <li>Object to or restrict certain processing where applicable</li>
+      <li>Request a portable copy of certain information where applicable</li>
+      <li>Withdraw consent where processing depends on consent</li>
+    </ul>
+    <p>You may contact us at <a href="mailto:support.theagora@gmail.com">support.theagora@gmail.com</a> to make a privacy request.</p>
+    <p>We may need to verify the request before providing, correcting, or deleting information.</p>
+    <p>You may also manage certain choices directly through the app or your device, including notification permissions and account deletion.</p>
   </section>
 
-  <footer>© Bhernaurd Maghirang · The Agora: Philosophy Debates</footer>
+  <section>
+    <h2>Security</h2>
+    <p>We use reasonable administrative, organizational, and technical safeguards intended to protect information from unauthorized access, loss, misuse, alteration, or disclosure.</p>
+    <p>These measures may include authentication controls, access restrictions, encrypted credentials, token-based sessions, and security monitoring.</p>
+    <p>However, no internet transmission, service, or storage system can be guaranteed to be completely secure.</p>
+  </section>
+
+  <section>
+    <h2>International Processing</h2>
+    <p>The Agora and its service providers may process information in countries or regions other than the one in which you live.</p>
+    <p>When required, we take reasonable steps intended to ensure that information receives appropriate protection when it is transferred or processed internationally.</p>
+  </section>
+
+  <section>
+    <h2>Children’s Privacy</h2>
+    <p>The Agora is not directed to children under 13.</p>
+    <p>We do not knowingly collect personal information from children under 13. If we learn that personal information from a child under 13 has been collected in a manner inconsistent with applicable law, we will take appropriate steps to delete it.</p>
+    <p>Parents or guardians who believe a child has provided personal information may contact us at:</p>
+    <p><a href="mailto:support.theagora@gmail.com">support.theagora@gmail.com</a></p>
+  </section>
+
+  <section>
+    <h2>Changes to This Privacy Policy</h2>
+    <p>We may update this Privacy Policy to reflect changes to The Agora, our service providers, our data practices, or applicable legal requirements.</p>
+    <p>When we make changes, we will update the Last updated date at the top of this policy.</p>
+    <p>If a change materially affects how we use personal information, we may provide additional notice where appropriate or required.</p>
+  </section>
+
+  <section>
+    <h2>Contact</h2>
+    <p>Questions, privacy requests, or concerns about this Privacy Policy may be sent to:</p>
+    <p><a href="mailto:support.theagora@gmail.com">support.theagora@gmail.com</a></p>
+  </section>
+
+  <footer>© 2026 The Agora: Learn Philosophy</footer>
 </main>
 </body>
 </html>
