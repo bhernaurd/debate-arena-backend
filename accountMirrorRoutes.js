@@ -3,6 +3,17 @@ import { AccountMirrorError } from './lib/accountMirrorService.js';
 
 const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
 
+const SUPPORTED_MIRROR_LANGUAGE_CODES = new Map([
+    ['en', 'en'],
+    ['es', 'es'],
+    ['pt-br', 'pt-BR'],
+    ['fr', 'fr'],
+    ['de', 'de'],
+    ['ja', 'ja'],
+    ['ko', 'ko'],
+    ['zh-hans', 'zh-Hans'],
+]);
+
 class AccountMirrorRouteError extends Error {
     constructor(code, message, { status = 400, retryable = false } = {}) {
         super(message);
@@ -41,6 +52,14 @@ function requireBearerToken(req) {
         fail('invalid_access_token', 'The access token is invalid or expired.', { status: 401 });
     }
     return match[1];
+}
+
+function mirrorLanguageCode(req) {
+    const raw = req.get('X-Agora-Language');
+    if (typeof raw !== 'string') return 'en';
+
+    const normalized = raw.trim().replaceAll('_', '-').toLowerCase();
+    return SUPPORTED_MIRROR_LANGUAGE_CODES.get(normalized) || 'en';
 }
 
 function requireObjectBody(req) {
@@ -91,6 +110,7 @@ function authInput(req) {
     return {
         installationId: requireInstallationId(req),
         accessToken: requireBearerToken(req),
+        languageCode: mirrorLanguageCode(req),
     };
 }
 
