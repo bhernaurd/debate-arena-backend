@@ -15,18 +15,19 @@ const terms = await readFile(
     'utf8'
 );
 
-const APP_NAME = 'The Agora: Philosophy Debates';
+const LEGACY_APP_NAME = 'The Agora: Philosophy Debates';
+const CURRENT_APP_NAME = 'The Agora: Learn Philosophy';
 
-function assertPublicDocument(source, title) {
+function assertPublicDocument(source, title, appName = LEGACY_APP_NAME) {
     assert.match(source, /<!doctype html>/i);
     assert.match(source, /<meta name="viewport"/i);
-    assert.ok(source.includes(APP_NAME));
+    assert.ok(source.includes(appName));
     assert.ok(source.includes('Bhernaurd Maghirang'));
     assert.ok(source.includes(title));
 }
 
 test('public legal resources identify the app and operator', () => {
-    assertPublicDocument(privacy, 'Privacy Policy');
+    assertPublicDocument(privacy, 'Privacy Policy', CURRENT_APP_NAME);
     assertPublicDocument(deletion, 'Account Deletion');
     assertPublicDocument(terms, 'Terms of Use');
 });
@@ -35,7 +36,8 @@ test('privacy policy exposes the external account-deletion path', () => {
     assert.ok(privacy.includes('href="/account-deletion/"'));
     assert.match(privacy, /retention/i);
     assert.match(privacy, /Anthropic/);
-    assert.match(privacy, /AI response safety reports/i);
+    assert.match(privacy, /The Mirror and Philosophical Profile/i);
+    assert.match(privacy, /cached Mirror translations/i);
 });
 
 test('Terms links users back to privacy and account deletion', () => {
