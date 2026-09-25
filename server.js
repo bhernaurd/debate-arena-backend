@@ -651,6 +651,13 @@ app.use(
   createAccountSubscriptionEntitlementRouter({
     accountAuthService,
     proAccessService: accountProAccessService,
+    pool,
+    closedTestProToken:
+      process.env.GOOGLE_PLAY_CLOSED_TEST_PRO_TOKEN || '',
+    closedTestAndroidBuild:
+      process.env.GOOGLE_PLAY_CLOSED_TEST_PRO_BUILD || '',
+    closedTestProDays:
+      process.env.GOOGLE_PLAY_CLOSED_TEST_PRO_DAYS || '21',
   })
 );
 app.use(
