@@ -3,7 +3,7 @@ import { CANONICAL_ACTIVITY_CTES } from './lib/analyticsIdentity.js';
 
 const APP_TIMEZONE = 'America/Chicago';
 
-const ALLOWED_EVENTS = new Set([
+export const ANALYTICS_ALLOWED_EVENTS = new Set([
   'app_opened',
   'daily_challenge_viewed',
   'daily_challenge_started',
@@ -294,7 +294,7 @@ export function createAnalyticsRouter(pool, options = {}) {
 
       if (
         typeof eventName !== 'string' ||
-        !ALLOWED_EVENTS.has(eventName)
+        !ANALYTICS_ALLOWED_EVENTS.has(eventName)
       ) {
         return res.status(400).json({
           success: false,
