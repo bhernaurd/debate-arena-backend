@@ -1,5 +1,6 @@
 import pg from 'pg';
 import { sendAnalyticsEmail } from './emailReporter.js';
+import { CANONICAL_ACTIVITY_CTES } from '../lib/analyticsIdentity.js';
 import {
   growth,
   percent,
@@ -26,16 +27,7 @@ bounds AS (
     (report_date + 1)::timestamp AT TIME ZONE 'America/Chicago' AS end_time
   FROM params
 ),
-installation_accounts AS (
-  SELECT DISTINCT ON (installation_id) installation_id, account_id
-  FROM account_installations
-  ORDER BY installation_id, (unlinked_at IS NULL) DESC, updated_at DESC, linked_at DESC
-),
-excluded_accounts AS (
-  SELECT DISTINCT ia.account_id
-  FROM excluded_analytics_users x
-  JOIN installation_accounts ia ON ia.installation_id = x.user_id
-),
+${CANONICAL_ACTIVITY_CTES},
 account_platforms AS (
   SELECT a.id AS account_id,
     CASE
@@ -49,6 +41,10 @@ account_platforms AS (
 ),
 raw_events AS (
   SELECT e.*, ia.account_id,
+    COALESCE(
+      'account:' || ia.account_id::text,
+      'installation:' || e.user_id
+    ) AS analytics_user_key,
     COALESCE(
       CASE WHEN LOWER(NULLIF(BTRIM(e.metadata->>'clientPlatform'), '')) IN ('ios','android')
         THEN LOWER(NULLIF(BTRIM(e.metadata->>'clientPlatform'), '')) END,
@@ -65,59 +61,68 @@ raw_events AS (
 ),
 events AS (
   SELECT re.* FROM raw_events re
-  WHERE re.account_id IS NOT NULL
-    AND NOT EXISTS (SELECT 1 FROM excluded_accounts ea WHERE ea.account_id = re.account_id)
+  WHERE re.account_id IS NULL
+     OR NOT EXISTS (
+       SELECT 1
+       FROM excluded_accounts ea
+       WHERE ea.account_id = re.account_id
+     )
 ),
-activity_accounts AS (
-  SELECT DISTINCT ia.account_id
-  FROM user_activity_days uad
-  JOIN installation_accounts ia ON ia.installation_id = uad.user_id
+first_seen AS (
+  SELECT analytics_user_key, MIN(active_date) AS first_active_date
+  FROM canonical_activity
+  GROUP BY analytics_user_key
+),
+activity_users AS (
+  SELECT DISTINCT ca.analytics_user_key
+  FROM canonical_activity ca
   CROSS JOIN params p
-  WHERE uad.active_date = p.report_date
-    AND NOT EXISTS (SELECT 1 FROM excluded_analytics_users x WHERE x.user_id = uad.user_id)
-    AND NOT EXISTS (SELECT 1 FROM excluded_accounts ea WHERE ea.account_id = ia.account_id)
+  WHERE ca.active_date = p.report_date
 ),
 activity AS (
-  SELECT COUNT(*) AS daily_active_users,
-    COUNT(*) FILTER (WHERE (a.created_at AT TIME ZONE 'America/Chicago')::date = p.report_date) AS new_users
-  FROM activity_accounts aa
-  JOIN accounts a ON a.id = aa.account_id
+  SELECT
+    COUNT(*) AS daily_active_users,
+    COUNT(*) FILTER (
+      WHERE fs.first_active_date = p.report_date
+    ) AS new_users
+  FROM activity_users au
+  JOIN first_seen fs USING (analytics_user_key)
   CROSS JOIN params p
 ),
 philosopher_flows AS (
-  SELECT DISTINCT account_id, platform, flow_id FROM events
+  SELECT DISTINCT analytics_user_key, platform, flow_id FROM events
   WHERE event_name = 'philosopher_selected' AND flow_id IS NOT NULL
 ),
 started_flows AS (
-  SELECT DISTINCT account_id, platform, flow_id FROM events
+  SELECT DISTINCT analytics_user_key, platform, flow_id FROM events
   WHERE event_name = 'debate_started' AND metadata->>'isDailyChallenge' = 'false' AND flow_id IS NOT NULL
 ),
 matched_flows AS (
-  SELECT pf.account_id, pf.platform, pf.flow_id FROM philosopher_flows pf
+  SELECT pf.analytics_user_key, pf.platform, pf.flow_id FROM philosopher_flows pf
   WHERE EXISTS (
     SELECT 1 FROM started_flows sf
-    WHERE sf.account_id = pf.account_id AND sf.flow_id = pf.flow_id
+    WHERE sf.analytics_user_key = pf.analytics_user_key AND sf.flow_id = pf.flow_id
   )
 ),
 summary AS (
   SELECT
-    COUNT(DISTINCT account_id) FILTER (WHERE event_name = 'daily_challenge_viewed') AS dc_viewers,
-    COUNT(DISTINCT account_id) FILTER (WHERE event_name = 'daily_challenge_started') AS dc_starters,
-    COUNT(DISTINCT account_id) FILTER (WHERE event_name = 'daily_challenge_completed') AS dc_completers,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'daily_challenge_viewed') AS dc_viewers,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'daily_challenge_started') AS dc_starters,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'daily_challenge_completed') AS dc_completers,
     COUNT(DISTINCT flow_id) FILTER (WHERE event_name = 'philosopher_selected' AND flow_id IS NOT NULL) AS philosopher_times,
-    COUNT(DISTINCT account_id) FILTER (WHERE event_name = 'philosopher_selected' AND flow_id IS NOT NULL) AS philosopher_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'philosopher_selected' AND flow_id IS NOT NULL) AS philosopher_users,
     COUNT(*) FILTER (WHERE event_name = 'topic_selected' AND flow_id IS NOT NULL) AS topic_times,
-    COUNT(DISTINCT account_id) FILTER (WHERE event_name = 'topic_selected' AND flow_id IS NOT NULL) AS topic_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'topic_selected' AND flow_id IS NOT NULL) AS topic_users,
     COUNT(DISTINCT flow_id) FILTER (WHERE event_name = 'difficulty_selected' AND flow_id IS NOT NULL) AS mode_times,
-    COUNT(DISTINCT account_id) FILTER (WHERE event_name = 'difficulty_selected' AND flow_id IS NOT NULL) AS mode_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'difficulty_selected' AND flow_id IS NOT NULL) AS mode_users,
     COUNT(DISTINCT COALESCE(debate_id, id::text)) FILTER (WHERE event_name = 'debate_started' AND metadata->>'isDailyChallenge' = 'false') AS debate_starts,
-    COUNT(DISTINCT account_id) FILTER (WHERE event_name = 'debate_started' AND metadata->>'isDailyChallenge' = 'false') AS debate_start_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'debate_started' AND metadata->>'isDailyChallenge' = 'false') AS debate_start_users,
     COUNT(DISTINCT COALESCE(debate_id, id::text)) FILTER (WHERE event_name = 'debate_completed' AND metadata->>'isDailyChallenge' = 'false') AS debate_completions,
-    COUNT(DISTINCT account_id) FILTER (WHERE event_name = 'debate_completed' AND metadata->>'isDailyChallenge' = 'false') AS debate_completion_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'debate_completed' AND metadata->>'isDailyChallenge' = 'false') AS debate_completion_users,
     COUNT(*) FILTER (WHERE event_name = 'report_viewed') AS report_views,
-    COUNT(DISTINCT account_id) FILTER (WHERE event_name = 'report_viewed') AS report_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'report_viewed') AS report_users,
     COUNT(*) FILTER (WHERE event_name = 'share_card_created') AS share_cards,
-    COUNT(DISTINCT account_id) FILTER (WHERE event_name = 'share_card_created') AS share_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'share_card_created') AS share_users,
     COUNT(*) FILTER (WHERE event_name = 'report_generation_failed') AS report_generation_failures
   FROM events
 ),
@@ -166,21 +171,21 @@ tracking AS (
   FROM raw_events
 ),
 activity_14 AS (
-  SELECT DISTINCT uad.active_date, ia.account_id
-  FROM user_activity_days uad
-  JOIN installation_accounts ia ON ia.installation_id = uad.user_id
+  SELECT DISTINCT ca.active_date, ca.analytics_user_key
+  FROM canonical_activity ca
   CROSS JOIN params p
-  WHERE uad.active_date >= p.report_date - 13 AND uad.active_date <= p.report_date
-    AND NOT EXISTS (SELECT 1 FROM excluded_analytics_users x WHERE x.user_id = uad.user_id)
-    AND NOT EXISTS (SELECT 1 FROM excluded_accounts ea WHERE ea.account_id = ia.account_id)
+  WHERE ca.active_date >= p.report_date - 13
+    AND ca.active_date <= p.report_date
 ),
 daily_counts AS (
-  SELECT active_date, COUNT(DISTINCT account_id) AS users FROM activity_14 GROUP BY active_date
+  SELECT active_date, COUNT(DISTINCT analytics_user_key) AS users
+  FROM activity_14
+  GROUP BY active_date
 ),
 seven_day AS (
   SELECT
-    (SELECT COUNT(DISTINCT account_id) FROM activity_14 a CROSS JOIN params p WHERE a.active_date >= p.report_date - 6) AS active_7d,
-    (SELECT COUNT(DISTINCT account_id) FROM activity_14 a CROSS JOIN params p WHERE a.active_date BETWEEN p.report_date - 13 AND p.report_date - 7) AS previous_active_7d,
+    (SELECT COUNT(DISTINCT analytics_user_key) FROM activity_14 a CROSS JOIN params p WHERE a.active_date >= p.report_date - 6) AS active_7d,
+    (SELECT COUNT(DISTINCT analytics_user_key) FROM activity_14 a CROSS JOIN params p WHERE a.active_date BETWEEN p.report_date - 13 AND p.report_date - 7) AS previous_active_7d,
     COALESCE((SELECT AVG(users::numeric) FROM daily_counts d CROSS JOIN params p WHERE d.active_date >= p.report_date - 6), 0) AS avg_dau_7d
 ),
 report_label AS (SELECT TO_CHAR(report_date, 'FMDay, FMMonth DD, YYYY') AS label FROM params)
@@ -195,47 +200,121 @@ CROSS JOIN ranked r CROSS JOIN pro_summary ps CROSS JOIN tracking t CROSS JOIN s
 `;
 
 const PLATFORM_SQL = `
-WITH params AS (SELECT ((NOW() AT TIME ZONE 'America/Chicago')::date - 1)::date AS report_date),
-bounds AS (SELECT report_date::timestamp AT TIME ZONE 'America/Chicago' AS start_time, (report_date + 1)::timestamp AT TIME ZONE 'America/Chicago' AS end_time FROM params),
-installation_accounts AS (
-  SELECT DISTINCT ON (installation_id) installation_id, account_id FROM account_installations
-  ORDER BY installation_id, (unlinked_at IS NULL) DESC, updated_at DESC, linked_at DESC
+WITH params AS (
+  SELECT ((NOW() AT TIME ZONE 'America/Chicago')::date - 1)::date AS report_date
 ),
+bounds AS (
+  SELECT
+    report_date::timestamp AT TIME ZONE 'America/Chicago' AS start_time,
+    (report_date + 1)::timestamp AT TIME ZONE 'America/Chicago' AS end_time
+  FROM params
+),
+${CANONICAL_ACTIVITY_CTES},
 account_platforms AS (
   SELECT a.id AS account_id,
     CASE
-      WHEN EXISTS (SELECT 1 FROM account_google_identities g WHERE g.account_id = a.id) AND NOT EXISTS (SELECT 1 FROM account_apple_identities ap WHERE ap.account_id = a.id) THEN 'android'
-      WHEN EXISTS (SELECT 1 FROM account_apple_identities ap WHERE ap.account_id = a.id) AND NOT EXISTS (SELECT 1 FROM account_google_identities g WHERE g.account_id = a.id) THEN 'ios'
-      ELSE 'unknown' END AS account_platform
+      WHEN EXISTS (SELECT 1 FROM account_google_identities g WHERE g.account_id = a.id)
+        AND NOT EXISTS (SELECT 1 FROM account_apple_identities ap WHERE ap.account_id = a.id) THEN 'android'
+      WHEN EXISTS (SELECT 1 FROM account_apple_identities ap WHERE ap.account_id = a.id)
+        AND NOT EXISTS (SELECT 1 FROM account_google_identities g WHERE g.account_id = a.id) THEN 'ios'
+      ELSE 'unknown'
+    END AS account_platform
   FROM accounts a
 ),
+activity_event_platforms AS (
+  SELECT DISTINCT ON (e.user_id)
+    e.user_id AS installation_id,
+    LOWER(NULLIF(BTRIM(e.metadata->>'clientPlatform'), '')) AS platform
+  FROM user_events e
+  CROSS JOIN bounds b
+  WHERE e.created_at >= b.start_time
+    AND e.created_at < b.end_time
+    AND LOWER(NULLIF(BTRIM(e.metadata->>'clientPlatform'), '')) IN ('ios','android')
+  ORDER BY e.user_id, e.created_at DESC
+),
+platform_activity AS (
+  SELECT DISTINCT
+    ca.analytics_user_key,
+    COALESCE(aep.platform, ap.account_platform, 'unknown') AS platform
+  FROM canonical_activity ca
+  CROSS JOIN params p
+  LEFT JOIN activity_event_platforms aep
+    ON aep.installation_id = ca.installation_id
+  LEFT JOIN account_platforms ap
+    ON ap.account_id = ca.account_id
+  WHERE ca.active_date = p.report_date
+),
 events AS (
-  SELECT e.*, ia.account_id,
-    COALESCE(CASE WHEN LOWER(NULLIF(BTRIM(e.metadata->>'clientPlatform'), '')) IN ('ios','android') THEN LOWER(NULLIF(BTRIM(e.metadata->>'clientPlatform'), '')) END, ap.account_platform, 'unknown') AS platform,
+  SELECT
+    e.*,
+    ia.account_id,
+    COALESCE(
+      'account:' || ia.account_id::text,
+      'installation:' || e.user_id
+    ) AS analytics_user_key,
+    COALESCE(
+      CASE
+        WHEN LOWER(NULLIF(BTRIM(e.metadata->>'clientPlatform'), '')) IN ('ios','android')
+          THEN LOWER(NULLIF(BTRIM(e.metadata->>'clientPlatform'), ''))
+      END,
+      ap.account_platform,
+      'unknown'
+    ) AS platform,
     NULLIF(BTRIM(e.metadata->>'flowId'), '') AS flow_id,
     NULLIF(BTRIM(e.metadata->>'debateId'), '') AS debate_id
-  FROM user_events e CROSS JOIN bounds b
-  JOIN installation_accounts ia ON ia.installation_id = e.user_id
-  LEFT JOIN account_platforms ap ON ap.account_id = ia.account_id
-  WHERE e.created_at >= b.start_time AND e.created_at < b.end_time
-    AND NOT EXISTS (SELECT 1 FROM excluded_analytics_users x WHERE x.user_id = e.user_id)
+  FROM user_events e
+  CROSS JOIN bounds b
+  LEFT JOIN installation_accounts ia
+    ON ia.installation_id = e.user_id
+  LEFT JOIN account_platforms ap
+    ON ap.account_id = ia.account_id
+  WHERE e.created_at >= b.start_time
+    AND e.created_at < b.end_time
+    AND NOT EXISTS (
+      SELECT 1 FROM excluded_analytics_users x WHERE x.user_id = e.user_id
+    )
+    AND (
+      ia.account_id IS NULL
+      OR NOT EXISTS (
+        SELECT 1 FROM excluded_accounts ea WHERE ea.account_id = ia.account_id
+      )
+    )
 ),
 philosopher_flows AS (
-  SELECT DISTINCT account_id, platform, flow_id FROM events WHERE event_name = 'philosopher_selected' AND flow_id IS NOT NULL
+  SELECT DISTINCT analytics_user_key, platform, flow_id
+  FROM events
+  WHERE event_name = 'philosopher_selected'
+    AND flow_id IS NOT NULL
 ),
 matched AS (
-  SELECT pf.* FROM philosopher_flows pf WHERE EXISTS (
-    SELECT 1 FROM events e WHERE e.account_id = pf.account_id AND e.flow_id = pf.flow_id
-      AND e.event_name = 'debate_started' AND e.metadata->>'isDailyChallenge' = 'false'
+  SELECT pf.*
+  FROM philosopher_flows pf
+  WHERE EXISTS (
+    SELECT 1
+    FROM events e
+    WHERE e.analytics_user_key = pf.analytics_user_key
+      AND e.flow_id = pf.flow_id
+      AND e.event_name = 'debate_started'
+      AND e.metadata->>'isDailyChallenge' = 'false'
   )
 )
-SELECT p.platform,
-  COUNT(DISTINCT e.account_id) FILTER (WHERE e.event_name = 'app_opened') AS active_users,
-  COUNT(DISTINCT COALESCE(e.debate_id, e.id::text)) FILTER (WHERE e.event_name = 'debate_started' AND e.metadata->>'isDailyChallenge' = 'false') AS debate_starts,
+SELECT
+  p.platform,
+  (
+    SELECT COUNT(DISTINCT pa.analytics_user_key)
+    FROM platform_activity pa
+    WHERE pa.platform = p.platform
+  ) AS active_users,
+  COUNT(DISTINCT COALESCE(e.debate_id, e.id::text))
+    FILTER (
+      WHERE e.event_name = 'debate_started'
+        AND e.metadata->>'isDailyChallenge' = 'false'
+    ) AS debate_starts,
   (SELECT COUNT(*) FROM philosopher_flows pf WHERE pf.platform = p.platform) AS philosopher_flows,
   (SELECT COUNT(*) FROM matched m WHERE m.platform = p.platform) AS matched_flows
 FROM (VALUES ('ios'::text), ('android'::text)) p(platform)
-LEFT JOIN events e ON e.platform = p.platform
+LEFT JOIN events e
+  ON e.platform = p.platform
 GROUP BY p.platform
 ORDER BY CASE p.platform WHEN 'ios' THEN 1 ELSE 2 END;
 `;
@@ -247,38 +326,26 @@ WITH params AS (
     ((NOW() AT TIME ZONE 'America/Chicago')::date - 7)::date AS start_date
 ),
 days AS (
-  SELECT generate_series(params.start_date, params.end_date, INTERVAL '1 day')::date AS active_date
+  SELECT generate_series(
+    params.start_date,
+    params.end_date,
+    INTERVAL '1 day'
+  )::date AS active_date
   FROM params
 ),
-installation_accounts AS (
-  SELECT DISTINCT ON (installation_id) installation_id, account_id
-  FROM account_installations
-  ORDER BY installation_id, (unlinked_at IS NULL) DESC, updated_at DESC, linked_at DESC
-),
-excluded_accounts AS (
-  SELECT DISTINCT ia.account_id
-  FROM excluded_analytics_users x
-  JOIN installation_accounts ia ON ia.installation_id = x.user_id
-),
-account_activity AS (
-  SELECT DISTINCT uad.active_date, ia.account_id
-  FROM user_activity_days uad
-  JOIN installation_accounts ia ON ia.installation_id = uad.user_id
-  WHERE NOT EXISTS (SELECT 1 FROM excluded_analytics_users x WHERE x.user_id = uad.user_id)
-    AND NOT EXISTS (SELECT 1 FROM excluded_accounts ea WHERE ea.account_id = ia.account_id)
-),
+${CANONICAL_ACTIVITY_CTES},
 first_seen AS (
-  SELECT account_id, MIN(active_date) AS first_active_date
-  FROM account_activity
-  GROUP BY account_id
+  SELECT analytics_user_key, MIN(active_date) AS first_active_date
+  FROM canonical_activity
+  GROUP BY analytics_user_key
 ),
 daily_active AS (
-  SELECT active_date, COUNT(DISTINCT account_id) AS daily_active_users
-  FROM account_activity
+  SELECT active_date, COUNT(DISTINCT analytics_user_key) AS daily_active_users
+  FROM canonical_activity
   GROUP BY active_date
 ),
 daily_new AS (
-  SELECT first_active_date AS active_date, COUNT(DISTINCT account_id) AS new_users
+  SELECT first_active_date AS active_date, COUNT(*) AS new_users
   FROM first_seen
   GROUP BY first_active_date
 )
@@ -286,10 +353,13 @@ SELECT
   TO_CHAR(days.active_date, 'MM-DD-YYYY Dy') AS report_date,
   COALESCE(daily_active.daily_active_users, 0) AS daily_active_users,
   COALESCE(daily_new.new_users, 0) AS new_users,
-  COALESCE(daily_active.daily_active_users, 0) - COALESCE(daily_new.new_users, 0) AS returning_users
+  COALESCE(daily_active.daily_active_users, 0)
+    - COALESCE(daily_new.new_users, 0) AS returning_users
 FROM days
-LEFT JOIN daily_active ON days.active_date = daily_active.active_date
-LEFT JOIN daily_new ON days.active_date = daily_new.active_date
+LEFT JOIN daily_active
+  ON days.active_date = daily_active.active_date
+LEFT JOIN daily_new
+  ON days.active_date = daily_new.active_date
 ORDER BY days.active_date DESC;
 `;
 

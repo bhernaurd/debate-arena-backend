@@ -1,8 +1,9 @@
 import express from 'express';
+import { CANONICAL_ACTIVITY_CTES } from './lib/analyticsIdentity.js';
 
 const APP_TIMEZONE = 'America/Chicago';
 
-const ALLOWED_EVENTS = new Set([
+export const ANALYTICS_ALLOWED_EVENTS = new Set([
   'app_opened',
   'daily_challenge_viewed',
   'daily_challenge_started',
@@ -36,6 +37,26 @@ const ALLOWED_EVENTS = new Set([
   'restore_started',
   'restore_completed',
   'restore_failed',
+
+  // Learn ecosystem
+  'learn_hub_viewed',
+  'learn_card_opened',
+  'learn_item_started',
+  'learn_item_completed',
+  'learn_course_completed',
+
+  // The Mirror funnel
+  'mirror_questionnaire_started',
+  'mirror_questionnaire_completed',
+  'mirror_analysis_generation_started',
+  'mirror_analysis_generated',
+  'mirror_analysis_failed',
+  'mirror_analysis_read_depth',
+  'mirror_detail_expanded',
+  'mirror_evidence_opened',
+  'mirror_recommendation_tapped',
+  'mirror_next_eligible_seen',
+  'mirror_completed',
 ]);
 
 const USER_ID_RE = /^[A-Za-z0-9-]{8,128}$/;
@@ -273,7 +294,7 @@ export function createAnalyticsRouter(pool, options = {}) {
 
       if (
         typeof eventName !== 'string' ||
-        !ALLOWED_EVENTS.has(eventName)
+        !ANALYTICS_ALLOWED_EVENTS.has(eventName)
       ) {
         return res.status(400).json({
           success: false,
@@ -312,19 +333,20 @@ export function createAnalyticsRouter(pool, options = {}) {
       const tz = APP_TIMEZONE;
 
       const usersQ = pool.query(
-        `WITH t AS (SELECT (now() AT TIME ZONE $1)::date AS today)
+        `WITH t AS (
+           SELECT (now() AT TIME ZONE $1)::date AS today
+         ),
+         ${CANONICAL_ACTIVITY_CTES}
          SELECT
-           COUNT(DISTINCT a.user_id)                                              AS total_users,
-           COUNT(DISTINCT a.user_id) FILTER (WHERE a.active_date = t.today)        AS dau,
-           COUNT(DISTINCT a.user_id) FILTER (WHERE a.active_date >= t.today - 6)   AS wau,
-           COUNT(DISTINCT a.user_id) FILTER (WHERE a.active_date >= t.today - 29)  AS mau
-         FROM user_activity_days a
-         CROSS JOIN t
-         WHERE NOT EXISTS (
-           SELECT 1
-           FROM excluded_analytics_users x
-           WHERE x.user_id = a.user_id
-         )`,
+           COUNT(DISTINCT activity.analytics_user_key) AS total_users,
+           COUNT(DISTINCT activity.analytics_user_key)
+             FILTER (WHERE activity.active_date = t.today) AS dau,
+           COUNT(DISTINCT activity.analytics_user_key)
+             FILTER (WHERE activity.active_date >= t.today - 6) AS wau,
+           COUNT(DISTINCT activity.analytics_user_key)
+             FILTER (WHERE activity.active_date >= t.today - 29) AS mau
+         FROM canonical_activity activity
+         CROSS JOIN t`,
         [tz]
       );
 
@@ -353,21 +375,42 @@ export function createAnalyticsRouter(pool, options = {}) {
       );
 
       const tierQ = pool.query(
-        `WITH ranked AS (
+        `WITH
+         ${CANONICAL_ACTIVITY_CTES},
+         ranked AS (
            SELECT
-             e.user_id,
-             COALESCE(e.metadata->>'analyticsAccessTier', 'legacy_unknown') AS tier,
+             COALESCE(
+               'account:' || ia.account_id::text,
+               'installation:' || e.user_id
+             ) AS analytics_user_key,
+             COALESCE(
+               e.metadata->>'analyticsAccessTier',
+               'legacy_unknown'
+             ) AS tier,
              ROW_NUMBER() OVER (
-               PARTITION BY e.user_id
+               PARTITION BY COALESCE(
+                 'account:' || ia.account_id::text,
+                 'installation:' || e.user_id
+               )
                ORDER BY e.created_at DESC
              ) AS rn
            FROM user_events e
+           LEFT JOIN installation_accounts ia
+             ON ia.installation_id = e.user_id
            WHERE (e.created_at AT TIME ZONE $1)::date =
                  (now() AT TIME ZONE $1)::date
              AND NOT EXISTS (
                SELECT 1
                FROM excluded_analytics_users x
                WHERE x.user_id = e.user_id
+             )
+             AND (
+               ia.account_id IS NULL
+               OR NOT EXISTS (
+                 SELECT 1
+                 FROM excluded_accounts ea
+                 WHERE ea.account_id = ia.account_id
+               )
              )
          )
          SELECT
@@ -574,29 +617,43 @@ export function createAnalyticsRouter(pool, options = {}) {
       );
 
       const retentionQ = pool.query(
-        `WITH first_seen AS (
-           SELECT a.user_id, MIN(a.active_date) AS cohort_date
-           FROM user_activity_days a
-           WHERE NOT EXISTS (
-             SELECT 1
-             FROM excluded_analytics_users x
-             WHERE x.user_id = a.user_id
-           )
-           GROUP BY a.user_id
+        `WITH
+         ${CANONICAL_ACTIVITY_CTES},
+         first_seen AS (
+           SELECT
+             analytics_user_key,
+             MIN(active_date) AS cohort_date
+           FROM canonical_activity
+           GROUP BY analytics_user_key
          ),
          spans AS (
-           SELECT fs.user_id, (ua.active_date - fs.cohort_date) AS day_n
+           SELECT
+             fs.analytics_user_key,
+             (activity.active_date - fs.cohort_date) AS day_n
            FROM first_seen fs
-           JOIN user_activity_days ua ON ua.user_id = fs.user_id
+           JOIN canonical_activity activity
+             ON activity.analytics_user_key = fs.analytics_user_key
          )
          SELECT
-           COUNT(DISTINCT user_id) AS cohort_size,
-           ROUND(COUNT(DISTINCT user_id) FILTER (WHERE day_n >= 1)::numeric
-                 / NULLIF(COUNT(DISTINCT user_id),0), 3)  AS d1_plus,
-           ROUND(COUNT(DISTINCT user_id) FILTER (WHERE day_n >= 7)::numeric
-                 / NULLIF(COUNT(DISTINCT user_id),0), 3)  AS d7_plus,
-           ROUND(COUNT(DISTINCT user_id) FILTER (WHERE day_n >= 30)::numeric
-                 / NULLIF(COUNT(DISTINCT user_id),0), 3)  AS d30_plus
+           COUNT(DISTINCT analytics_user_key) AS cohort_size,
+           ROUND(
+             COUNT(DISTINCT analytics_user_key)
+               FILTER (WHERE day_n >= 1)::numeric
+             / NULLIF(COUNT(DISTINCT analytics_user_key), 0),
+             3
+           ) AS d1_plus,
+           ROUND(
+             COUNT(DISTINCT analytics_user_key)
+               FILTER (WHERE day_n >= 7)::numeric
+             / NULLIF(COUNT(DISTINCT analytics_user_key), 0),
+             3
+           ) AS d7_plus,
+           ROUND(
+             COUNT(DISTINCT analytics_user_key)
+               FILTER (WHERE day_n >= 30)::numeric
+             / NULLIF(COUNT(DISTINCT analytics_user_key), 0),
+             3
+           ) AS d30_plus
          FROM spans`
       );
 
