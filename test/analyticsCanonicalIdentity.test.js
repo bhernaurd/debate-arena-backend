@@ -40,7 +40,7 @@ test('canonical activity SQL counts linked accounts once and anonymous installs 
   );
   assert.match(
     CANONICAL_ACTIVITY_CTES,
-    /LEFT JOIN account_installations/
+    /LEFT JOIN installation_accounts/
   );
   assert.match(
     CANONICAL_ACTIVITY_CTES,
