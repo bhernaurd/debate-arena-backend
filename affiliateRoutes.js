@@ -585,13 +585,23 @@ function renderPartnerDashboardPage(token) {
         <div class="mini-grid">
           <div class="mini">
             <div class="metric-heading">
-              <div class="label">Promo Active</div>
+              <div class="label">Trial Active</div>
               ${renderInfoButton(
-                'Promo Active',
-                'Subscribers currently in the $0.99 first-month promotional period. Each subscriber appears in only one current-state box. If auto-renew is turned off during the promo, the subscriber remains Promo Active until that access period ends.'
+                'Trial Active',
+                'Subscribers currently in the 7-day free trial with auto-renew still enabled.'
               )}
             </div>
             <div class="value" id="promoActiveSubscribers">—</div>
+          </div>
+          <div class="mini">
+            <div class="metric-heading">
+              <div class="label">Trial Cancelled Before Paid</div>
+              ${renderInfoButton(
+                'Trial Cancelled Before Paid',
+                'Subscribers who started the 7-day free trial and turned off auto-renew before their first $7.99 monthly payment. They keep trial access until the trial expires.'
+              )}
+            </div>
+            <div class="value" id="trialCancelingSubscribers">—</div>
           </div>
           <div class="mini">
             <div class="metric-heading">
@@ -646,6 +656,43 @@ function renderPartnerDashboardPage(token) {
         </div>
       </div>
 
+      <div class="section hidden" id="previousOfferHistorySection">
+        <div class="section-title"><h2>Previous Offer History</h2></div>
+        <div class="section-note">Historical results from the retired creator offer. These do not count toward the current 7-day trial program.</div>
+        <div class="mini-grid">
+          <div class="mini">
+            <div class="metric-heading">
+              <div class="label">Previous Offer Signups</div>
+              ${renderInfoButton(
+                'Previous Offer Signups',
+                'Verified referrals attributed to the retired creator offer before the 7-day free trial program replaced it.'
+              )}
+            </div>
+            <div class="value" id="previousOfferSignups">—</div>
+          </div>
+          <div class="mini">
+            <div class="metric-heading">
+              <div class="label">Cancelled Before Full Price</div>
+              ${renderInfoButton(
+                'Cancelled Before Full Price',
+                'Previous-offer subscribers who turned off auto-renew before reaching a standard full-price renewal.'
+              )}
+            </div>
+            <div class="value" id="previousOfferCancelled">—</div>
+          </div>
+          <div class="mini">
+            <div class="metric-heading">
+              <div class="label">Converted to Full Price</div>
+              ${renderInfoButton(
+                'Converted to Full Price',
+                'Previous-offer subscribers who later produced a verified standard paid renewal.'
+              )}
+            </div>
+            <div class="value" id="previousOfferConverted">—</div>
+          </div>
+        </div>
+      </div>
+
       <div class="section">
         <div class="section-title"><h2>Financial Snapshot</h2></div>
         <div class="financial-grid">
@@ -654,7 +701,7 @@ function renderPartnerDashboardPage(token) {
               <div class="label">Eligible Revenue Generated</div>
               ${renderInfoButton(
                 'Eligible Revenue Generated',
-                'The total revenue that has been accepted as commission eligible under your compensation agreement. Promotional $0.99 payments are excluded.'
+                'The total revenue that has been accepted as commission eligible under your compensation agreement. Free-trial access does not generate commissionable revenue.'
               )}
             </div>
             <div class="value money" id="lifetimeEligibleRevenue">—</div>
@@ -686,13 +733,13 @@ function renderPartnerDashboardPage(token) {
         <article class="card">
           <div class="section-title"><h2>Performance</h2></div>
           <div class="rows">
-            <div class="row"><span class="name name-with-info">Promo Renewal Rate ${renderInfoButton(
-              'Promo Renewal Rate',
-              'The percentage of attributed $0.99 promo subscribers who later produced a verified commission-eligible paid renewal.'
+            <div class="row"><span class="name name-with-info">Trial Conversion Rate ${renderInfoButton(
+              'Trial Conversion Rate',
+              'The percentage of completed 7-day trials that later produced a verified commission-eligible paid renewal.'
             )}</span><span class="number" id="promoRenewalRate">—</span></div>
-            <div class="row"><span class="name name-with-info">Promo Non-Renewals ${renderInfoButton(
-              'Promo Non-Renewals',
-              'The number of referred subscribers whose $0.99 promotional period ended without a later commission-eligible paid renewal being verified.'
+            <div class="row"><span class="name name-with-info">Trial Non-Conversions ${renderInfoButton(
+              'Trial Non-Conversions',
+              'The number of referred subscribers whose 7-day free trial ended without a later commission-eligible paid renewal being verified.'
             )}</span><span class="number" id="promoNonRenewals">—</span></div>
             <div class="row"><span class="name name-with-info">Paid Conversion Rate ${renderInfoButton(
               'Paid Conversion Rate',
@@ -725,16 +772,16 @@ function renderPartnerDashboardPage(token) {
             )}</span><span class="number" id="commissionBasis">—</span></div>
             <div class="row"><span class="name name-with-info">Current Monthly Price ${renderInfoButton(
               'Current Monthly Price',
-              'The current U.S. customer price for new subscribers, read from App Store Connect. Existing subscribers can remain on an older preserved price, which is shown separately in the active price-tier counts.'
+              'The current U.S. customer price for new subscribers, read from App Store Connect.'
             )}</span><span class="number" id="currentMonthlyPrice">—</span></div>
             <div class="row hidden" id="scheduledMonthlyPriceRow"><span class="name name-with-info">Scheduled Monthly Price ${renderInfoButton(
               'Scheduled Monthly Price',
               'The next U.S. subscription price already scheduled in App Store Connect. The effective date appears here when Apple has a future price change scheduled.'
             )}</span><span class="number" id="scheduledMonthlyPrice">—</span></div>
             <div id="activePriceTierRows"></div>
-            <div class="row"><span class="name name-with-info">$0.99 Promo ${renderInfoButton(
-              '$0.99 Promo',
-              'The promotional $0.99 payment is excluded from commission. Commission begins only when a transaction becomes commission eligible under your plan.'
+            <div class="row"><span class="name name-with-info">Creator Offer ${renderInfoButton(
+              'Creator Offer',
+              'The 7-day creator trial is free and excluded from commission. Commission begins with the first verified standard paid renewal.'
             )}</span><span class="number">Excluded</span></div>
           </div>
         </article>
@@ -1037,32 +1084,19 @@ function renderPartnerDashboardPage(token) {
         candidates.set(key, existing);
       };
 
-      if (apple.status === 'available') {
-        const appleCurrency = apple.currency || 'USD';
-        const preservedPrices = Array.isArray(apple.preservedPrices)
-          ? apple.preservedPrices
-          : [];
-
-        // Always surface the current public price, the next scheduled price,
-        // and preserved subscriber prices. This keeps founding-price tiers
-        // visible at zero subscribers and after a scheduled increase becomes
-        // the new public price. normalizedPriceKey() removes duplicates.
-        [apple.current, apple.next, ...preservedPrices]
-          .filter(price => price?.customerPrice)
-          .forEach(price => addCandidate({
-            amount: price.customerPrice,
-            currency: price.currency || appleCurrency,
-            planKind: 'monthly'
-          }));
-      }
-
-      actualTiers.forEach(tier => addCandidate({
-        amount: tier.amount,
-        currency: tier.currency || 'USD',
-        planKind: pricePlanKind(tier.productId),
-        productId: tier.productId,
-        count: tier.count,
-      }));
+      // Price-tier rows are historical/accounting facts, not a catalog of
+      // every price Apple has ever preserved. Only show a tier when this
+      // affiliate actually has at least one verified active paid subscriber
+      // on that price.
+      actualTiers
+        .filter(tier => Number(tier.count || 0) > 0)
+        .forEach(tier => addCandidate({
+          amount: tier.amount,
+          currency: tier.currency || 'USD',
+          planKind: pricePlanKind(tier.productId),
+          productId: tier.productId,
+          count: tier.count,
+        }));
 
       const rows = [...candidates.values()].sort((left, right) => {
         if (left.planKind !== right.planKind) return left.planKind === 'monthly' ? -1 : 1;
@@ -1082,7 +1116,7 @@ function renderPartnerDashboardPage(token) {
           ? number(tier.count == null ? 0 : tier.count)
           : '—';
         const info = exactCountsAvailable
-          ? 'Active paid subscribers grouped by the price on their latest verified Apple paid transaction. The $0.99 promotional period is excluded.'
+          ? 'Active paid subscribers grouped by the price on their latest verified Apple paid transaction. The 7-day free trial is excluded.'
           : 'Price-tier counts will appear once verified Apple subscription-chain data is available for this affiliate.';
         return '<div class="row"><span class="name name-with-info">' +
           html(label) +
@@ -1209,7 +1243,8 @@ function renderPartnerDashboardPage(token) {
 
     function currentStateLabel(value) {
       const labels = {
-        promo_active: 'Promo Active',
+        promo_active: 'Trial Active',
+        trial_canceling: 'Trial Cancelled Before Paid',
         paid_renewing: 'Paid + Renewing',
         paid_canceling: 'Paid + Canceling',
         billing_retry: 'Billing Retry',
@@ -1223,7 +1258,7 @@ function renderPartnerDashboardPage(token) {
       const label = currentStateLabel(value);
       let klass = 'badge';
       if (label === 'Paid + Renewing') klass += ' positive';
-      if (['Promo Active', 'Paid + Canceling', 'Billing Retry'].includes(label)) klass += ' warning';
+      if (['Trial Active', 'Trial Cancelled Before Paid', 'Paid + Canceling', 'Billing Retry'].includes(label)) klass += ' warning';
       if (label === 'Expired') klass += ' danger';
       return '<span class="' + klass + '">' + html(label) + '</span>';
     }
@@ -1281,6 +1316,7 @@ function renderPartnerDashboardPage(token) {
       text('currentlyOwed', money(o.currentlyOwed));
 
       text('promoActiveSubscribers', number(o.promoActiveSubscribers ?? o.promoSubscribers));
+      text('trialCancelingSubscribers', number(o.trialCancelingSubscribers));
       text('paidRenewingSubscribers', number(o.paidRenewingSubscribers));
       text('paidCancelingSubscribers', number(o.paidCancelingSubscribers));
       text('billingRetry', number(o.billingRetry));
@@ -1306,6 +1342,14 @@ function renderPartnerDashboardPage(token) {
       text('commissionRate', data.compensation ? percent(Number(data.compensation.rate) * 100) : '—');
       text('commissionBasis', readableBasis(data.compensation?.basis));
 
+      const historicalOffer = data.historicalOffer || {};
+      const previousOfferSignups = Number(historicalOffer.totalSignups || 0);
+      const previousOfferSection = document.getElementById('previousOfferHistorySection');
+      previousOfferSection.classList.toggle('hidden', previousOfferSignups === 0);
+      text('previousOfferSignups', number(previousOfferSignups));
+      text('previousOfferCancelled', number(historicalOffer.cancelledBeforeFullPrice));
+      text('previousOfferConverted', number(historicalOffer.convertedToPaid));
+
       const applePricing = data.subscriptionPricing || {};
       const currentApplePrice = applePricing.status === 'available' ? applePricing.current : null;
       const nextApplePrice = applePricing.status === 'available' ? applePricing.next : null;
@@ -1326,20 +1370,11 @@ function renderPartnerDashboardPage(token) {
         const scheduledPriceForDescription = nextApplePrice?.customerPrice
           ? priceMoney(nextApplePrice.customerPrice, nextApplePrice.currency || applePricing.currency) + '/month'
           : null;
-        // App Store Connect currently returns the scheduled $7.99 price to the
-        // partner dashboard, but in production its startDate can be omitted.
-        // Preserve Apple as the primary source whenever the date is present,
-        // and use the already-approved Sep 1, 2026 transition as a narrow
-        // fallback for this exact $7.99 U.S. schedule so the affiliate tooltip
-        // never loses the effective date.
+        // Use Apple's scheduled price date when one is present.
         const appleScheduledStartForDescription = nextApplePrice?.startDate
           ? scheduledPriceDate(nextApplePrice.startDate)
           : '';
-        const scheduledStartForDescription =
-          appleScheduledStartForDescription ||
-          (Number(nextApplePrice?.customerPrice) === 7.99
-            ? 'Sep 1, 2026'
-            : null);
+        const scheduledStartForDescription = appleScheduledStartForDescription || null;
 
         scheduledInfoButton.dataset.infoText = scheduledPriceForDescription
           ? 'The next U.S. subscription price already scheduled in App Store Connect. ' +
@@ -1363,7 +1398,8 @@ function renderPartnerDashboardPage(token) {
 
       const subscriberRows = [
         row('Referrals Acquired in Selected Period', number(s.newReferrals)),
-        row('Promo Active', number(s.promoActiveSubscribers ?? s.promoSubscribers)),
+        row('Trial Active', number(s.promoActiveSubscribers ?? s.promoSubscribers)),
+        row('Trial Cancelled Before Paid', number(s.trialCancelingSubscribers)),
         row('Paid + Renewing', number(s.paidRenewingSubscribers)),
         row('Paid + Canceling', number(s.paidCancelingSubscribers)),
         row('Billing Retry', number(s.billingRetry)),
@@ -1377,9 +1413,9 @@ function renderPartnerDashboardPage(token) {
       document.getElementById('subscriberBreakdown').innerHTML = subscriberRows.join('');
 
       document.getElementById('performanceBreakdown').innerHTML = [
-        row('Promo Renewal Rate', percent(p.promoRenewalRate)),
-        row('Promo Non-Renewals', number(s.promoNonRenewals)),
-        row('Promo Non-Renewal Rate', percent(p.promoNonRenewalRate)),
+        row('Trial Conversion Rate', percent(p.promoRenewalRate)),
+        row('Trial Non-Conversions', number(s.promoNonRenewals)),
+        row('Trial Non-Conversion Rate', percent(p.promoNonRenewalRate)),
         row('Paid Conversion Rate', percent(p.paidConversionRate)),
         row('Active Retention', percent(p.activeRetention)),
         row('Cancellation Rate', percent(p.cancellationRate)),
