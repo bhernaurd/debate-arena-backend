@@ -3097,6 +3097,41 @@ export function createAffiliateRouter(pool, options = {}) {
       },
     });
 
+  if (
+    process.env.RAILWAY_ENVIRONMENT_NAME === 'production' &&
+    options.runTrackingHealthOnStartup !== false
+  ) {
+    setTimeout(() => {
+      trackingHealthService.getHealth()
+        .then((health) => {
+          console.log(
+            '[affiliate-health]',
+            JSON.stringify({
+              overall: health.overall,
+              affiliateCount: health.affiliateCount,
+              mismatchCount: health.mismatchCount,
+              warningCount: health.warningCount,
+              affiliates: (health.affiliates || []).map((item) => ({
+                code: item.code,
+                health: item.health,
+                raw: item.raw,
+                published: item.published,
+                checks: item.checks,
+                errors: item.errors,
+                warnings: item.warnings,
+              })),
+            })
+          );
+        })
+        .catch((error) => {
+          console.error(
+            '[affiliate-health] startup verification failed:',
+            error?.stack || error?.message || error
+          );
+        });
+    }, 2500);
+  }
+
   async function loadAppStoreConnectImports({
     reactivateRetired = false,
     actor = 'owner_admin',
