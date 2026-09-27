@@ -122,6 +122,19 @@ test('owner admin overview exposes lifetime referrals, current, and cancelled su
   assert.match(source, /Lifetime · auto-renew off/);
 });
 
+test('owner affiliate overview keeps the main affiliate table visible and collapses diagnostics', () => {
+  const affiliatesIndex = source.indexOf('<h2>Affiliates</h2>');
+  const healthIndex = source.indexOf('<h2>Affiliate Tracking Health</h2>');
+  const importsIndex = source.indexOf('<h2>App Store Connect Imports</h2>');
+
+  assert.ok(affiliatesIndex >= 0);
+  assert.ok(healthIndex > affiliatesIndex);
+  assert.ok(importsIndex > healthIndex);
+  assert.match(source, /<details class="admin-collapsible">[\s\S]*?<h2>Affiliate Tracking Health<\/h2>/);
+  assert.match(source, /<details class="admin-collapsible">[\s\S]*?<h2>App Store Connect Imports<\/h2>/);
+  assert.match(source, /collapsible-arrow/);
+});
+
 test('owner affiliate admin dashboard is a locked shell backed by admin-only APIs', () => {
   assert.match(source, /\/admin\/affiliates/);
   assert.match(source, /AFFILIATE_ADMIN_KEY/);

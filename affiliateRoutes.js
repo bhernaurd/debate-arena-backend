@@ -1722,6 +1722,21 @@ function renderAffiliateAdminDashboardPage() {
     .section { margin-top: 24px; }
     .section-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 11px; flex-wrap: wrap; }
     .section-head h2 { margin: 0; font: 500 23px Georgia,"Times New Roman",serif; }
+    .admin-collapsible { margin-top: 24px; }
+    .admin-collapsible > summary {
+      list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+      gap: 14px; padding: 14px 16px; border: 1px solid rgba(255,255,255,.07);
+      background: rgba(255,255,255,.025); border-radius: 14px; transition: background .15s ease;
+    }
+    .admin-collapsible > summary::-webkit-details-marker { display: none; }
+    .admin-collapsible > summary:hover { background: rgba(255,255,255,.045); }
+    .admin-collapsible[open] > summary { margin-bottom: 12px; background: rgba(255,255,255,.035); }
+    .collapsible-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; flex-wrap: wrap; }
+    .collapsible-title h2 { margin: 0; font: 500 21px Georgia,"Times New Roman",serif; }
+    .collapsible-meta { color: var(--muted); font-size: 11px; }
+    .collapsible-arrow { color: var(--muted); font-size: 14px; transition: transform .15s ease; }
+    .admin-collapsible[open] .collapsible-arrow { transform: rotate(90deg); }
+    .collapsible-body { padding-top: 2px; }
     .muted { color: var(--muted); }
     .tiny { font-size: 11px; }
     .table-card { overflow: hidden; }
@@ -1843,53 +1858,6 @@ function renderAffiliateAdminDashboardPage() {
 
       <div class="section">
         <div class="section-head">
-          <div>
-            <h2>Affiliate Tracking Health</h2>
-            <div class="muted tiny">Read-only reconciliation of raw Apple-attributed subscription chains, the published partner dashboard, subscriber-state math, duplicate ownership, and commission calculations. These checks never modify affiliate data.</div>
-          </div>
-          <div class="toolbar">
-            <div id="trackingHealthStatus" class="muted tiny">Not checked yet</div>
-            <button id="loadTrackingHealth" class="button" type="button">Run Checks</button>
-          </div>
-        </div>
-        <div id="trackingHealthNotice" class="notice hidden"></div>
-        <div class="card table-card">
-          <div class="table-wrap">
-            <table>
-              <thead><tr>
-                <th>Partner</th><th>Health</th><th>Raw / Dashboard Referrals</th><th>Current</th><th>Cancelled</th><th>States</th><th>Commission</th><th>Notes</th>
-              </tr></thead>
-              <tbody id="trackingHealthRows"><tr><td colspan="8" class="empty">Unlock the admin dashboard to run read-only tracking checks.</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <div class="section">
-        <div class="section-head">
-          <div><h2>App Store Connect Imports</h2><div class="muted tiny">Offers created in App Store Connect appear here automatically after sync. Complete setup to turn them into Agora affiliates.</div></div>
-          <div class="toolbar">
-            <div id="appleSyncStatus" class="muted tiny">Not synced yet</div>
-            <button id="toggleInactiveAppleImports" class="button hidden" type="button">Show Inactive</button>
-            <button id="toggleIgnoredAppleImports" class="button hidden" type="button">Show Ignored</button>
-            <button id="syncAppleOffers" class="button" type="button">Sync App Store Connect</button>
-          </div>
-        </div>
-        <div class="card table-card">
-          <div class="table-wrap">
-            <table>
-              <thead><tr>
-                <th>Apple Offer</th><th>Creator Code</th><th>Apple Status</th><th>Eligibility</th><th>Linked</th><th>Action</th>
-              </tr></thead>
-              <tbody id="appleImportRows"><tr><td colspan="6" class="empty">Unlock the admin dashboard to load App Store Connect imports.</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-        <div id="appleImportWarnings" class="muted tiny" style="margin-top:10px"></div>
-      </div>
-
-      <div class="section">
-        <div class="section-head">
           <div><h2>Affiliates</h2><div class="muted tiny">Active production partners are shown by default. Choose Paused to inspect inactive partners. Sandbox/Test partners only appear when explicitly selected.</div></div>
           <div class="toolbar">
             <input id="affiliateSearch" class="field" type="search" placeholder="Search partner or code" />
@@ -1912,6 +1880,66 @@ function renderAffiliateAdminDashboardPage() {
           </div>
         </div>
       </div>
+
+      <details class="admin-collapsible">
+        <summary>
+          <div class="collapsible-title">
+            <h2>Affiliate Tracking Health</h2>
+            <span id="trackingHealthStatus" class="collapsible-meta">Not checked yet</span>
+          </div>
+          <span class="collapsible-arrow">›</span>
+        </summary>
+        <div class="collapsible-body">
+          <div class="section-head">
+            <div class="muted tiny">Read-only reconciliation of raw Apple-attributed subscription chains, the published partner dashboard, subscriber-state math, duplicate ownership, and commission calculations. These checks never modify affiliate data.</div>
+            <div class="toolbar">
+              <button id="loadTrackingHealth" class="button" type="button">Run Checks</button>
+            </div>
+          </div>
+          <div id="trackingHealthNotice" class="notice hidden"></div>
+          <div class="card table-card">
+            <div class="table-wrap">
+              <table>
+                <thead><tr>
+                  <th>Partner</th><th>Health</th><th>Raw / Dashboard Referrals</th><th>Current</th><th>Cancelled</th><th>States</th><th>Commission</th><th>Notes</th>
+                </tr></thead>
+                <tbody id="trackingHealthRows"><tr><td colspan="8" class="empty">Unlock the admin dashboard to run read-only tracking checks.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="admin-collapsible">
+        <summary>
+          <div class="collapsible-title">
+            <h2>App Store Connect Imports</h2>
+            <span id="appleSyncStatus" class="collapsible-meta">Not synced yet</span>
+          </div>
+          <span class="collapsible-arrow">›</span>
+        </summary>
+        <div class="collapsible-body">
+          <div class="section-head">
+            <div class="muted tiny">Offer-code setup and sync tools. Open this section only when adding, repairing, or reviewing Apple creator-code imports.</div>
+            <div class="toolbar">
+              <button id="toggleInactiveAppleImports" class="button hidden" type="button">Show Inactive</button>
+              <button id="toggleIgnoredAppleImports" class="button hidden" type="button">Show Ignored</button>
+              <button id="syncAppleOffers" class="button" type="button">Sync App Store Connect</button>
+            </div>
+          </div>
+          <div class="card table-card">
+            <div class="table-wrap">
+              <table>
+                <thead><tr>
+                  <th>Apple Offer</th><th>Creator Code</th><th>Apple Status</th><th>Eligibility</th><th>Linked</th><th>Action</th>
+                </tr></thead>
+                <tbody id="appleImportRows"><tr><td colspan="6" class="empty">Unlock the admin dashboard to load App Store Connect imports.</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <div id="appleImportWarnings" class="muted tiny" style="margin-top:10px"></div>
+        </div>
+      </details>
     </section>
 
     <section id="payoutsTab" class="hidden">
