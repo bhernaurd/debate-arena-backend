@@ -144,7 +144,7 @@ test('partner dashboard exposes the approved affiliate metrics without a creator
   assert.match(html, /Eligible Revenue Generated/);
   assert.match(html, /Lifetime Commission Earned/);
   assert.match(html, /Lifetime Paid/);
-  assert.match(html, /Anonymous Subscriber Activity/);
+  assert.match(html, /Subscriber Activity/);
   assert.match(html, /Free-trial access is excluded from commission/);
   assert.doesNotMatch(html, /Commission-Earning Subscribers/);
   assert.doesNotMatch(html, />Canceling<\/div>/);
@@ -169,6 +169,11 @@ test('dashboard service derives anonymous subscriber state from verified Apple s
   assert.match(source, /current_state/);
   assert.match(source, /anonymousSubscriberActivity/);
   assert.match(source, /subscriberAlias/);
+  assert.match(source, /subscriber_display_name/);
+  assert.match(source, /subscriberDisplayName/);
+  assert.match(source, /autoRenewDisabledAt/);
+  assert.match(source, /firstStandardPaidAt/);
+  assert.match(source, /previous_offer_cancelled/);
   assert.match(source, /offer_type::text/);
   assert.match(source, /expires_date > NOW\(\)/);
   assert.match(source, /grace_period_expires_date > NOW\(\)/);
