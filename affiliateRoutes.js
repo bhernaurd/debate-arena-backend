@@ -835,9 +835,9 @@ function renderPartnerDashboardPage(token) {
 
       <div class="section">
         <article class="card">
-          <div class="section-title"><div class="title-with-info"><h2>Anonymous Subscriber Activity</h2>${renderInfoButton(
-            'Anonymous Subscriber Activity',
-            'A privacy-safe activity view of attributed subscriptions. It intentionally does not expose customer identity, Agora account IDs, Apple transaction IDs, or other personal identifiers.'
+          <div class="section-title"><div class="title-with-info"><h2>Subscriber Activity</h2>${renderInfoButton(
+            'Subscriber Activity',
+            'Shows the referred Agora account name when available, plus verified subscription timing and status. Email addresses, account IDs, Apple transaction IDs, and payment identifiers are not shown.'
           )}</div><span>Up to 100 referrals in the selected period</span></div>
           <div id="subscriberActivity" class="empty">No verified subscriber activity yet.</div>
         </article>
@@ -1255,10 +1255,15 @@ function renderPartnerDashboardPage(token) {
       const labels = {
         promo_active: 'Trial Active',
         trial_canceling: 'Trial Cancelled Before Paid',
+        trial_expired_without_conversion: 'Trial Expired Without Conversion',
         paid_renewing: 'Paid + Renewing',
         paid_canceling: 'Paid + Canceling',
         billing_retry: 'Billing Retry',
         expired: 'Expired',
+        previous_offer_cancelled: 'Cancelled Before Full Price',
+        previous_offer_converted: 'Converted to Full Price',
+        previous_offer_ended: 'Previous Offer Ended',
+        previous_offer_active: 'Previous Offer Active',
         pending: 'Pending Apple State'
       };
       return labels[value] || 'Pending Apple State';
@@ -1267,9 +1272,9 @@ function renderPartnerDashboardPage(token) {
     function currentStateBadge(value) {
       const label = currentStateLabel(value);
       let klass = 'badge';
-      if (label === 'Paid + Renewing') klass += ' positive';
-      if (['Trial Active', 'Trial Cancelled Before Paid', 'Paid + Canceling', 'Billing Retry'].includes(label)) klass += ' warning';
-      if (label === 'Expired') klass += ' danger';
+      if (['Paid + Renewing', 'Converted to Full Price'].includes(label)) klass += ' positive';
+      if (['Trial Active', 'Trial Cancelled Before Paid', 'Paid + Canceling', 'Billing Retry', 'Previous Offer Active'].includes(label)) klass += ' warning';
+      if (['Expired', 'Trial Expired Without Conversion', 'Cancelled Before Full Price', 'Previous Offer Ended'].includes(label)) klass += ' danger';
       return '<span class="' + klass + '">' + html(label) + '</span>';
     }
 
@@ -1291,19 +1296,29 @@ function renderPartnerDashboardPage(token) {
         return '<div class="empty">No verified subscriber activity in this range.</div>';
       }
 
-      const rows = items.map(item =>
-        '<tr>' +
-          '<td><span class="alias">' + html(item.subscriberAlias || '—') + '</span></td>' +
-          '<td>' + html(dateLabel(item.joinedAt)) + '</td>' +
-          '<td>' + html(planLabel(item.plan)) + '</td>' +
+      const rows = items.map(item => {
+        const autoRenew = item.autoRenewEnabled === true
+          ? 'On'
+          : item.autoRenewEnabled === false
+            ? 'Off'
+            : '—';
+
+        return '<tr>' +
+          '<td><strong>' + html(item.subscriberLabel || item.subscriberAlias || 'Subscriber') + '</strong></td>' +
+          '<td>' + html(item.offerLabel || '—') + '</td>' +
+          '<td>' + html(dateLabel(item.joinedAt, true)) + '</td>' +
           '<td>' + currentStateBadge(item.currentState) + '</td>' +
-          '<td>' + html(dateLabel(item.lastActivityAt, true)) + '</td>' +
-        '</tr>'
-      ).join('');
+          '<td>' + html(autoRenew) + '</td>' +
+          '<td>' + html(dateLabel(item.autoRenewDisabledAt, true)) + '</td>' +
+          '<td>' + html(dateLabel(item.firstStandardPaidAt, true)) + '</td>' +
+          '<td>' + html(dateLabel(item.expiresAt, true)) + '</td>' +
+        '</tr>';
+      }).join('');
 
       return '<div class="activity-wrap"><table class="activity-table">' +
         '<thead><tr>' +
-          '<th>Subscriber</th><th>Joined</th><th>Plan</th><th>Current State</th><th>Last Activity</th>' +
+          '<th>Subscriber</th><th>Offer</th><th>Joined</th><th>Current State</th>' +
+          '<th>Auto-Renew</th><th>Auto-Renew Off</th><th>First Full-Price Payment</th><th>Access Ends</th>' +
         '</tr></thead><tbody>' + rows + '</tbody></table></div>';
     }
 
