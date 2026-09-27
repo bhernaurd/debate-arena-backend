@@ -230,6 +230,23 @@ test('service rejects string booleans instead of treating "false" as true', asyn
 });
 
 
+test('returning affiliate reactivation preserves history and reuses the existing affiliate record', async () => {
+  const source = await readFile(
+    new URL('../lib/affiliateProgramService.js', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(source, /async function reactivateAffiliate/);
+  assert.match(source, /SELECT \* FROM affiliates WHERE normalized_code = \$1 LIMIT 1 FOR UPDATE/);
+  assert.match(source, /status = 'active'/);
+  assert.match(source, /code_status = 'active'/);
+  assert.match(source, /historical_mapping/);
+  assert.match(source, /affiliate_reactivated/);
+  assert.match(source, /affiliate_reactivated_for_new_offer/);
+  assert.match(source, /getPartnerDashboardLink\(result\.affiliate\.id\)/);
+  assert.match(source, /reactivated: true/);
+});
+
 test('production affiliate creation requires an Apple offer reference name before database writes', async () => {
   const { createAffiliateProgramService } = await import('../lib/affiliateProgramService.js');
   const fakePool = {
