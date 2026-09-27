@@ -1760,7 +1760,7 @@ function renderAffiliateAdminDashboardPage() {
 
       <div class="section">
         <div class="section-head">
-          <div><h2>Affiliates</h2><div class="muted tiny">Production partners are shown by default. Sandbox/Test partners only appear when explicitly selected.</div></div>
+          <div><h2>Affiliates</h2><div class="muted tiny">Active production partners are shown by default. Choose Paused to inspect inactive partners. Sandbox/Test partners only appear when explicitly selected.</div></div>
           <div class="toolbar">
             <input id="affiliateSearch" class="field" type="search" placeholder="Search partner or code" />
             <select id="affiliateFilter" class="select">
@@ -1986,7 +1986,12 @@ function renderAffiliateAdminDashboardPage() {
     async function loadAppleImports(showToast) {
       if (!adminKey) return;
       try {
-        const payload = await adminFetch('/api/admin/app-store-connect/imports');
+        const payload = await adminFetch(
+          showToast
+            ? '/api/admin/app-store-connect/sync'
+            : '/api/admin/app-store-connect/imports',
+          showToast ? { method: 'POST' } : undefined
+        );
         appleImports = Array.isArray(payload.imports) ? payload.imports : [];
         appleLinked = Array.isArray(payload.linked) ? payload.linked : [];
         appleIgnored = Array.isArray(payload.ignored) ? payload.ignored : [];
@@ -1997,7 +2002,17 @@ function renderAffiliateAdminDashboardPage() {
           errorMessage: payload.errorMessage || null,
         };
         renderAppleImports();
-        if (showToast) toast(payload.configured === false ? 'App Store Connect sync is not configured yet.' : 'App Store Connect sync complete.');
+        if (showToast) {
+          await loadAffiliates(false);
+          const reactivatedCount = Number(payload.reactivatedCount || 0);
+          toast(
+            payload.configured === false
+              ? 'App Store Connect sync is not configured yet.'
+              : reactivatedCount > 0
+                ? 'App Store Connect sync complete. Reactivated ' + reactivatedCount + ' affiliate' + (reactivatedCount === 1 ? '' : 's') + '.'
+                : 'App Store Connect sync complete.'
+          );
+        }
       } catch (error) {
         appleImports = [];
         appleLinked = [];
@@ -2046,6 +2061,7 @@ function renderAffiliateAdminDashboardPage() {
           return false;
         }
 
+        if (filter === 'production' && a.status !== 'active') return false;
         if (filter === 'active' && a.status !== 'active') return false;
         if (filter === 'paused' && a.status === 'active') return false;
         return true;
