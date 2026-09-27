@@ -2738,14 +2738,21 @@ function renderAffiliateAdminDashboardPage() {
         });
         const appleProvisioning = payload.appleProvisioning || {};
         const appleConnected = ['created','already_exists'].includes(appleProvisioning.status);
+        const reactivated = payload.reactivated === true;
         const appleMessage = isTest
-          ? 'Sandbox/test affiliate created. Automatic production Apple provisioning was skipped.'
+          ? (reactivated
+              ? 'Sandbox/test affiliate reactivated. Automatic production Apple provisioning was skipped.'
+              : 'Sandbox/test affiliate created. Automatic production Apple provisioning was skipped.')
           : appleConnected
             ? (appleProvisioning.status === 'created'
                 ? 'Apple creator code created automatically with ' + number(appleProvisioning.numberOfCodes || 1000) + ' redemptions.'
                 : 'Apple creator code already existed in the shared offer and is linked.')
-            : 'Affiliate created, but the Apple creator code still needs attention: ' + String(appleProvisioning.message || 'Apple provisioning failed.');
-        $('modal').innerHTML = '<h2>Affiliate Created</h2><div class="modal-sub">Copy these links now. The private dashboard link can also be recovered later from this admin dashboard when encrypted token storage is configured.</div>' +
+            : (reactivated ? 'Affiliate reactivated' : 'Affiliate created') + ', but the Apple creator code still needs attention: ' + String(appleProvisioning.message || 'Apple provisioning failed.');
+        $('modal').innerHTML = '<h2>' + (reactivated ? 'Affiliate Reactivated' : 'Affiliate Created') + '</h2><div class="modal-sub">' +
+          (reactivated
+            ? 'The existing affiliate record was moved to the 7-day free promo. Historical referrals and prior-offer data were preserved.'
+            : 'Copy these links now. The private dashboard link can also be recovered later from this admin dashboard when encrypted token storage is configured.') +
+          '</div>' +
           '<div class="result-box">' + resultLine('Referral Link', payload.referralUrl) + resultLine('Private Dashboard', payload.dashboardUrl) + resultLine('Apple Redemption', payload.appleRedemptionUrl) + '</div>' +
           '<div class="' + (appleConnected || isTest ? 'result-box' : 'notice danger') + '" style="margin-top:12px">' + html(appleMessage) + '</div>' +
           '<div class="modal-actions">' +
@@ -4044,7 +4051,25 @@ export function createAffiliateRouter(pool, options = {}) {
   router.post('/api/admin/affiliates', adminOnly, async (req, res) => {
     try {
       const actor = req.get('x-admin-actor') || 'owner_admin';
-      const created = await service.createAffiliate(req.body || {}, actor);
+      const body = req.body || {};
+      const existing = await service.findAffiliateByCode(body.customCode);
+      const requestedOffer = String(body.appleOfferIdentifier || '').trim().toUpperCase();
+      const existingOffer = String(existing?.normalized_apple_offer_identifier || '').trim().toUpperCase();
+      const requestedIsTest = body.isTest === true || String(body.isTest || '').toLowerCase() === 'true';
+
+      const returningRetiredAffiliate =
+        existing &&
+        existing.status === 'inactive' &&
+        Boolean(existing.is_test) === requestedIsTest &&
+        requestedOffer === 'AFFILIATE 7 DAY FREE PROMO' &&
+        (
+          existingOffer === 'AFFILIATE FIRST MONTH $0.99' ||
+          String(existing.code_status || '').toLowerCase() === 'disabled'
+        );
+
+      const created = returningRetiredAffiliate
+        ? await service.reactivateAffiliate(body, actor)
+        : await service.createAffiliate(body, actor);
       let appleProvisioning = {
         created: false,
         status: 'skipped',
@@ -4073,7 +4098,9 @@ export function createAffiliateRouter(pool, options = {}) {
         }
       }
 
-      return res.status(201).json({ success: true, ...created, appleProvisioning });
+      return res
+        .status(created?.reactivated ? 200 : 201)
+        .json({ success: true, ...created, appleProvisioning });
     } catch (error) {
       if (error?.code === '23505') {
         const constraint = String(error?.constraint || '');
