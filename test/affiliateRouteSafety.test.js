@@ -25,8 +25,8 @@ test('admin affiliate creation keeps creator codes unique while allowing a share
 });
 
 
-test('partner dashboard stays read-only and presents anonymous subscriber activity', () => {
-  assert.match(source, /Anonymous Subscriber Activity/);
+test('partner dashboard stays read-only and presents subscriber activity details', () => {
+  assert.match(source, /Subscriber Activity/);
   assert.match(source, /Subscriber<\/th>/);
   assert.match(source, /Current Subscribers/);
   assert.match(source, /Trial Active/);
@@ -34,6 +34,10 @@ test('partner dashboard stays read-only and presents anonymous subscriber activi
   assert.match(source, /Paid \+ Renewing/);
   assert.match(source, /Paid \+ Canceling/);
   assert.match(source, /Current State<\/th>/);
+  assert.match(source, /Auto-Renew Off/);
+  assert.match(source, /First Full-Price Payment/);
+  assert.match(source, /Access Ends/);
+  assert.match(source, /subscriberLabel/);
   assert.match(source, /Eligible Revenue Generated/);
   assert.doesNotMatch(source, /Commission-Earning Subscribers/);
   assert.doesNotMatch(source, /Search creators/i);
