@@ -6,6 +6,7 @@ import {
   classifyAffiliateTrackingFact,
   summarizeAffiliateTrackingFacts,
   evaluateAffiliateTrackingInvariants,
+  evaluateAdminOverviewInvariants,
   createAffiliateTrackingHealthService,
 } from '../lib/affiliateTrackingHealthService.js';
 
@@ -224,6 +225,62 @@ test('invariants verify exact commission math', () => {
   assert.equal(validation.checks.payoutMathChecked, 1);
 });
 
+test('owner overview invariants verify subscriber, alert, and payout-backed summary cards', () => {
+  const validation = evaluateAdminOverviewInvariants({
+    rawOverview: {
+      activeAffiliates: 2,
+      totalReferrals: 4,
+      currentSubscribers: 2,
+      cancelledSubscribers: 2,
+      openPartnerAlerts: 1,
+      estimatedThisMonthByCurrency: { USD: 12.5 },
+      currentlyOwedByCurrency: { USD: 7.99 },
+    },
+    publishedOverview: {
+      activeAffiliates: 2,
+      totalReferrals: 4,
+      currentSubscribers: 2,
+      cancelledSubscribers: 2,
+      openPartnerAlerts: 1,
+      estimatedThisMonthByCurrency: { usd: 12.5 },
+      currentlyOwedByCurrency: { USD: 7.99 },
+    },
+  });
+
+  assert.equal(validation.status, 'verified');
+  assert.equal(validation.checks.totalReferralsReconciles, true);
+  assert.equal(validation.checks.estimatedThisMonthReconciles, true);
+  assert.equal(validation.checks.currentlyOwedReconciles, true);
+});
+
+test('owner overview invariants fail if a summary card drifts from raw production data', () => {
+  const validation = evaluateAdminOverviewInvariants({
+    rawOverview: {
+      activeAffiliates: 2,
+      totalReferrals: 1,
+      currentSubscribers: 0,
+      cancelledSubscribers: 1,
+      openPartnerAlerts: 0,
+      estimatedThisMonthByCurrency: {},
+      currentlyOwedByCurrency: {},
+    },
+    publishedOverview: {
+      activeAffiliates: 2,
+      totalReferrals: 0,
+      currentSubscribers: 0,
+      cancelledSubscribers: 0,
+      openPartnerAlerts: 0,
+      estimatedThisMonthByCurrency: {},
+      currentlyOwedByCurrency: {},
+    },
+  });
+
+  assert.equal(validation.status, 'mismatch');
+  assert.equal(validation.checks.totalReferralsReconciles, false);
+  assert.equal(validation.checks.cancelledSubscribersReconciles, false);
+  assert.ok(validation.errors.some((item) => item.field === 'totalReferrals'));
+});
+
 test('tracking health service is read-only and reconciles raw facts to projected dashboard totals', async () => {
   const queries = [];
   const pool = {
@@ -231,7 +288,36 @@ test('tracking health service is read-only and reconciles raw facts to projected
       const text = String(sql);
       queries.push(text);
 
-      if (text.includes('FROM affiliates') && text.includes('status <>')) {
+      if (text.includes('COUNT(DISTINCT affiliate.id)')) {
+        return {
+          rows: [{
+            active_affiliates: 1,
+            total_referrals: 1,
+            current_subscribers: 0,
+            cancelled_subscribers: 1,
+          }],
+        };
+      }
+      if (text.includes('FROM affiliate_alerts alert')) {
+        return { rows: [{ open_partner_alerts: 0 }] };
+      }
+      if (
+        text.includes('FROM affiliate_monthly_payouts payout') &&
+        text.includes("payout_period = date_trunc('month'")
+      ) {
+        return { rows: [] };
+      }
+      if (
+        text.includes('FROM affiliate_monthly_payouts payout') &&
+        text.includes("payout.status IN ('ready_to_pay', 'partially_paid')")
+      ) {
+        return { rows: [] };
+      }
+      if (
+        text.includes('FROM affiliates') &&
+        text.includes('status <>') &&
+        text.includes('ORDER BY display_name ASC')
+      ) {
         return {
           rows: [{
             id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -288,6 +374,15 @@ test('tracking health service is read-only and reconciles raw facts to projected
         cancelledSubscribers: 1,
       },
     }),
+    projectAdminOverview: async () => ({
+      activeAffiliates: 1,
+      totalReferrals: 1,
+      currentSubscribers: 0,
+      cancelledSubscribers: 1,
+      openPartnerAlerts: 0,
+      estimatedThisMonthByCurrency: {},
+      currentlyOwedByCurrency: {},
+    }),
   });
 
   const result = await service.getHealth();
@@ -296,6 +391,9 @@ test('tracking health service is read-only and reconciles raw facts to projected
   assert.equal(result.affiliates.length, 1);
   assert.equal(result.affiliates[0].raw.totalReferrals, 1);
   assert.equal(result.affiliates[0].checks.currentSubscribersReconcile, true);
+  assert.equal(result.adminOverview.status, 'verified');
+  assert.equal(result.ownerOverviewMismatch, false);
+  assert.equal(result.adminOverview.checks.totalReferralsReconciles, true);
 
   const combined = queries.join('\n').toUpperCase();
   assert.doesNotMatch(combined, /\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bALTER\b|\bDROP\b/);

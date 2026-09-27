@@ -24,6 +24,7 @@ import {
 } from './lib/affiliateTrackingHealthService.js';
 import {
   scopePartnerDashboard,
+  scopeAdminAffiliateList,
 } from './lib/affiliateCurrentOfferDashboardMiddleware.js';
 
 function jsonError(res, error) {
@@ -2211,22 +2212,40 @@ function renderAffiliateAdminDashboardPage() {
         ' · read-only';
 
       const mismatchCount = Number(trackingHealth.mismatchCount || 0);
+      const affiliateMismatchCount = Number(trackingHealth.affiliateMismatchCount || 0);
+      const ownerOverviewMismatch = Boolean(trackingHealth.ownerOverviewMismatch);
       const warningCount = Number(trackingHealth.warningCount || 0);
-      if (mismatchCount > 0) {
+      const ownerStatus = trackingHealth.adminOverview?.status === 'verified'
+        ? 'Owner Overview verified'
+        : 'Owner Overview mismatch';
+
+      statusEl.textContent =
+        ownerStatus + ' · Checked ' + dateTime(trackingHealth.generatedAt) +
+        ' · read-only';
+
+      if (ownerOverviewMismatch) {
+        noticeEl.className = 'notice danger';
+        const ownerErrors = (trackingHealth.adminOverview?.errors || [])
+          .map(entry => entry.message)
+          .join(' · ');
+        noticeEl.textContent =
+          'Owner Overview failed reconciliation. ' +
+          (ownerErrors || 'One or more summary cards do not match raw production records.');
+      } else if (affiliateMismatchCount > 0) {
         noticeEl.className = 'notice danger';
         noticeEl.textContent =
-          mismatchCount + ' affiliate' + (mismatchCount === 1 ? '' : 's') +
-          ' failed reconciliation. Do not treat the affected dashboard totals as verified until the mismatch is reviewed.';
+          affiliateMismatchCount + ' affiliate' + (affiliateMismatchCount === 1 ? '' : 's') +
+          ' failed reconciliation. The owner Overview itself is verified.';
       } else if (warningCount > 0) {
         noticeEl.className = 'notice';
         noticeEl.textContent =
-          'All published totals reconcile. ' + warningCount +
+          'Owner Overview and all published affiliate totals reconcile. ' + warningCount +
           ' affiliate' + (warningCount === 1 ? '' : 's') +
-          ' has a non-blocking data warning, such as an entitlement still awaiting Apple state.';
+          ' has a non-blocking data warning.';
       } else {
         noticeEl.className = 'notice';
         noticeEl.textContent =
-          'Verified: raw attribution chains, published dashboard totals, state partitions, duplicate ownership, and stored commission math all reconcile.';
+          'Verified: Owner Overview, raw attribution chains, published affiliate totals, state partitions, duplicate ownership, payout summaries, and stored commission math all reconcile.';
       }
 
       const rows = Array.isArray(trackingHealth.affiliates)
@@ -3126,6 +3145,51 @@ export function createAffiliateRouter(pool, options = {}) {
         });
         return projected?.data || {};
       },
+      projectAdminOverview: async () => {
+        const projected = await scopeAdminAffiliateList(pool, {
+          success: true,
+          affiliates: await service.listAffiliates(),
+        });
+        const production = (projected?.affiliates || []).filter(
+          item => !item.is_test && item.status !== 'archived'
+        );
+
+        const estimatedThisMonthByCurrency = {};
+        const currentlyOwedByCurrency = {};
+        for (const item of production) {
+          const currency = String(item.payout_currency || 'USD').toUpperCase();
+          if (item.estimated_this_month != null) {
+            estimatedThisMonthByCurrency[currency] =
+              Number(estimatedThisMonthByCurrency[currency] || 0) +
+              Number(item.estimated_this_month || 0);
+          }
+          currentlyOwedByCurrency[currency] =
+            Number(currentlyOwedByCurrency[currency] || 0) +
+            Number(item.currently_owed || 0);
+        }
+
+        return {
+          activeAffiliates: production.filter(item => item.status === 'active').length,
+          totalReferrals: production.reduce(
+            (sum, item) => sum + Number(item.total_referrals || 0),
+            0
+          ),
+          currentSubscribers: production.reduce(
+            (sum, item) => sum + Number(item.current_subscribers || 0),
+            0
+          ),
+          cancelledSubscribers: production.reduce(
+            (sum, item) => sum + Number(item.cancelled_subscribers || 0),
+            0
+          ),
+          openPartnerAlerts: production.reduce(
+            (sum, item) => sum + Number(item.open_alerts || 0),
+            0
+          ),
+          estimatedThisMonthByCurrency,
+          currentlyOwedByCurrency,
+        };
+      },
     });
 
   if (
@@ -3142,6 +3206,8 @@ export function createAffiliateRouter(pool, options = {}) {
               affiliateCount: health.affiliateCount,
               mismatchCount: health.mismatchCount,
               warningCount: health.warningCount,
+              ownerOverviewMismatch: health.ownerOverviewMismatch,
+              adminOverview: health.adminOverview,
               affiliates: (health.affiliates || []).map((item) => ({
                 code: item.code,
                 health: item.health,
