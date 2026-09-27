@@ -56,9 +56,18 @@ async function loadCandidates(client, batchSize) {
       AND EXISTS (
         SELECT 1
         FROM affiliates affiliate
-        WHERE affiliate.normalized_apple_offer_identifier =
+        WHERE affiliate.status IN ('active', 'inactive')
+          AND (
+            affiliate.normalized_apple_offer_identifier =
               UPPER(BTRIM(tx.offer_identifier))
-          AND affiliate.status IN ('active', 'inactive')
+            OR EXISTS (
+              SELECT 1
+              FROM affiliate_apple_offer_aliases alias
+              WHERE alias.affiliate_id = affiliate.id
+                AND alias.normalized_offer_identifier =
+                  UPPER(BTRIM(tx.offer_identifier))
+            )
+          )
       )
       AND NOT EXISTS (
         SELECT 1
