@@ -1558,7 +1558,16 @@ function renderPartnerDashboardPage(token) {
       });
 
       if (!response.ok) {
-        document.body.innerHTML = '<main class="shell"><div class="eyebrow">THE AGORA PARTNERS</div><h1 style="margin-top:18px">Dashboard unavailable</h1><p style="color:var(--muted)">This private dashboard link is no longer active.</p></main>';
+        const linkInactive = response.status === 404 || response.status === 410;
+        document.body.innerHTML =
+          '<main class="shell"><div class="eyebrow">THE AGORA PARTNERS</div>' +
+          '<h1 style="margin-top:18px">' +
+          (linkInactive ? 'Dashboard unavailable' : 'Dashboard temporarily unavailable') +
+          '</h1><p style="color:var(--muted)">' +
+          (linkInactive
+            ? 'This private dashboard link is no longer active.'
+            : 'The dashboard could not load right now. Your private link is still valid. Please refresh in a moment.') +
+          '</p></main>';
         return;
       }
 
