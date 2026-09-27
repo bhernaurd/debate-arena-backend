@@ -1740,6 +1740,7 @@ function renderAffiliateAdminDashboardPage() {
           <div><h2>App Store Connect Imports</h2><div class="muted tiny">Offers created in App Store Connect appear here automatically after sync. Complete setup to turn them into Agora affiliates.</div></div>
           <div class="toolbar">
             <div id="appleSyncStatus" class="muted tiny">Not synced yet</div>
+            <button id="toggleInactiveAppleImports" class="button hidden" type="button">Show Inactive</button>
             <button id="toggleIgnoredAppleImports" class="button hidden" type="button">Show Ignored</button>
             <button id="syncAppleOffers" class="button" type="button">Sync App Store Connect</button>
           </div>
@@ -1839,6 +1840,7 @@ function renderAffiliateAdminDashboardPage() {
     let appleIgnored = [];
     let appleSync = null;
     let showIgnoredAppleImports = false;
+    let showInactiveAppleImports = false;
     let payouts = [];
     let alerts = [];
     let activeTab = 'overview';
@@ -2163,18 +2165,31 @@ function renderAffiliateAdminDashboardPage() {
       '</tr>';
     }
 
+    function appleImportIsInactive(item) {
+      const canonical = item?.canonical || null;
+      if (canonical) {
+        return canonical.customCodeActive === false || canonical.offerActive === false;
+      }
+      const configs = Array.isArray(item?.configurations) ? item.configurations : [];
+      return configs.length > 0 && configs.every(config =>
+        config.customCodeActive === false || config.offerActive === false
+      );
+    }
+
     function renderAppleImports() {
       const rowsEl = $('appleImportRows');
       const statusEl = $('appleSyncStatus');
       const warningsEl = $('appleImportWarnings');
       const ignoredToggle = $('toggleIgnoredAppleImports');
-      if (!rowsEl || !statusEl || !warningsEl || !ignoredToggle) return;
+      const inactiveToggle = $('toggleInactiveAppleImports');
+      if (!rowsEl || !statusEl || !warningsEl || !ignoredToggle || !inactiveToggle) return;
 
       if (!appleSync) {
         statusEl.textContent = 'Not synced yet';
         rowsEl.innerHTML = '<tr><td colspan="6" class="empty">Use “Sync App Store Connect” to discover Apple offers and custom codes.</td></tr>';
         warningsEl.textContent = '';
         ignoredToggle.classList.add('hidden');
+        inactiveToggle.classList.add('hidden');
         return;
       }
 
@@ -2183,6 +2198,7 @@ function renderAffiliateAdminDashboardPage() {
         rowsEl.innerHTML = '<tr><td colspan="6" class="empty">App Store Connect sync is unavailable. Check the Railway credentials and backend logs for the exact error.</td></tr>';
         warningsEl.textContent = '';
         ignoredToggle.classList.add('hidden');
+        inactiveToggle.classList.add('hidden');
         return;
       }
 
@@ -2197,8 +2213,20 @@ function renderAffiliateAdminDashboardPage() {
       ignoredToggle.classList.toggle('hidden', appleIgnored.length === 0);
       ignoredToggle.textContent = (showIgnoredAppleImports ? 'Hide Ignored' : 'Show Ignored') + (appleIgnored.length ? ' (' + appleIgnored.length + ')' : '');
 
-      const importRows = appleImports.map(item => renderAppleImportRow(item, 'import'));
-      const linkedRows = appleLinked.filter(item => item.linkedAffiliate?.status !== 'archived').map(item => renderAppleImportRow(item, 'linked'));
+      const linkedVisible = appleLinked.filter(item => item.linkedAffiliate?.status !== 'archived');
+      const inactiveCount = appleImports.concat(linkedVisible).filter(appleImportIsInactive).length;
+      inactiveToggle.classList.toggle('hidden', inactiveCount === 0);
+      inactiveToggle.textContent = (showInactiveAppleImports ? 'Hide Inactive' : 'Show Inactive') + (inactiveCount ? ' (' + inactiveCount + ')' : '');
+
+      const visibleImports = showInactiveAppleImports
+        ? appleImports
+        : appleImports.filter(item => !appleImportIsInactive(item));
+      const visibleLinked = showInactiveAppleImports
+        ? linkedVisible
+        : linkedVisible.filter(item => !appleImportIsInactive(item));
+
+      const importRows = visibleImports.map(item => renderAppleImportRow(item, 'import'));
+      const linkedRows = visibleLinked.map(item => renderAppleImportRow(item, 'linked'));
       const ignoredRows = showIgnoredAppleImports ? appleIgnored.map(item => renderAppleImportRow(item, 'ignored')) : [];
       const combined = importRows.concat(linkedRows, ignoredRows);
 
@@ -2643,6 +2671,10 @@ function renderAffiliateAdminDashboardPage() {
     $('signOut').addEventListener('click', lockAdmin);
     $('refreshAll').addEventListener('click', () => Promise.all([loadAffiliates(true), loadAppleImports(false), loadAlerts(false), loadPayouts(false)]));
     $('syncAppleOffers').addEventListener('click', () => loadAppleImports(true));
+    $('toggleInactiveAppleImports').addEventListener('click', () => {
+      showInactiveAppleImports = !showInactiveAppleImports;
+      renderAppleImports();
+    });
     $('toggleIgnoredAppleImports').addEventListener('click', () => {
       showIgnoredAppleImports = !showIgnoredAppleImports;
       renderAppleImports();
