@@ -98,7 +98,8 @@ test('partner dashboard contains Overview and Breakdown tabs', () => {
 test('partner dashboard uses one mutually exclusive current-state model', () => {
   const html = renderPartnerDashboardPage('abcdefghijklmnopqrstuvwxyz0123456789ABCDE');
   assert.match(html, /Each referred subscriber appears in one current state only/);
-  assert.match(html, /Promo Active/);
+  assert.match(html, /Trial Active/);
+  assert.match(html, /Trial Cancelled Before Paid/);
   assert.match(html, /Paid \+ Renewing/);
   assert.match(html, /Paid \+ Canceling/);
   assert.match(html, /Billing Retry/);
@@ -134,7 +135,8 @@ test('partner dashboard exposes the approved affiliate metrics without a creator
   const html = renderPartnerDashboardPage('abcdefghijklmnopqrstuvwxyz0123456789ABCDE');
   assert.doesNotMatch(html, /Search creators/i);
   assert.match(html, /Current Subscribers/);
-  assert.match(html, /Promo Active/);
+  assert.match(html, /Trial Active/);
+  assert.match(html, /Trial Cancelled Before Paid/);
   assert.match(html, /Paid \+ Renewing/);
   assert.match(html, /Paid \+ Canceling/);
   assert.match(html, /Billing Retry/);
