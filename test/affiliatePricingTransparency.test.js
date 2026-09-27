@@ -233,10 +233,11 @@ test('partner dashboard includes current pricing and active price-tier transpare
   assert.match(html, /Current Monthly Price/);
   assert.match(html, /Scheduled Monthly Price/);
   assert.match(html, /activePriceTierRows/);
-  assert.match(html, /apple\.preservedPrices/);
+  assert.doesNotMatch(html, /apple\.preservedPrices/);
   assert.match(html, /Active .* Subscribers/);
   assert.match(html, /latest verified Apple paid transaction/);
-  assert.match(html, /\$0\.99 Promo/);
+  assert.match(html, /Creator Offer/);
+  assert.doesNotMatch(html, /\$0\.99 Promo/);
 });
 
 test('affiliate dashboard service groups active paid chains by latest verified Apple transaction price', () => {
