@@ -51,6 +51,11 @@ test('partner dashboard distinguishes inactive links from temporary server failu
   assert.match(source, /response\.status === 404 \|\| response\.status === 410/);
 });
 
+test('overview subscriber summary does not double-count cancelled referrals as current', () => {
+  assert.match(source, /Active referrals with auto-renew still on/);
+  assert.match(source, /Anyone who has cancelled is counted only under Cancelled Subscribers/);
+});
+
 test('overview presents lifetime referrals and cancellations across creator offers', () => {
   assert.match(source, /Cancelled Subscribers/);
   assert.match(source, /id="cancelledSubscribers"/);
