@@ -1760,7 +1760,7 @@ function renderAffiliateAdminDashboardPage() {
 
       <div class="section">
         <div class="section-head">
-          <div><h2>Affiliates</h2><div class="muted tiny">Production partners are shown by default. Sandbox/Test partners only appear when explicitly selected.</div></div>
+          <div><h2>Affiliates</h2><div class="muted tiny">Active production partners are shown by default. Choose Paused to inspect inactive partners. Sandbox/Test partners only appear when explicitly selected.</div></div>
           <div class="toolbar">
             <input id="affiliateSearch" class="field" type="search" placeholder="Search partner or code" />
             <select id="affiliateFilter" class="select">
@@ -1986,7 +1986,12 @@ function renderAffiliateAdminDashboardPage() {
     async function loadAppleImports(showToast) {
       if (!adminKey) return;
       try {
-        const payload = await adminFetch('/api/admin/app-store-connect/imports');
+        const payload = await adminFetch(
+          showToast
+            ? '/api/admin/app-store-connect/sync'
+            : '/api/admin/app-store-connect/imports',
+          showToast ? { method: 'POST' } : undefined
+        );
         appleImports = Array.isArray(payload.imports) ? payload.imports : [];
         appleLinked = Array.isArray(payload.linked) ? payload.linked : [];
         appleIgnored = Array.isArray(payload.ignored) ? payload.ignored : [];
@@ -1997,7 +2002,17 @@ function renderAffiliateAdminDashboardPage() {
           errorMessage: payload.errorMessage || null,
         };
         renderAppleImports();
-        if (showToast) toast(payload.configured === false ? 'App Store Connect sync is not configured yet.' : 'App Store Connect sync complete.');
+        if (showToast) {
+          await loadAffiliates(false);
+          const reactivatedCount = Number(payload.reactivatedCount || 0);
+          toast(
+            payload.configured === false
+              ? 'App Store Connect sync is not configured yet.'
+              : reactivatedCount > 0
+                ? 'App Store Connect sync complete. Reactivated ' + reactivatedCount + ' affiliate' + (reactivatedCount === 1 ? '' : 's') + '.'
+                : 'App Store Connect sync complete.'
+          );
+        }
       } catch (error) {
         appleImports = [];
         appleLinked = [];
@@ -2046,6 +2061,7 @@ function renderAffiliateAdminDashboardPage() {
           return false;
         }
 
+        if (filter === 'production' && a.status !== 'active') return false;
         if (filter === 'active' && a.status !== 'active') return false;
         if (filter === 'paused' && a.status === 'active') return false;
         return true;
@@ -2817,6 +2833,176 @@ export function createAffiliateRouter(pool, options = {}) {
         'com.bhernaurd.TheAgora.Clip',
     });
 
+  async function loadAppStoreConnectImports({
+    reactivateRetired = false,
+    actor = 'owner_admin',
+  } = {}) {
+    if (!appStoreConnectService.isConfigured()) {
+      return {
+        configured: false,
+        syncedAt: null,
+        imports: [],
+        linked: [],
+        ignored: [],
+        warnings: [],
+        reactivated: [],
+        reactivatedCount: 0,
+        errorMessage: 'App Store Connect sync is not configured yet.',
+      };
+    }
+
+    let [affiliates, importPreferences] = await Promise.all([
+      service.listAffiliates(),
+      appleImportPreferences.listPreferences(),
+    ]);
+    let payload = await appStoreConnectService.listImports({
+      existingAffiliates: affiliates,
+      importPreferences,
+    });
+
+    const reactivated = [];
+    if (reactivateRetired) {
+      for (const item of payload.linked || []) {
+        const linked = item?.linkedAffiliate || null;
+        const canonical = item?.canonical || null;
+        const canonicalOffer = String(canonical?.normalizedOfferName || '')
+          .trim()
+          .toUpperCase();
+        const previousOffer = String(linked?.appleOfferIdentifier || '')
+          .trim()
+          .toUpperCase();
+
+        const isLiveSevenDayOffer =
+          canonicalOffer === 'AFFILIATE 7 DAY FREE PROMO' &&
+          canonical?.offerActive === true &&
+          canonical?.customCodeActive === true;
+
+        const wasRetiredProgram =
+          previousOffer === 'AFFILIATE FIRST MONTH $0.99' ||
+          String(linked?.codeStatus || '').trim().toLowerCase() === 'disabled';
+
+        if (
+          !linked?.id ||
+          linked.status !== 'inactive' ||
+          !isLiveSevenDayOffer ||
+          !wasRetiredProgram
+        ) {
+          continue;
+        }
+
+        await service.setAffiliateAppleOfferMapping({
+          affiliateId: linked.id,
+          appleOfferIdentifier: canonical.offerName,
+          actor: actor + ':apple_sync',
+        });
+
+        const client = await pool.connect();
+        try {
+          await client.query('BEGIN');
+          const updatedResult = await client.query(
+            `
+            UPDATE affiliates
+            SET status = 'active',
+                code_status = 'active',
+                updated_at = NOW()
+            WHERE id = $1
+              AND status = 'inactive'
+            RETURNING *
+            `,
+            [linked.id]
+          );
+          const updated = updatedResult.rows[0] || null;
+
+          if (updated) {
+            await client.query(
+              `
+              INSERT INTO affiliate_admin_audit_log (
+                admin_actor,
+                action_type,
+                affiliate_id,
+                related_record_type,
+                related_record_id,
+                before_value,
+                after_value
+              )
+              VALUES (
+                $1,
+                'affiliate_reactivated_from_app_store_sync',
+                $2::uuid,
+                'affiliate',
+                $2::uuid::text,
+                $3::jsonb,
+                $4::jsonb
+              )
+              `,
+              [
+                actor,
+                linked.id,
+                JSON.stringify({
+                  status: linked.status,
+                  codeStatus: linked.codeStatus || null,
+                  appleOfferIdentifier: linked.appleOfferIdentifier || null,
+                }),
+                JSON.stringify({
+                  status: 'active',
+                  codeStatus: 'active',
+                  appleOfferIdentifier: canonical.offerName,
+                }),
+              ]
+            );
+
+            reactivated.push({
+              id: linked.id,
+              displayName: linked.displayName,
+              customCode: item.customCode,
+              appleOfferIdentifier: canonical.offerName,
+            });
+          }
+
+          await client.query('COMMIT');
+        } catch (error) {
+          await client.query('ROLLBACK');
+          throw error;
+        } finally {
+          client.release();
+        }
+      }
+
+      if (reactivated.length) {
+        [affiliates, importPreferences] = await Promise.all([
+          service.listAffiliates(),
+          appleImportPreferences.listPreferences(),
+        ]);
+        payload = await appStoreConnectService.listImports({
+          existingAffiliates: affiliates,
+          importPreferences,
+        });
+      }
+    }
+
+    // Keep the partner pricing cache aligned with the same explicit Apple sync.
+    // Pricing failure should never block creator-code synchronization.
+    if (typeof appStoreConnectService.getSubscriptionPricingSummary === 'function') {
+      try {
+        await appStoreConnectService.getSubscriptionPricingSummary({
+          territory: 'USA',
+          forceRefresh: true,
+        });
+      } catch (pricingError) {
+        console.error(
+          '[affiliate] App Store Connect pricing refresh during sync:',
+          pricingError?.message || pricingError
+        );
+      }
+    }
+
+    return {
+      ...payload,
+      reactivated,
+      reactivatedCount: reactivated.length,
+    };
+  }
+
   const adminOnly = requireAdminKey(adminKey);
   const referralLimiter = rateLimit({
     windowMs: 60 * 1000,
@@ -3214,43 +3400,22 @@ export function createAffiliateRouter(pool, options = {}) {
 
   router.get('/api/admin/app-store-connect/imports', adminOnly, async (_req, res) => {
     try {
-      if (!appStoreConnectService.isConfigured()) {
-        return res.json({
-          success: true,
-          configured: false,
-          syncedAt: null,
-          imports: [],
-          linked: [],
-          ignored: [],
-          warnings: [],
-          errorMessage: 'App Store Connect sync is not configured yet.',
-        });
-      }
-      const [affiliates, importPreferences] = await Promise.all([
-        service.listAffiliates(),
-        appleImportPreferences.listPreferences(),
-      ]);
-      const payload = await appStoreConnectService.listImports({
-        existingAffiliates: affiliates,
-        importPreferences,
+      const payload = await loadAppStoreConnectImports({
+        reactivateRetired: false,
       });
+      return res.json({ success: true, ...payload });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
 
-      // The owner-facing Sync button also refreshes the short-lived partner
-      // pricing cache. A pricing lookup failure must never block offer imports.
-      if (typeof appStoreConnectService.getSubscriptionPricingSummary === 'function') {
-        try {
-          await appStoreConnectService.getSubscriptionPricingSummary({
-            territory: 'USA',
-            forceRefresh: true,
-          });
-        } catch (pricingError) {
-          console.error(
-            '[affiliate] App Store Connect pricing refresh during sync:',
-            pricingError?.message || pricingError
-          );
-        }
-      }
-
+  router.post('/api/admin/app-store-connect/sync', adminOnly, async (req, res) => {
+    try {
+      const actor = req.get('x-admin-actor') || 'owner_admin';
+      const payload = await loadAppStoreConnectImports({
+        reactivateRetired: true,
+        actor,
+      });
       return res.json({ success: true, ...payload });
     } catch (error) {
       return jsonError(res, error);
