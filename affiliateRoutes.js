@@ -549,11 +549,11 @@ function renderPartnerDashboardPage(token) {
             <div class="label">Current Subscribers</div>
             ${renderInfoButton(
               'Current Subscribers',
-              'The number of referred subscribers who currently still have subscription access. This is one overall total, not an additional subscriber state.'
+              'The number of referred subscribers who currently have access and have not turned off auto-renew. Anyone who has cancelled is counted only under Cancelled Subscribers, even if access remains until the end of the period.'
             )}
           </div>
           <div class="value" id="currentSubscribers">—</div>
-          <div class="subvalue">Referred subscribers with access right now</div>
+          <div class="subvalue">Active referrals with auto-renew still on</div>
         </article>
         <article class="card primary">
           <div class="metric-heading">
