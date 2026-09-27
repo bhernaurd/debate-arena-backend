@@ -112,6 +112,16 @@ test('breakdown uses explicit calendar-month navigation with YTD and Lifetime sh
   assert.doesNotMatch(source, /data-range="last_3_months"/);
 });
 
+test('owner admin overview exposes lifetime referrals, current, and cancelled subscriber totals', () => {
+  assert.match(source, /id="sumReferrals"/);
+  assert.match(source, /id="sumSubscribers"/);
+  assert.match(source, /id="sumCancelled"/);
+  assert.match(source, /Cancelled Subscribers/);
+  assert.match(source, /cancelled_subscribers/);
+  assert.match(source, /Active · auto-renew on/);
+  assert.match(source, /Lifetime · auto-renew off/);
+});
+
 test('owner affiliate admin dashboard is a locked shell backed by admin-only APIs', () => {
   assert.match(source, /\/admin\/affiliates/);
   assert.match(source, /AFFILIATE_ADMIN_KEY/);
