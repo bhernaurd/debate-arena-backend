@@ -19,6 +19,7 @@ import { createSubscriptionAdminRouter } from './subscriptionAdminRoutes.js';
 import { createSubscriptionAdminDashboardRouter } from './subscriptionAdminDashboardRoutes.js';
 import { createPaywallConfigurationRouter } from './paywallConfigurationRoutes.js';
 import { createAffiliateRouter } from './affiliateRoutes.js';
+import { createAffiliateCurrentOfferDashboardMiddleware } from './lib/affiliateCurrentOfferDashboardMiddleware.js';
 import { createAccountAuthRouter } from './accountAuthRoutes.js';
 import { createAccountSubscriptionEntitlementRouter } from './accountSubscriptionEntitlementRoutes.js';
 import { createAccountDebateHistoryRouter } from './accountDebateHistoryRoutes.js';
@@ -678,6 +679,7 @@ app.use(
 app.use('/api/account', accountAuthRouter);
 
 app.use('/affiliate', affiliatePortalLimiter);
+app.use(createAffiliateCurrentOfferDashboardMiddleware(pool));
 app.use(createAffiliateRouter(pool, {
   accountAuthService,
   affiliateSubscriptionAttributionService,
