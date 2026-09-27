@@ -1712,7 +1712,7 @@ function renderAffiliateAdminDashboardPage() {
     .tab { border: 0; background: transparent; color: var(--muted); padding: 10px 18px; border-radius: 10px; cursor: pointer; font-weight: 700; }
     .tab.active { background: var(--panel-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
     .hidden { display: none !important; }
-    .summary-grid { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 10px; }
+    .summary-grid { display: grid; grid-template-columns: repeat(7,minmax(0,1fr)); gap: 10px; }
     .card { background: linear-gradient(180deg, rgba(23,20,31,.98), rgba(16,14,22,.98)); border: 1px solid rgba(255,255,255,.07); border-radius: 17px; box-shadow: var(--shadow); }
     .summary { padding: 16px; min-width: 0; }
     .summary .label { color: var(--muted); font-size: 11px; font-weight: 700; line-height: 1.3; }
@@ -1834,7 +1834,8 @@ function renderAffiliateAdminDashboardPage() {
       <div class="summary-grid">
         <div class="card summary"><div class="label">Active Affiliates</div><div id="sumAffiliates" class="value">—</div><div class="sub">Production only</div></div>
         <div class="card summary"><div class="label">Total Referrals</div><div id="sumReferrals" class="value">—</div><div class="sub">Verified chains</div></div>
-        <div class="card summary"><div class="label">Current Subscribers</div><div id="sumSubscribers" class="value">—</div><div class="sub">Active access now</div></div>
+        <div class="card summary"><div class="label">Current Subscribers</div><div id="sumSubscribers" class="value">—</div><div class="sub">Active · auto-renew on</div></div>
+        <div class="card summary"><div class="label">Cancelled Subscribers</div><div id="sumCancelled" class="value">—</div><div class="sub">Lifetime · auto-renew off</div></div>
         <div class="card summary"><div class="label">Estimated This Month</div><div id="sumEstimated" class="value money">—</div><div id="sumEstimatedSub" class="sub">Open estimate</div></div>
         <div class="card summary"><div class="label">Currently Owed</div><div id="sumOwed" class="value money">—</div><div id="sumOwedSub" class="sub">Finalized unpaid</div></div>
         <div class="card summary"><div class="label">Open Partner Alerts</div><div id="sumAlerts" class="value">—</div><div class="sub">Production only</div></div>
@@ -1904,9 +1905,9 @@ function renderAffiliateAdminDashboardPage() {
           <div class="table-wrap">
             <table>
               <thead><tr>
-                <th>Partner</th><th>Code</th><th>Env</th><th>Status</th><th>Referrals</th><th>Subscribers</th><th>This Month</th><th>Owed</th><th>Commission</th><th>Alerts</th><th>Actions</th>
+                <th>Partner</th><th>Code</th><th>Env</th><th>Status</th><th>Referrals</th><th>Current</th><th>Cancelled</th><th>This Month</th><th>Owed</th><th>Commission</th><th>Alerts</th><th>Actions</th>
               </tr></thead>
-              <tbody id="affiliateRows"><tr><td colspan="11" class="empty">Unlock the admin dashboard to load affiliates.</td></tr></tbody>
+              <tbody id="affiliateRows"><tr><td colspan="12" class="empty">Unlock the admin dashboard to load affiliates.</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -2261,6 +2262,7 @@ function renderAffiliateAdminDashboardPage() {
       $('sumAffiliates').textContent = number(prod.filter(a => a.status === 'active').length);
       $('sumReferrals').textContent = number(prod.reduce((sum,a) => sum + numeric(a.total_referrals),0));
       $('sumSubscribers').textContent = number(prod.reduce((sum,a) => sum + numeric(a.current_subscribers),0));
+      $('sumCancelled').textContent = number(prod.reduce((sum,a) => sum + numeric(a.cancelled_subscribers),0));
       const knownEstimates = prod.filter(a => a.estimated_this_month != null);
       const awaitingEstimates = prod.length - knownEstimates.length;
       const estimateGroup = groupedMoney(knownEstimates, 'estimated_this_month');
@@ -2298,7 +2300,7 @@ function renderAffiliateAdminDashboardPage() {
       });
 
       if (!filtered.length) {
-        $('affiliateRows').innerHTML = '<tr><td colspan="11" class="empty">No affiliates match this view.</td></tr>';
+        $('affiliateRows').innerHTML = '<tr><td colspan="12" class="empty">No affiliates match this view.</td></tr>';
         return;
       }
 
@@ -2313,6 +2315,7 @@ function renderAffiliateAdminDashboardPage() {
           '<td>' + statusBadge(a) + '</td>' +
           '<td>' + number(a.total_referrals) + '</td>' +
           '<td>' + number(a.current_subscribers) + '</td>' +
+          '<td>' + number(a.cancelled_subscribers) + '</td>' +
           '<td class="money">' + (a.estimated_this_month == null ? '—' : money(a.estimated_this_month, a.payout_currency)) + '<div style="margin-top:5px">' + (a.current_month_data_status ? dataStatusBadge(a.current_month_data_status) : badge('Awaiting payout data','')) + '</div></td>' +
           '<td class="money">' + money(a.currently_owed, a.payout_currency) + '</td>' +
           '<td>' + percent(a.commission_rate) + '<div class="muted tiny">' + html(basisLabel(a.commission_basis)) + '</div></td>' +
@@ -2557,7 +2560,7 @@ function renderAffiliateAdminDashboardPage() {
         ['Partner', a.display_name], ['Creator Code', a.normalized_code], ['Apple Offer Reference', a.apple_offer_identifier || 'Not configured'],
         ['Environment', a.is_test ? 'Sandbox' : 'Production'], ['Affiliate Since', String(a.affiliate_since || '').slice(0,10)],
         ['Status', String(a.status || '') + ' / ' + String(a.code_status || '')], ['Commission', percent(a.commission_rate) + ' · ' + basisLabel(a.commission_basis)],
-        ['Total Referrals', number(a.total_referrals)], ['Current Subscribers', number(a.current_subscribers)], ['Estimated This Month', a.estimated_this_month == null ? 'Awaiting payout data' : money(a.estimated_this_month, a.payout_currency)],
+        ['Total Referrals', number(a.total_referrals)], ['Current Subscribers', number(a.current_subscribers)], ['Cancelled Subscribers', number(a.cancelled_subscribers)], ['Estimated This Month', a.estimated_this_month == null ? 'Awaiting payout data' : money(a.estimated_this_month, a.payout_currency)],
         ['Currently Owed', money(a.currently_owed, a.payout_currency)], ['Lifetime Commission', money(a.lifetime_commission_earned, a.payout_currency)], ['Lifetime Paid', money(a.lifetime_paid, a.payout_currency)],
         ['Contact', a.contact_email || '—'], ['Payout Method', a.payout_method || '—']
       ];
