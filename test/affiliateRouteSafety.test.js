@@ -45,6 +45,12 @@ test('partner dashboard stays read-only and presents subscriber activity details
 });
 
 
+test('partner dashboard distinguishes inactive links from temporary server failures', () => {
+  assert.match(source, /Dashboard temporarily unavailable/);
+  assert.match(source, /Your private link is still valid/);
+  assert.match(source, /response\.status === 404 \|\| response\.status === 410/);
+});
+
 test('overview presents lifetime referrals and cancellations across creator offers', () => {
   assert.match(source, /Cancelled Subscribers/);
   assert.match(source, /id="cancelledSubscribers"/);
