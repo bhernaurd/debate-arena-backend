@@ -263,7 +263,7 @@ function renderPartnerDashboardPage(token) {
       font-size: 13px;
       line-height: 1.45;
     }
-    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+    .grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
     .financial-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
     .card {
       position: relative;
@@ -538,11 +538,11 @@ function renderPartnerDashboardPage(token) {
             <div class="label">Total Referrals</div>
             ${renderInfoButton(
               'Total Referrals',
-              'The total number of verified Apple subscription chains attributed to your creator code. Each subscription chain is counted once, even when it renews.'
+              'The lifetime number of verified subscribers attributed to your creator code across both the current 7-day trial program and previous creator offers. Each subscription chain is counted once.'
             )}
           </div>
           <div class="value" id="totalReferrals">—</div>
-          <div class="subvalue">Verified from Apple offer-code and subscription data</div>
+          <div class="subvalue">All verified referrals across creator offers</div>
         </article>
         <article class="card primary">
           <div class="metric-heading">
@@ -554,6 +554,17 @@ function renderPartnerDashboardPage(token) {
           </div>
           <div class="value" id="currentSubscribers">—</div>
           <div class="subvalue">Referred subscribers with access right now</div>
+        </article>
+        <article class="card primary">
+          <div class="metric-heading">
+            <div class="label">Cancelled Subscribers</div>
+            ${renderInfoButton(
+              'Cancelled Subscribers',
+              'The lifetime number of referred subscribers who turned off auto-renew across the current 7-day trial program and previous creator offers. They may still have access until the end of a paid period or trial.'
+            )}
+          </div>
+          <div class="value" id="cancelledSubscribers">—</div>
+          <div class="subvalue">Lifetime referrals with auto-renew turned off</div>
         </article>
         <article class="card primary">
           <div class="metric-heading">
@@ -1337,6 +1348,7 @@ function renderPartnerDashboardPage(token) {
       text('partnerCode', data.affiliate.customCode);
       text('totalReferrals', number(o.totalReferrals));
       text('currentSubscribers', number(o.currentSubscribers ?? o.activeSubscribers));
+      text('cancelledSubscribers', number(o.cancelledSubscribers));
       text('estimatedThisMonth', money(o.estimatedThisMonth));
       text('currentlyOwed', money(o.currentlyOwed));
 
@@ -1419,7 +1431,14 @@ function renderPartnerDashboardPage(token) {
 
       const freshnessValue = data.dataFreshness?.latestVerifiedSubscriptionAt || data.dataFreshness?.latestAppleStateDate;
       text('freshness', freshnessValue ? 'Apple data through ' + dateLabel(freshnessValue, true) : 'Awaiting Apple data');
-      document.getElementById('dataNotice').style.display = data.dataFreshness?.status === 'awaiting_apple_data' ? 'block' : 'none';
+      const dataNotice = document.getElementById('dataNotice');
+      const hasHistoricalReferrals = Number(data.historicalOffer?.totalSignups || 0) > 0;
+      const awaitingCurrentProgram = data.dataFreshness?.status === 'awaiting_apple_data';
+      dataNotice.style.display = awaitingCurrentProgram ? 'block' : 'none';
+      if (awaitingCurrentProgram && hasHistoricalReferrals) {
+        dataNotice.textContent =
+          'No verified activity in the current 7-day trial program yet. Previous-offer referrals are preserved below; financial totals update as verified Apple payout data is calculated and reconciled.';
+      }
 
       const subscriberRows = [
         row('Referrals Acquired in Selected Period', number(s.newReferrals)),

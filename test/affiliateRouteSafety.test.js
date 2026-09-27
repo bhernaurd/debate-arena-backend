@@ -45,6 +45,13 @@ test('partner dashboard stays read-only and presents subscriber activity details
 });
 
 
+test('overview presents lifetime referrals and cancellations across creator offers', () => {
+  assert.match(source, /Cancelled Subscribers/);
+  assert.match(source, /id="cancelledSubscribers"/);
+  assert.match(source, /All verified referrals across creator offers/);
+  assert.match(source, /o\.cancelledSubscribers/);
+});
+
 test('breakdown includes range-scoped previous-offer history without mixing it into current trial states', () => {
   assert.match(source, /id="breakdownPreviousOfferHistorySection"/);
   assert.match(source, /id="breakdownPreviousOfferHistory"/);
