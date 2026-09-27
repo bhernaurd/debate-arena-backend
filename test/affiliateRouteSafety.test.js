@@ -135,6 +135,14 @@ test('owner affiliate overview keeps the main affiliate table visible and collap
   assert.match(source, /collapsible-arrow/);
 });
 
+test('returning retired affiliates are reactivated instead of duplicated', () => {
+  assert.match(source, /returningRetiredAffiliate/);
+  assert.match(source, /AFFILIATE 7 DAY FREE PROMO/);
+  assert.match(source, /service\.reactivateAffiliate\(body, actor\)/);
+  assert.match(source, /Affiliate Reactivated/);
+  assert.match(source, /Historical referrals and prior-offer data were preserved/);
+});
+
 test('owner affiliate admin dashboard is a locked shell backed by admin-only APIs', () => {
   assert.match(source, /\/admin\/affiliates/);
   assert.match(source, /AFFILIATE_ADMIN_KEY/);
