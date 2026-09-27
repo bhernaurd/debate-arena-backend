@@ -29,7 +29,8 @@ test('partner dashboard stays read-only and presents anonymous subscriber activi
   assert.match(source, /Anonymous Subscriber Activity/);
   assert.match(source, /Subscriber<\/th>/);
   assert.match(source, /Current Subscribers/);
-  assert.match(source, /Promo Active/);
+  assert.match(source, /Trial Active/);
+  assert.match(source, /Trial Cancelled Before Paid/);
   assert.match(source, /Paid \+ Renewing/);
   assert.match(source, /Paid \+ Canceling/);
   assert.match(source, /Current State<\/th>/);
@@ -48,8 +49,8 @@ test('performance breakdown stays cohort-focused and does not repeat lifetime fi
   assert.ok(end > start, 'performance breakdown render block should have an end marker');
 
   const block = source.slice(start, end);
-  assert.match(block, /Promo Renewal Rate/);
-  assert.match(block, /Promo Non-Renewals/);
+  assert.match(block, /Trial Conversion Rate/);
+  assert.match(block, /Trial Non-Conversions/);
   assert.match(block, /Paid Conversion Rate/);
   assert.match(block, /Active Retention/);
   assert.match(block, /Cancellation Rate/);
