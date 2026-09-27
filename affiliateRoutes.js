@@ -817,9 +817,19 @@ function renderPartnerDashboardPage(token) {
         <article class="card">
           <div class="section-title"><div class="title-with-info"><h2>Performance Breakdown</h2>${renderInfoButton(
             'Performance Breakdown',
-            'Shows promo outcomes, paid conversion, current retention, and cancellation for referrals acquired in the selected range. Paid conversion means ever converted to a commission-earning subscription; active retention means still active now.'
+            'Shows 7-day trial outcomes, paid conversion, current retention, and cancellation for referrals acquired in the selected range. Paid conversion means ever converted to a commission-earning subscription; active retention means still active now.'
           )}</div></div>
           <div class="rows" id="performanceBreakdown"></div>
+        </article>
+      </div>
+
+      <div class="section hidden" id="breakdownPreviousOfferHistorySection">
+        <article class="card">
+          <div class="section-title"><div class="title-with-info"><h2>Previous Offer History</h2>${renderInfoButton(
+            'Previous Offer History',
+            'Shows outcomes from the retired creator offer for referrals acquired in the selected period. These results are historical and do not count toward the current 7-day trial program.'
+          )}</div></div>
+          <div class="rows" id="breakdownPreviousOfferHistory"></div>
         </article>
       </div>
 
@@ -857,7 +867,7 @@ function renderPartnerDashboardPage(token) {
       </div>
 
       <div class="fine-print">
-        Apple provides the underlying verified subscription and offer-code data. The Agora applies the affiliate's agreed commission terms and payout accounting. Promotional $0.99 payments are excluded from commission. Subscriber activity is anonymous and does not expose customer identity or Apple transaction identifiers.
+        Apple provides the underlying verified subscription and offer-code data. The Agora applies the affiliate's agreed commission terms and payout accounting. Free-trial access is excluded from commission. Previous-offer history is shown separately from the current 7-day trial program. Subscriber activity is anonymous and does not expose customer identity or Apple transaction identifiers.
       </div>
     </section>
   </main>
@@ -1419,6 +1429,16 @@ function renderPartnerDashboardPage(token) {
         row('Paid Conversion Rate', percent(p.paidConversionRate)),
         row('Active Retention', percent(p.activeRetention)),
         row('Cancellation Rate', percent(p.cancellationRate)),
+      ].join('');
+
+      const previousOfferSelected = b.previousOfferHistory || {};
+      const previousOfferSelectedSignups = Number(previousOfferSelected.totalSignups || 0);
+      const previousOfferBreakdownSection = document.getElementById('breakdownPreviousOfferHistorySection');
+      previousOfferBreakdownSection.classList.toggle('hidden', previousOfferSelectedSignups === 0);
+      document.getElementById('breakdownPreviousOfferHistory').innerHTML = [
+        row('Previous Offer Signups', number(previousOfferSelectedSignups)),
+        row('Cancelled Before Full Price', number(previousOfferSelected.cancelledBeforeFullPrice)),
+        row('Converted to Full Price', number(previousOfferSelected.convertedToPaid)),
       ].join('');
 
       document.getElementById('subscriberActivity').className = '';

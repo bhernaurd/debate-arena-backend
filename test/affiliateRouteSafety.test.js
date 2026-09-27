@@ -41,6 +41,15 @@ test('partner dashboard stays read-only and presents anonymous subscriber activi
 });
 
 
+test('breakdown includes range-scoped previous-offer history without mixing it into current trial states', () => {
+  assert.match(source, /id="breakdownPreviousOfferHistorySection"/);
+  assert.match(source, /id="breakdownPreviousOfferHistory"/);
+  assert.match(source, /Previous Offer Signups/);
+  assert.match(source, /Cancelled Before Full Price/);
+  assert.match(source, /Converted to Full Price/);
+  assert.match(source, /b\.previousOfferHistory/);
+});
+
 test('performance breakdown stays cohort-focused and does not repeat lifetime financial totals', () => {
   const start = source.indexOf("document.getElementById('performanceBreakdown').innerHTML");
   const end = source.indexOf("document.getElementById('subscriberActivity')", start);

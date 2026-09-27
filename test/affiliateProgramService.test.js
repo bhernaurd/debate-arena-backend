@@ -145,7 +145,7 @@ test('partner dashboard exposes the approved affiliate metrics without a creator
   assert.match(html, /Lifetime Commission Earned/);
   assert.match(html, /Lifetime Paid/);
   assert.match(html, /Anonymous Subscriber Activity/);
-  assert.match(html, /Promotional \$0\.99 payments are excluded from commission/);
+  assert.match(html, /Free-trial access is excluded from commission/);
   assert.doesNotMatch(html, /Commission-Earning Subscribers/);
   assert.doesNotMatch(html, />Canceling<\/div>/);
 });
