@@ -19,6 +19,12 @@ import {
 import {
   createAffiliateReferralHandoffService,
 } from './lib/affiliateReferralHandoffService.js';
+import {
+  createAffiliateTrackingHealthService,
+} from './lib/affiliateTrackingHealthService.js';
+import {
+  scopePartnerDashboard,
+} from './lib/affiliateCurrentOfferDashboardMiddleware.js';
 
 function jsonError(res, error) {
   const statusCode = Number(error?.statusCode) || 500;
@@ -1836,6 +1842,30 @@ function renderAffiliateAdminDashboardPage() {
 
       <div class="section">
         <div class="section-head">
+          <div>
+            <h2>Affiliate Tracking Health</h2>
+            <div class="muted tiny">Read-only reconciliation of raw Apple-attributed subscription chains, the published partner dashboard, subscriber-state math, duplicate ownership, and commission calculations. These checks never modify affiliate data.</div>
+          </div>
+          <div class="toolbar">
+            <div id="trackingHealthStatus" class="muted tiny">Not checked yet</div>
+            <button id="loadTrackingHealth" class="button" type="button">Run Checks</button>
+          </div>
+        </div>
+        <div id="trackingHealthNotice" class="notice hidden"></div>
+        <div class="card table-card">
+          <div class="table-wrap">
+            <table>
+              <thead><tr>
+                <th>Partner</th><th>Health</th><th>Raw / Dashboard Referrals</th><th>Current</th><th>Cancelled</th><th>States</th><th>Commission</th><th>Notes</th>
+              </tr></thead>
+              <tbody id="trackingHealthRows"><tr><td colspan="8" class="empty">Unlock the admin dashboard to run read-only tracking checks.</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
           <div><h2>App Store Connect Imports</h2><div class="muted tiny">Offers created in App Store Connect appear here automatically after sync. Complete setup to turn them into Agora affiliates.</div></div>
           <div class="toolbar">
             <div id="appleSyncStatus" class="muted tiny">Not synced yet</div>
@@ -1942,6 +1972,7 @@ function renderAffiliateAdminDashboardPage() {
     let showInactiveAppleImports = false;
     let payouts = [];
     let alerts = [];
+    let trackingHealth = null;
     let activeTab = 'overview';
 
     const $ = id => document.getElementById(id);
@@ -2066,7 +2097,12 @@ function renderAffiliateAdminDashboardPage() {
         affiliates = Array.isArray(payload.affiliates) ? payload.affiliates : [];
         unlockUi();
         renderOverview();
-        await Promise.all([loadAppleImports(false), loadAlerts(false), loadPayouts(false)]);
+        await Promise.all([
+          loadAppleImports(false),
+          loadAlerts(false),
+          loadPayouts(false),
+          loadTrackingHealth(false),
+        ]);
       } catch (error) {
         $('loginError').textContent = error.message;
         if (error.status !== 401) toast(error.message, true);
@@ -2119,6 +2155,101 @@ function renderAffiliateAdminDashboardPage() {
         appleSync = { configured: false, syncedAt: null, warnings: [], errorMessage: error.message };
         renderAppleImports();
         toast(error.message, true);
+      }
+    }
+
+    function trackingHealthBadge(value) {
+      if (value === 'verified') return badge('Verified', 'positive');
+      if (value === 'verified_with_warnings') return badge('Verified · Warnings', 'warning');
+      return badge('Mismatch', 'danger');
+    }
+
+    function renderTrackingHealth() {
+      const rowsEl = $('trackingHealthRows');
+      const statusEl = $('trackingHealthStatus');
+      const noticeEl = $('trackingHealthNotice');
+      if (!rowsEl || !statusEl || !noticeEl) return;
+
+      if (!trackingHealth) {
+        statusEl.textContent = 'Not checked yet';
+        noticeEl.className = 'notice hidden';
+        rowsEl.innerHTML = '<tr><td colspan="8" class="empty">Run the checks to verify affiliate tracking against raw production data.</td></tr>';
+        return;
+      }
+
+      statusEl.textContent =
+        'Checked ' + dateTime(trackingHealth.generatedAt) +
+        ' · read-only';
+
+      const mismatchCount = Number(trackingHealth.mismatchCount || 0);
+      const warningCount = Number(trackingHealth.warningCount || 0);
+      if (mismatchCount > 0) {
+        noticeEl.className = 'notice danger';
+        noticeEl.textContent =
+          mismatchCount + ' affiliate' + (mismatchCount === 1 ? '' : 's') +
+          ' failed reconciliation. Do not treat the affected dashboard totals as verified until the mismatch is reviewed.';
+      } else if (warningCount > 0) {
+        noticeEl.className = 'notice';
+        noticeEl.textContent =
+          'All published totals reconcile. ' + warningCount +
+          ' affiliate' + (warningCount === 1 ? '' : 's') +
+          ' has a non-blocking data warning, such as an entitlement still awaiting Apple state.';
+      } else {
+        noticeEl.className = 'notice';
+        noticeEl.textContent =
+          'Verified: raw attribution chains, published dashboard totals, state partitions, duplicate ownership, and stored commission math all reconcile.';
+      }
+
+      const rows = Array.isArray(trackingHealth.affiliates)
+        ? trackingHealth.affiliates
+        : [];
+
+      if (!rows.length) {
+        rowsEl.innerHTML = '<tr><td colspan="8" class="empty">No active production affiliates to verify.</td></tr>';
+        return;
+      }
+
+      rowsEl.innerHTML = rows.map(item => {
+        const checks = item.checks || {};
+        const raw = item.raw || {};
+        const published = item.published || {};
+        const notes = []
+          .concat(item.errors || [])
+          .concat(item.warnings || [])
+          .map(entry => entry.message)
+          .join(' · ');
+
+        return '<tr>' +
+          '<td><div class="partner-name">' + html(item.displayName) + '</div><div class="muted tiny">' + html(item.code) + '</div></td>' +
+          '<td>' + trackingHealthBadge(item.health) + '</td>' +
+          '<td>' + number(raw.totalReferrals) + ' / ' + number(published.totalReferrals) + '</td>' +
+          '<td>' + number(raw.currentSubscribers) + ' / ' + number(published.currentSubscribers) + '</td>' +
+          '<td>' + number(raw.cancelledSubscribers) + ' / ' + number(published.cancelledSubscribers) + '</td>' +
+          '<td>' + (checks.statePartitionReconciles && checks.offerPartitionReconciles ? badge('Reconciled','positive') : badge('Mismatch','danger')) + '</td>' +
+          '<td>' + (checks.commissionMathReconciles ? badge('Reconciled','positive') : badge('Mismatch','danger')) +
+            '<div class="muted tiny">' + number(checks.payoutMathChecked || 0) + ' payout period' + (Number(checks.payoutMathChecked || 0) === 1 ? '' : 's') + ' checked</div></td>' +
+          '<td><div class="muted tiny">' + html(notes || 'No issues detected') + '</div></td>' +
+        '</tr>';
+      }).join('');
+    }
+
+    async function loadTrackingHealth(showToast) {
+      if (!adminKey) return;
+      try {
+        trackingHealth = await adminFetch('/api/admin/affiliate-tracking-health');
+        renderTrackingHealth();
+        if (showToast) {
+          toast(
+            trackingHealth.overall === 'mismatch'
+              ? 'Tracking checks found a mismatch.'
+              : 'Affiliate tracking checks complete.',
+            trackingHealth.overall === 'mismatch'
+          );
+        }
+      } catch (error) {
+        trackingHealth = null;
+        renderTrackingHealth();
+        if (showToast) toast(error.message, true);
       }
     }
 
@@ -2784,7 +2915,14 @@ function renderAffiliateAdminDashboardPage() {
     });
     $('adminKey').addEventListener('keydown', event => { if (event.key === 'Enter') $('unlockAdmin').click(); });
     $('signOut').addEventListener('click', lockAdmin);
-    $('refreshAll').addEventListener('click', () => Promise.all([loadAffiliates(true), loadAppleImports(false), loadAlerts(false), loadPayouts(false)]));
+    $('refreshAll').addEventListener('click', () => Promise.all([
+      loadAffiliates(true),
+      loadAppleImports(false),
+      loadAlerts(false),
+      loadPayouts(false),
+      loadTrackingHealth(false),
+    ]));
+    $('loadTrackingHealth').addEventListener('click', () => loadTrackingHealth(true));
     $('syncAppleOffers').addEventListener('click', () => loadAppleImports(true));
     $('toggleInactiveAppleImports').addEventListener('click', () => {
       showInactiveAppleImports = !showInactiveAppleImports;
@@ -2930,6 +3068,33 @@ export function createAffiliateRouter(pool, options = {}) {
         options.appClipBundleId ||
         process.env.AFFILIATE_APP_CLIP_BUNDLE_ID ||
         'com.bhernaurd.TheAgora.Clip',
+    });
+
+  const trackingHealthService =
+    options.trackingHealthService ||
+    createAffiliateTrackingHealthService({
+      pool,
+      projectPublishedDashboard: async (affiliate) => {
+        const projected = await scopePartnerDashboard(pool, {
+          success: true,
+          data: {
+            affiliate: {
+              customCode: affiliate.normalized_code,
+            },
+            range: {
+              start: '2000-01-01',
+              endExclusive: '2999-01-01',
+            },
+            overview: {},
+            breakdown: {
+              subscriberMetrics: {},
+              performance: {},
+            },
+            reconciliation: {},
+          },
+        });
+        return projected?.data || {};
+      },
     });
 
   async function loadAppStoreConnectImports({
@@ -3483,6 +3648,16 @@ export function createAffiliateRouter(pool, options = {}) {
         ...result,
         reconciliation,
       });
+    } catch (error) {
+      return jsonError(res, error);
+    }
+  });
+
+  router.get('/api/admin/affiliate-tracking-health', adminOnly, async (req, res) => {
+    try {
+      const includeInactive = String(req.query?.includeInactive || '').toLowerCase() === 'true';
+      const health = await trackingHealthService.getHealth({ includeInactive });
+      return res.json({ success: true, ...health });
     } catch (error) {
       return jsonError(res, error);
     }
