@@ -126,6 +126,78 @@ summary AS (
     COUNT(*) FILTER (WHERE event_name = 'report_generation_failed') AS report_generation_failures
   FROM events
 ),
+learn_summary AS (
+  SELECT
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_hub_viewed') AS learn_hub_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_card_opened' AND metadata->>'feature' = 'learn_philosophy') AS learn_philosophy_opened_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_item_completed' AND metadata->>'feature' = 'learn_philosophy') AS learn_philosophy_completed_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_card_opened' AND metadata->>'feature' = 'thought_lab') AS thought_lab_opened_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_item_completed' AND metadata->>'feature' = 'thought_lab') AS thought_lab_completed_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_card_opened' AND metadata->>'feature' = 'modern_cases') AS modern_cases_opened_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_item_completed' AND metadata->>'feature' = 'modern_cases') AS modern_cases_completed_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_card_opened' AND metadata->>'feature' = 'where_do_you_stand') AS stance_opened_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_item_completed' AND metadata->>'feature' = 'where_do_you_stand') AS stance_completed_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_card_opened' AND metadata->>'feature' = 'mirror') AS mirror_opened_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'mirror_questionnaire_started') AS mirror_questionnaire_started_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'mirror_questionnaire_completed') AS mirror_questionnaire_completed_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'mirror_analysis_read_depth'
+        AND CASE
+          WHEN COALESCE(metadata->>'depth', '') ~ '^[0-9]+$'
+            THEN (metadata->>'depth')::integer
+          ELSE 0
+        END >= 50
+    ) AS mirror_readers_50_users,
+    COUNT(*) FILTER (WHERE event_name = 'mirror_analysis_failed') AS mirror_analysis_failures
+  FROM events
+),
+mirror_completion_summary AS (
+  SELECT
+    COUNT(DISTINCT s.account_id) FILTER (WHERE s.cycle_number = 1) AS mirror_1_completed,
+    COUNT(DISTINCT s.account_id) FILTER (WHERE s.cycle_number = 2) AS mirror_2_completed,
+    COUNT(DISTINCT s.account_id) FILTER (WHERE s.cycle_number = 3) AS mirror_3_completed
+  FROM account_mirror_snapshots s
+  CROSS JOIN bounds b
+  WHERE s.generated_at >= b.start_time
+    AND s.generated_at < b.end_time
+    AND NOT EXISTS (
+      SELECT 1
+      FROM excluded_accounts ea
+      WHERE ea.account_id = s.account_id
+    )
+),
+mirror_second_eligible AS (
+  SELECT DISTINCT c.account_id
+  FROM account_mirror_cycles c
+  CROSS JOIN bounds b
+  WHERE c.cycle_number = 2
+    AND c.questionnaire_eligible_at < b.end_time
+    AND NOT EXISTS (
+      SELECT 1
+      FROM excluded_accounts ea
+      WHERE ea.account_id = c.account_id
+    )
+),
+mirror_second_completed AS (
+  SELECT DISTINCT s.account_id
+  FROM account_mirror_snapshots s
+  CROSS JOIN bounds b
+  WHERE s.cycle_number = 2
+    AND s.generated_at < b.end_time
+    AND NOT EXISTS (
+      SELECT 1
+      FROM excluded_accounts ea
+      WHERE ea.account_id = s.account_id
+    )
+),
+mirror_return_summary AS (
+  SELECT
+    COUNT(*) AS mirror_2_eligible,
+    COUNT(completed.account_id) AS mirror_2_returned
+  FROM mirror_second_eligible eligible
+  LEFT JOIN mirror_second_completed completed
+    USING (account_id)
+),
 flow_conversion AS (
   SELECT (SELECT COUNT(*) FROM philosopher_flows) AS philosopher_flows,
          (SELECT COUNT(*) FROM matched_flows) AS matched_flows
@@ -191,11 +263,12 @@ seven_day AS (
 report_label AS (SELECT TO_CHAR(report_date, 'FMDay, FMMonth DD, YYYY') AS label FROM params)
 SELECT rl.label AS report_date_label,
   a.daily_active_users, a.new_users, (a.daily_active_users - a.new_users) AS returning_users,
-  s.*, fc.philosopher_flows, fc.matched_flows, r.ranked_debates, r.ranked_users,
+  s.*, ls.*, mcs.*, mrs.*, fc.philosopher_flows, fc.matched_flows, r.ranked_debates, r.ranked_users,
   ps.paid_pro, ps.trial_pro, t.raw_events, t.account_linked_events,
   t.philosopher_missing_flow, t.normal_starts_missing_flow,
   sd.active_7d, sd.previous_active_7d, ROUND(sd.avg_dau_7d, 1) AS avg_dau_7d
-FROM report_label rl CROSS JOIN activity a CROSS JOIN summary s CROSS JOIN flow_conversion fc
+FROM report_label rl CROSS JOIN activity a CROSS JOIN summary s CROSS JOIN learn_summary ls
+CROSS JOIN mirror_completion_summary mcs CROSS JOIN mirror_return_summary mrs CROSS JOIN flow_conversion fc
 CROSS JOIN ranked r CROSS JOIN pro_summary ps CROSS JOIN tracking t CROSS JOIN seven_day sd;
 `;
 
@@ -374,6 +447,8 @@ function trackingWarnings(row) {
   if (missingStart > 0) warnings.push(`${missingStart} normal debate start${missingStart === 1 ? '' : 's'} missing flowId.`);
   const reportFailures = toNumber(row.report_generation_failures);
   if (reportFailures > 0) warnings.push(`${reportFailures} debate report generation failure${reportFailures === 1 ? '' : 's'} recorded.`);
+  const mirrorFailures = toNumber(row.mirror_analysis_failures);
+  if (mirrorFailures > 0) warnings.push(`${mirrorFailures} Mirror analysis failure${mirrorFailures === 1 ? '' : 's'} recorded.`);
   return warnings;
 }
 
@@ -413,6 +488,19 @@ async function main() {
       `🏛️ <b>The Agora Daily Report</b>`, `<b>${row.report_date_label}</b>`, ``,
       `<b>USERS</b>`, `${toNumber(row.daily_active_users)} active • ${toNumber(row.new_users)} new • ${toNumber(row.returning_users)} returning`, ``,
       `<b>DAILY CHALLENGE</b>`, `${toNumber(row.dc_viewers)} viewed • ${toNumber(row.dc_starters)} started • ${toNumber(row.dc_completers)} completed`, ``,
+      `<b>LEARN</b>`,
+      `Learn Hub: ${toNumber(row.learn_hub_users)} ${toNumber(row.learn_hub_users) === 1 ? 'user' : 'users'}`,
+      `Learn Philosophy: ${toNumber(row.learn_philosophy_opened_users)} opened • ${toNumber(row.learn_philosophy_completed_users)} completed`,
+      `Thought Experiment Lab: ${toNumber(row.thought_lab_opened_users)} opened • ${toNumber(row.thought_lab_completed_users)} completed`,
+      `Modern Cases: ${toNumber(row.modern_cases_opened_users)} opened • ${toNumber(row.modern_cases_completed_users)} completed`,
+      `Where Do You Stand?: ${toNumber(row.stance_opened_users)} opened • ${toNumber(row.stance_completed_users)} completed`, ``,
+      `<b>THE MIRROR</b>`,
+      `${toNumber(row.mirror_opened_users)} opened • ${toNumber(row.mirror_questionnaire_started_users)} questionnaire starts • ${toNumber(row.mirror_questionnaire_completed_users)} submitted`,
+      `Mirror #1 completed: ${toNumber(row.mirror_1_completed)}`,
+      `Mirror #2 completed: ${toNumber(row.mirror_2_completed)}`,
+      `Mirror #3 completed: ${toNumber(row.mirror_3_completed)}`,
+      `50%+ readers: ${toNumber(row.mirror_readers_50_users)}`,
+      `Starting Mirror → Mirror #2: ${toNumber(row.mirror_2_returned)}/${toNumber(row.mirror_2_eligible)} (${percent(row.mirror_2_returned, row.mirror_2_eligible)})`, ``,
       `<b>NORMAL DEBATES</b>`,
       stageLine('Philosopher selected', row.philosopher_times, row.philosopher_users),
       stageLine('Topic selected', row.topic_times, row.topic_users),
