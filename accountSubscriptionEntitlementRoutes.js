@@ -129,14 +129,20 @@ function requireClosedTestActivation(
         );
     }
 
-    const expectedBuild =
+    const expectedBuilds =
         typeof androidBuild === 'string'
-            ? androidBuild.trim()
-            : '';
+            ? androidBuild
+                .split(',')
+                .map((value) => value.trim())
+                .filter(Boolean)
+            : [];
+
+    const providedBuild =
+        String(req.get('X-Android-Build') || '').trim();
 
     if (
-        expectedBuild &&
-        String(req.get('X-Android-Build') || '').trim() !== expectedBuild
+        expectedBuilds.length > 0 &&
+        !expectedBuilds.includes(providedBuild)
     ) {
         fail(
             'invalid_closed_test_build',
