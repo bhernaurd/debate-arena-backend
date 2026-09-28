@@ -796,6 +796,7 @@ async function main() {
       `<b>THE MIRROR</b>`,
       `${toNumber(row.mirror_opened_users)} users opened`,
       `Questionnaire (server): ${toNumber(row.mirror_server_questionnaire_starts)} started • ${toNumber(row.mirror_server_questionnaire_submissions)} submitted`,
+      `Questionnaire events (client): ${toNumber(row.mirror_questionnaire_started_events)} started • ${toNumber(row.mirror_questionnaire_completed_events)} submitted`,
       `Generation attempts (client): ${toNumber(row.mirror_initial_generation_attempts)} initial • ${toNumber(row.mirror_retry_generation_attempts)} retries`,
       `Analysis (server): ${toNumber(row.mirror_server_completed_total)} completed • ${toNumber(row.mirror_server_failures)} failed`,
       `Client observations: ${toNumber(row.mirror_analysis_generated_events)} generated • ${toNumber(row.mirror_analysis_failures)} failed • ${toNumber(row.mirror_completed_events)} completed`,
