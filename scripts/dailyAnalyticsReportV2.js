@@ -437,9 +437,8 @@ mirror_cycle_summary AS (
         AND c.questionnaire_completed_at < b.end_time
     ) AS mirror_server_questionnaire_submissions,
     COUNT(*) FILTER (
-      WHERE c.failed_at >= b.start_time
-        AND c.failed_at < b.end_time
-    ) AS mirror_server_failures
+      WHERE c.status = 'failed'
+    ) AS mirror_server_current_failed_cycles
   FROM account_mirror_cycles c
   CROSS JOIN bounds b
   WHERE NOT EXISTS (
@@ -727,8 +726,10 @@ function trackingWarnings(row) {
   if (missingStart > 0) warnings.push(`${missingStart} normal debate start${missingStart === 1 ? '' : 's'} missing flowId.`);
   const reportFailures = toNumber(row.report_generation_failures);
   if (reportFailures > 0) warnings.push(`${reportFailures} debate report generation failure${reportFailures === 1 ? '' : 's'} recorded.`);
-  const mirrorFailures = toNumber(row.mirror_server_failures);
-  if (mirrorFailures > 0) warnings.push(`${mirrorFailures} server-confirmed Mirror analysis failure${mirrorFailures === 1 ? '' : 's'} recorded.`);
+  const mirrorFailures = toNumber(row.mirror_analysis_failures);
+  if (mirrorFailures > 0) warnings.push(`${mirrorFailures} Mirror generation failure event${mirrorFailures === 1 ? '' : 's'} recorded.`);
+  const currentFailedMirrorCycles = toNumber(row.mirror_server_current_failed_cycles);
+  if (currentFailedMirrorCycles > 0) warnings.push(`${currentFailedMirrorCycles} Mirror cycle${currentFailedMirrorCycles === 1 ? '' : 's'} currently remain failed in server state.`);
 
   const learnMissingFeature = toNumber(row.learn_events_missing_feature);
   const learnUnknownFeature = toNumber(row.learn_events_unknown_feature);
@@ -795,11 +796,12 @@ async function main() {
       `↳ ${toNumber(row.stance_item_starts)} new position starts • ${toNumber(row.stance_item_completions)} positions completed • ${toNumber(row.stance_course_completions)} full-set finishes`, ``,
       `<b>THE MIRROR</b>`,
       `${toNumber(row.mirror_opened_users)} users opened`,
-      `Questionnaire (server): ${toNumber(row.mirror_server_questionnaire_starts)} started • ${toNumber(row.mirror_server_questionnaire_submissions)} submitted`,
-      `Questionnaire events (client): ${toNumber(row.mirror_questionnaire_started_events)} started • ${toNumber(row.mirror_questionnaire_completed_events)} submitted`,
+      `Questionnaire: ${toNumber(row.mirror_questionnaire_started_events)} opened • ${toNumber(row.mirror_server_questionnaire_starts)} first-answer starts • ${toNumber(row.mirror_server_questionnaire_submissions)} submitted`,
+      `Questionnaire submit events (client): ${toNumber(row.mirror_questionnaire_completed_events)}`,
       `Generation attempts (client): ${toNumber(row.mirror_initial_generation_attempts)} initial • ${toNumber(row.mirror_retry_generation_attempts)} retries`,
-      `Analysis (server): ${toNumber(row.mirror_server_completed_total)} completed • ${toNumber(row.mirror_server_failures)} failed`,
-      `Client observations: ${toNumber(row.mirror_analysis_generated_events)} generated • ${toNumber(row.mirror_analysis_failures)} failed • ${toNumber(row.mirror_completed_events)} completed`,
+      `Analysis (server): ${toNumber(row.mirror_server_completed_total)} completed`,
+      `Failures: ${toNumber(row.mirror_analysis_failures)} client failure events • ${toNumber(row.mirror_server_current_failed_cycles)} cycles currently failed on server`,
+      `Client observations: ${toNumber(row.mirror_analysis_generated_events)} generated • ${toNumber(row.mirror_completed_events)} completed`,
       `Reading: ${toNumber(row.mirror_readers_50_users)} Mirror reports reached 50% • ${toNumber(row.mirror_readers_100_users)} reached 100%`,
       `Engagement: ${toNumber(row.mirror_detail_expansion_events)} detail expands • ${toNumber(row.mirror_evidence_open_events)} evidence opens • ${toNumber(row.mirror_recommendation_tap_events)} recommendation taps`,
       `Next Mirror eligible seen: ${toNumber(row.mirror_next_eligible_seen_events)}`,
