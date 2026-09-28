@@ -128,18 +128,108 @@ summary AS (
 ),
 learn_summary AS (
   SELECT
-    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_hub_viewed') AS learn_hub_users,
-    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_card_opened' AND metadata->>'feature' = 'learn_philosophy') AS learn_philosophy_opened_users,
-    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_item_completed' AND metadata->>'feature' = 'learn_philosophy') AS learn_philosophy_completed_users,
-    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_card_opened' AND metadata->>'feature' = 'thought_lab') AS thought_lab_opened_users,
-    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_item_completed' AND metadata->>'feature' = 'thought_lab') AS thought_lab_completed_users,
-    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_card_opened' AND metadata->>'feature' = 'modern_cases') AS modern_cases_opened_users,
-    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_item_completed' AND metadata->>'feature' = 'modern_cases') AS modern_cases_completed_users,
-    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_card_opened' AND metadata->>'feature' = 'where_do_you_stand') AS stance_opened_users,
-    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_item_completed' AND metadata->>'feature' = 'where_do_you_stand') AS stance_completed_users,
-    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'learn_card_opened' AND metadata->>'feature' = 'mirror') AS mirror_opened_users,
-    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'mirror_questionnaire_started') AS mirror_questionnaire_started_users,
-    COUNT(DISTINCT analytics_user_key) FILTER (WHERE event_name = 'mirror_questionnaire_completed') AS mirror_questionnaire_completed_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'learn_hub_viewed'
+    ) AS learn_hub_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'learn_card_opened'
+        AND metadata->>'feature' = 'learn_philosophy'
+    ) AS learn_philosophy_opened_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'learn_item_started'
+        AND metadata->>'feature' = 'learn_philosophy'
+    ) AS learn_philosophy_started_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'learn_item_completed'
+        AND metadata->>'feature' = 'learn_philosophy'
+    ) AS learn_philosophy_completed_users,
+    COUNT(*) FILTER (
+      WHERE event_name = 'learn_item_completed'
+        AND metadata->>'feature' = 'learn_philosophy'
+    ) AS learn_philosophy_item_completions,
+    COUNT(*) FILTER (
+      WHERE event_name = 'learn_course_completed'
+        AND metadata->>'feature' = 'learn_philosophy'
+    ) AS learn_philosophy_course_completions,
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'learn_card_opened'
+        AND metadata->>'feature' = 'thought_lab'
+    ) AS thought_lab_opened_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'learn_item_started'
+        AND metadata->>'feature' = 'thought_lab'
+    ) AS thought_lab_started_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'learn_item_completed'
+        AND metadata->>'feature' = 'thought_lab'
+    ) AS thought_lab_completed_users,
+    COUNT(*) FILTER (
+      WHERE event_name = 'learn_item_completed'
+        AND metadata->>'feature' = 'thought_lab'
+    ) AS thought_lab_item_completions,
+    COUNT(*) FILTER (
+      WHERE event_name = 'learn_course_completed'
+        AND metadata->>'feature' = 'thought_lab'
+    ) AS thought_lab_course_completions,
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'learn_card_opened'
+        AND metadata->>'feature' = 'modern_cases'
+    ) AS modern_cases_opened_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'learn_item_started'
+        AND metadata->>'feature' = 'modern_cases'
+    ) AS modern_cases_started_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'learn_item_completed'
+        AND metadata->>'feature' = 'modern_cases'
+    ) AS modern_cases_completed_users,
+    COUNT(*) FILTER (
+      WHERE event_name = 'learn_item_completed'
+        AND metadata->>'feature' = 'modern_cases'
+    ) AS modern_cases_item_completions,
+    COUNT(*) FILTER (
+      WHERE event_name = 'learn_course_completed'
+        AND metadata->>'feature' = 'modern_cases'
+    ) AS modern_cases_course_completions,
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'learn_card_opened'
+        AND metadata->>'feature' = 'where_do_you_stand'
+    ) AS stance_opened_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'learn_item_started'
+        AND metadata->>'feature' = 'where_do_you_stand'
+    ) AS stance_started_users,
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'learn_item_completed'
+        AND metadata->>'feature' = 'where_do_you_stand'
+    ) AS stance_completed_users,
+    COUNT(*) FILTER (
+      WHERE event_name = 'learn_item_completed'
+        AND metadata->>'feature' = 'where_do_you_stand'
+    ) AS stance_item_completions,
+    COUNT(*) FILTER (
+      WHERE event_name = 'learn_course_completed'
+        AND metadata->>'feature' = 'where_do_you_stand'
+    ) AS stance_course_completions,
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'learn_card_opened'
+        AND metadata->>'feature' = 'mirror'
+    ) AS mirror_opened_users,
+    COUNT(*) FILTER (
+      WHERE event_name = 'mirror_questionnaire_started'
+    ) AS mirror_questionnaire_started_events,
+    COUNT(*) FILTER (
+      WHERE event_name = 'mirror_questionnaire_completed'
+    ) AS mirror_questionnaire_completed_events,
+    COUNT(*) FILTER (
+      WHERE event_name = 'mirror_analysis_generation_started'
+    ) AS mirror_generation_attempts,
+    COUNT(*) FILTER (
+      WHERE event_name = 'mirror_analysis_generated'
+    ) AS mirror_analysis_generated_events,
+    COUNT(*) FILTER (
+      WHERE event_name = 'mirror_analysis_failed'
+    ) AS mirror_analysis_failures,
     COUNT(DISTINCT analytics_user_key) FILTER (
       WHERE event_name = 'mirror_analysis_read_depth'
         AND CASE
@@ -148,7 +238,66 @@ learn_summary AS (
           ELSE 0
         END >= 50
     ) AS mirror_readers_50_users,
-    COUNT(*) FILTER (WHERE event_name = 'mirror_analysis_failed') AS mirror_analysis_failures
+    COUNT(DISTINCT analytics_user_key) FILTER (
+      WHERE event_name = 'mirror_analysis_read_depth'
+        AND COALESCE(metadata->>'depth', '') = '100'
+    ) AS mirror_readers_100_users,
+    COUNT(*) FILTER (
+      WHERE event_name = 'mirror_detail_expanded'
+    ) AS mirror_detail_expansion_events,
+    COUNT(*) FILTER (
+      WHERE event_name = 'mirror_evidence_opened'
+    ) AS mirror_evidence_open_events,
+    COUNT(*) FILTER (
+      WHERE event_name = 'mirror_recommendation_tapped'
+    ) AS mirror_recommendation_tap_events,
+    COUNT(*) FILTER (
+      WHERE event_name = 'mirror_next_eligible_seen'
+    ) AS mirror_next_eligible_seen_events,
+    COUNT(*) FILTER (
+      WHERE event_name = 'mirror_completed'
+    ) AS mirror_completed_events,
+
+    COUNT(*) FILTER (
+      WHERE event_name IN (
+        'learn_card_opened',
+        'learn_item_started',
+        'learn_item_completed',
+        'learn_course_completed'
+      )
+        AND NULLIF(BTRIM(metadata->>'feature'), '') IS NULL
+    ) AS learn_events_missing_feature,
+    COUNT(*) FILTER (
+      WHERE event_name IN (
+        'learn_card_opened',
+        'learn_item_started',
+        'learn_item_completed',
+        'learn_course_completed'
+      )
+        AND COALESCE(metadata->>'feature', '') NOT IN (
+          'learn_philosophy',
+          'thought_lab',
+          'modern_cases',
+          'where_do_you_stand',
+          'mirror'
+        )
+    ) AS learn_events_unknown_feature,
+    COUNT(*) FILTER (
+      WHERE event_name IN ('learn_item_started', 'learn_item_completed')
+        AND NULLIF(BTRIM(metadata->>'itemId'), '') IS NULL
+    ) AS learn_item_events_missing_id,
+    COUNT(*) FILTER (
+      WHERE event_name = 'learn_course_completed'
+        AND NULLIF(BTRIM(metadata->>'courseId'), '') IS NULL
+    ) AS learn_course_events_missing_id,
+    COUNT(*) FILTER (
+      WHERE event_name LIKE 'mirror_%'
+        AND NULLIF(BTRIM(metadata->>'cycleId'), '') IS NULL
+    ) AS mirror_events_missing_cycle,
+    COUNT(*) FILTER (
+      WHERE event_name LIKE 'mirror_%'
+        AND COALESCE(metadata->>'mirrorNumber', '') !~ '^[1-9][0-9]*$'
+    ) AS mirror_events_invalid_number
   FROM events
 ),
 mirror_completion_summary AS (
@@ -449,6 +598,21 @@ function trackingWarnings(row) {
   if (reportFailures > 0) warnings.push(`${reportFailures} debate report generation failure${reportFailures === 1 ? '' : 's'} recorded.`);
   const mirrorFailures = toNumber(row.mirror_analysis_failures);
   if (mirrorFailures > 0) warnings.push(`${mirrorFailures} Mirror analysis failure${mirrorFailures === 1 ? '' : 's'} recorded.`);
+
+  const learnMissingFeature = toNumber(row.learn_events_missing_feature);
+  const learnUnknownFeature = toNumber(row.learn_events_unknown_feature);
+  const learnMissingItem = toNumber(row.learn_item_events_missing_id);
+  const learnMissingCourse = toNumber(row.learn_course_events_missing_id);
+  const mirrorMissingCycle = toNumber(row.mirror_events_missing_cycle);
+  const mirrorInvalidNumber = toNumber(row.mirror_events_invalid_number);
+
+  if (learnMissingFeature > 0) warnings.push(`${learnMissingFeature} Learn event${learnMissingFeature === 1 ? '' : 's'} missing feature metadata.`);
+  if (learnUnknownFeature > 0) warnings.push(`${learnUnknownFeature} Learn event${learnUnknownFeature === 1 ? '' : 's'} used an unknown feature value.`);
+  if (learnMissingItem > 0) warnings.push(`${learnMissingItem} Learn item event${learnMissingItem === 1 ? '' : 's'} missing itemId.`);
+  if (learnMissingCourse > 0) warnings.push(`${learnMissingCourse} Learn course completion${learnMissingCourse === 1 ? '' : 's'} missing courseId.`);
+  if (mirrorMissingCycle > 0) warnings.push(`${mirrorMissingCycle} Mirror event${mirrorMissingCycle === 1 ? '' : 's'} missing cycleId.`);
+  if (mirrorInvalidNumber > 0) warnings.push(`${mirrorInvalidNumber} Mirror event${mirrorInvalidNumber === 1 ? '' : 's'} missing a valid mirrorNumber.`);
+
   return warnings;
 }
 
@@ -490,16 +654,22 @@ async function main() {
       `<b>DAILY CHALLENGE</b>`, `${toNumber(row.dc_viewers)} viewed • ${toNumber(row.dc_starters)} started • ${toNumber(row.dc_completers)} completed`, ``,
       `<b>LEARN</b>`,
       `Learn Hub: ${toNumber(row.learn_hub_users)} ${toNumber(row.learn_hub_users) === 1 ? 'user' : 'users'}`,
-      `Learn Philosophy: ${toNumber(row.learn_philosophy_opened_users)} opened • ${toNumber(row.learn_philosophy_completed_users)} completed`,
-      `Thought Experiment Lab: ${toNumber(row.thought_lab_opened_users)} opened • ${toNumber(row.thought_lab_completed_users)} completed`,
-      `Modern Cases: ${toNumber(row.modern_cases_opened_users)} opened • ${toNumber(row.modern_cases_completed_users)} completed`,
-      `Where Do You Stand?: ${toNumber(row.stance_opened_users)} opened • ${toNumber(row.stance_completed_users)} completed`, ``,
+      `Learn Philosophy: ${toNumber(row.learn_philosophy_opened_users)} opened • ${toNumber(row.learn_philosophy_started_users)} started • ${toNumber(row.learn_philosophy_completed_users)} completed`,
+      `↳ ${toNumber(row.learn_philosophy_item_completions)} items completed • ${toNumber(row.learn_philosophy_course_completions)} courses finished`,
+      `Thought Experiment Lab: ${toNumber(row.thought_lab_opened_users)} opened • ${toNumber(row.thought_lab_started_users)} started • ${toNumber(row.thought_lab_completed_users)} completed`,
+      `↳ ${toNumber(row.thought_lab_item_completions)} experiments completed • ${toNumber(row.thought_lab_course_completions)} full-lab finishes`,
+      `Modern Cases: ${toNumber(row.modern_cases_opened_users)} opened • ${toNumber(row.modern_cases_started_users)} started • ${toNumber(row.modern_cases_completed_users)} completed`,
+      `↳ ${toNumber(row.modern_cases_item_completions)} cases completed • ${toNumber(row.modern_cases_course_completions)} full-set finishes`,
+      `Where Do You Stand?: ${toNumber(row.stance_opened_users)} opened • ${toNumber(row.stance_started_users)} started • ${toNumber(row.stance_completed_users)} completed`,
+      `↳ ${toNumber(row.stance_item_completions)} positions completed • ${toNumber(row.stance_course_completions)} full-set finishes`, ``,
       `<b>THE MIRROR</b>`,
-      `${toNumber(row.mirror_opened_users)} opened • ${toNumber(row.mirror_questionnaire_started_users)} questionnaire starts • ${toNumber(row.mirror_questionnaire_completed_users)} submitted`,
-      `Mirror #1 completed: ${toNumber(row.mirror_1_completed)}`,
-      `Mirror #2 completed: ${toNumber(row.mirror_2_completed)}`,
-      `Mirror #3 completed: ${toNumber(row.mirror_3_completed)}`,
-      `50%+ readers: ${toNumber(row.mirror_readers_50_users)}`,
+      `${toNumber(row.mirror_opened_users)} opened`,
+      `Questionnaire: ${toNumber(row.mirror_questionnaire_started_events)} started • ${toNumber(row.mirror_questionnaire_completed_events)} submitted`,
+      `Generation: ${toNumber(row.mirror_generation_attempts)} attempts • ${toNumber(row.mirror_analysis_generated_events)} generated • ${toNumber(row.mirror_analysis_failures)} failed`,
+      `Reading: ${toNumber(row.mirror_readers_50_users)} reached 50% • ${toNumber(row.mirror_readers_100_users)} reached 100%`,
+      `Engagement: ${toNumber(row.mirror_detail_expansion_events)} detail expands • ${toNumber(row.mirror_evidence_open_events)} evidence opens • ${toNumber(row.mirror_recommendation_tap_events)} recommendation taps`,
+      `Next Mirror eligible seen: ${toNumber(row.mirror_next_eligible_seen_events)} • client completion events: ${toNumber(row.mirror_completed_events)}`,
+      `Server completions: #1 ${toNumber(row.mirror_1_completed)} • #2 ${toNumber(row.mirror_2_completed)} • #3 ${toNumber(row.mirror_3_completed)}`,
       `Starting Mirror → Mirror #2: ${toNumber(row.mirror_2_returned)}/${toNumber(row.mirror_2_eligible)} (${percent(row.mirror_2_returned, row.mirror_2_eligible)})`, ``,
       `<b>NORMAL DEBATES</b>`,
       stageLine('Philosopher selected', row.philosopher_times, row.philosopher_users),
