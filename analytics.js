@@ -244,7 +244,8 @@ export function createAnalyticsRouter(pool, options = {}) {
 
     await pool.query(
       `INSERT INTO user_events (user_id, event_name, metadata)
-       VALUES ($1, $2, $3::jsonb)`,
+       VALUES ($1, $2, $3::jsonb)
+       ON CONFLICT DO NOTHING`,
       [userId, eventName, JSON.stringify(enrichedMetadata)]
     );
   }
