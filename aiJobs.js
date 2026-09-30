@@ -130,9 +130,11 @@ const BALANCED_STANDARD_OUTPUT_POLICY = Object.freeze({
     // rather than an error threshold.
     screenshotMaximumBodyWords: 135,
 
-    // Lower than the generic 900-token debate budget, but high enough to let
-    // Claude finish a concise response naturally instead of truncating it.
-    maxTokens: 240,
+    // Keep the response mobile-friendly through the word-count instructions,
+    // but leave enough output headroom for Claude to finish the final SCORE
+    // sentence. Production logs showed 240 tokens could truncate Balanced
+    // replies mid-analysis even when the requested body stayed concise.
+    maxTokens: 360,
 });
 
 const STANDARD_DEBATE_JOB_TYPES = new Set([
