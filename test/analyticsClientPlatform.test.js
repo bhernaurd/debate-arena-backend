@@ -8,7 +8,7 @@ import {
   createAnalyticsRouter,
 } from '../analytics.js';
 
-function createPoolRecorder() {
+function createPoolRecorder(subscriptionRows = []) {
   const eventRows = [];
 
   return {
@@ -16,7 +16,7 @@ function createPoolRecorder() {
 
     async query(text, params = []) {
       if (text.includes('FROM subscription_entitlements se')) {
-        return { rows: [] };
+        return { rows: subscriptionRows };
       }
 
       if (text.includes('INSERT INTO user_events')) {
@@ -200,4 +200,54 @@ test('legacy iOS app-open analytics are tagged as iOS by the backend', async () 
     pool.eventRows[0].metadata.clientPlatformSource,
     'ios-header-fallback'
   );
+});
+
+
+test('Google Play Pro is classified as paid Pro in Android analytics metadata', async () => {
+  const future = new Date(Date.now() + 60_000).toISOString();
+  const pool = createPoolRecorder([
+    {
+      status: 'active',
+      is_trial: false,
+      product_id: 'agora_pro_monthly',
+      environment: 'Production',
+      expires_date: future,
+      grace_period_expires_date: null,
+      revocation_date: null,
+      auto_renew_enabled: true,
+      pro_access_source: 'google_play',
+      is_recurring_pro: true,
+      is_lifetime_pro: false,
+      pricing_cohort: 'standard',
+      subscription_store: 'google_play',
+    },
+  ]);
+
+  await withAnalyticsServer(pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/event`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Installation-ID': 'android-installation-456',
+        'X-Client-Platform': 'android',
+        'X-Android-Version': '4.3',
+        'X-Android-Build': '6',
+      },
+      body: JSON.stringify({
+        userId: 'android-installation-456',
+        eventName: 'paywall_viewed',
+        metadata: {},
+      }),
+    });
+
+    assert.equal(response.status, 200);
+  });
+
+  assert.equal(pool.eventRows.length, 1);
+  const metadata = pool.eventRows[0].metadata;
+  assert.equal(metadata.clientPlatform, 'android');
+  assert.equal(metadata.analyticsAccessTier, 'paid_pro');
+  assert.equal(metadata.subscriptionStore, 'google_play');
+  assert.equal(metadata.subscriptionAccessSource, 'google_play');
+  assert.equal(metadata.revenueEligible, true);
 });
