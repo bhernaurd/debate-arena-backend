@@ -1,0 +1,203 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+
+import express from 'express';
+
+import {
+  analyticsClientContextFromHeaders,
+  createAnalyticsRouter,
+} from '../analytics.js';
+
+function createPoolRecorder() {
+  const eventRows = [];
+
+  return {
+    eventRows,
+
+    async query(text, params = []) {
+      if (text.includes('FROM subscription_entitlements se')) {
+        return { rows: [] };
+      }
+
+      if (text.includes('INSERT INTO user_events')) {
+        eventRows.push({
+          userId: params[0],
+          eventName: params[1],
+          metadata: JSON.parse(params[2]),
+        });
+        return { rows: [], rowCount: 1 };
+      }
+
+      if (text.includes('INSERT INTO user_activity_days')) {
+        return { rows: [], rowCount: 1 };
+      }
+
+      throw new Error(
+        `Unexpected analytics test query: ${text.slice(0, 120)}`
+      );
+    },
+  };
+}
+
+async function withAnalyticsServer(pool, work) {
+  const app = express();
+  app.use(
+    '/analytics',
+    createAnalyticsRouter(pool, {
+      adminKey: 'test-admin-key',
+    })
+  );
+
+  const server = await new Promise((resolve) => {
+    const listening = app.listen(0, '127.0.0.1', () => {
+      resolve(listening);
+    });
+  });
+
+  try {
+    const address = server.address();
+    await work(
+      `http://127.0.0.1:${address.port}/analytics`
+    );
+  } finally {
+    await new Promise((resolve, reject) => {
+      server.close((error) => {
+        if (error) reject(error);
+        else resolve();
+      });
+    });
+  }
+}
+
+test('Android analytics context uses the explicit platform and Android build headers', () => {
+  assert.deepEqual(
+    analyticsClientContextFromHeaders({
+      clientPlatform: 'android',
+      androidVersion: '4.3',
+      androidBuild: '6',
+    }),
+    {
+      clientPlatform: 'android',
+      clientVersion: '4.3',
+      clientBuild: '6',
+      clientPlatformSource: 'x-client-platform',
+      clientAnalyticsVersion: 'platform_v1',
+    }
+  );
+});
+
+test('iOS analytics context uses the explicit platform and iOS build headers', () => {
+  assert.deepEqual(
+    analyticsClientContextFromHeaders({
+      clientPlatform: 'ios',
+      iosVersion: '4.3',
+      iosBuild: '812',
+    }),
+    {
+      clientPlatform: 'ios',
+      clientVersion: '4.3',
+      clientBuild: '812',
+      clientPlatformSource: 'x-client-platform',
+      clientAnalyticsVersion: 'platform_v1',
+    }
+  );
+});
+
+test('legacy iOS builds are inferred from X-iOS-Build when X-Client-Platform is absent', () => {
+  assert.deepEqual(
+    analyticsClientContextFromHeaders({
+      iosBuild: '812',
+    }),
+    {
+      clientPlatform: 'ios',
+      clientVersion: null,
+      clientBuild: '812',
+      clientPlatformSource: 'ios-header-fallback',
+      clientAnalyticsVersion: 'platform_v1',
+    }
+  );
+});
+
+test('Android analytics metadata cannot spoof iOS platform identity', async () => {
+  const pool = createPoolRecorder();
+
+  await withAnalyticsServer(pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/event`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Installation-ID': 'android-installation-123',
+        'X-Client-Platform': 'android',
+        'X-Android-Version': '4.3',
+        'X-Android-Build': '6',
+      },
+      body: JSON.stringify({
+        userId: 'android-installation-123',
+        eventName: 'debate_completed',
+        metadata: {
+          clientPlatform: 'ios',
+          clientVersion: 'spoofed',
+          clientBuild: 'spoofed',
+        },
+      }),
+    });
+
+    assert.equal(response.status, 200);
+  });
+
+  assert.equal(pool.eventRows.length, 1);
+  assert.equal(
+    pool.eventRows[0].metadata.clientPlatform,
+    'android'
+  );
+  assert.equal(
+    pool.eventRows[0].metadata.clientVersion,
+    '4.3'
+  );
+  assert.equal(
+    pool.eventRows[0].metadata.clientBuild,
+    '6'
+  );
+  assert.equal(
+    pool.eventRows[0].metadata.clientPlatformSource,
+    'x-client-platform'
+  );
+});
+
+test('legacy iOS app-open analytics are tagged as iOS by the backend', async () => {
+  const pool = createPoolRecorder();
+
+  await withAnalyticsServer(pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/app-open`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Installation-ID': 'ios-installation-123',
+        'X-iOS-Build': '812',
+      },
+      body: JSON.stringify({
+        userId: 'ios-installation-123',
+      }),
+    });
+
+    assert.equal(response.status, 200);
+  });
+
+  assert.equal(pool.eventRows.length, 1);
+  assert.equal(
+    pool.eventRows[0].eventName,
+    'app_opened'
+  );
+  assert.equal(
+    pool.eventRows[0].metadata.clientPlatform,
+    'ios'
+  );
+  assert.equal(
+    pool.eventRows[0].metadata.clientBuild,
+    '812'
+  );
+  assert.equal(
+    pool.eventRows[0].metadata.clientPlatformSource,
+    'ios-header-fallback'
+  );
+});
