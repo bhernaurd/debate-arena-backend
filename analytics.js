@@ -912,6 +912,147 @@ export function createAnalyticsRouter(pool, options = {}) {
          )`
       );
 
+      const googlePlaySubscriptionsQ = pool.query(
+        `SELECT
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND is_trial = true
+               AND normalized_status IN (
+                 'trial',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_trials,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND is_trial = false
+               AND normalized_status IN (
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_paid_subscribers,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND normalized_status IN (
+                 'trial',
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_pro_access,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND product_id = 'agora_pro_monthly'
+               AND is_trial = false
+               AND normalized_status IN (
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS paid_monthly,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND product_id = 'agora_pro_yearly'
+               AND is_trial = false
+               AND normalized_status IN (
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS paid_yearly,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND COALESCE(pricing_cohort, 'unknown') =
+                   'founding_2026'
+               AND is_trial = true
+               AND normalized_status IN (
+                 'trial',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_founding_trials,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND COALESCE(pricing_cohort, 'unknown') =
+                   'founding_2026'
+               AND is_trial = false
+               AND normalized_status IN (
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_founding_paid_subscribers,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND COALESCE(pricing_cohort, 'unknown') =
+                   'standard'
+               AND is_trial = true
+               AND normalized_status IN (
+                 'trial',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_standard_trials,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND COALESCE(pricing_cohort, 'unknown') =
+                   'standard'
+               AND is_trial = false
+               AND normalized_status IN (
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_standard_paid_subscribers,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND COALESCE(pricing_cohort, 'unknown') =
+                   'unknown'
+               AND normalized_status IN (
+                 'trial',
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_unknown_cohort,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND normalized_status IN (
+                 'trial',
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+               AND auto_renew_enabled = false
+           ) AS active_auto_renew_off,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND normalized_status = 'on_hold'
+           ) AS on_hold_subscriptions,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND normalized_status = 'paused'
+           ) AS paused_subscriptions,
+           COUNT(*) FILTER (
+             WHERE test_purchase = true
+               AND normalized_status IN (
+                 'trial',
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_test_purchases
+         FROM google_play_subscription_entitlements gp
+         WHERE NOT EXISTS (
+           SELECT 1
+           FROM account_installations ai
+           INNER JOIN excluded_analytics_users x
+             ON x.user_id = ai.installation_id
+           WHERE ai.account_id = gp.account_id
+         )`
+      );
+
       const retentionQ = pool.query(
         `WITH
          ${CANONICAL_ACTIVITY_CTES},
@@ -960,6 +1101,7 @@ export function createAnalyticsRouter(pool, options = {}) {
         platformUsers,
         todayByPlatform,
         subscriptions,
+        googlePlaySubscriptions,
         retention,
       ] = await Promise.all([
         usersQ,
@@ -968,6 +1110,7 @@ export function createAnalyticsRouter(pool, options = {}) {
         platformUsersQ,
         todayByPlatformQ,
         subscriptionsQ,
+        googlePlaySubscriptionsQ,
         retentionQ,
       ]);
 
@@ -987,6 +1130,10 @@ export function createAnalyticsRouter(pool, options = {}) {
         todayByPlatform: platformRows,
         todayByTier: tier.rows[0],
         subscriptions: subscriptions.rows[0],
+        subscriptionsByStore: {
+          appStore: subscriptions.rows[0],
+          googlePlay: googlePlaySubscriptions.rows[0],
+        },
         retention: retention.rows[0],
       });
     } catch (err) {
