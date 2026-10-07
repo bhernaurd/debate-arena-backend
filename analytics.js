@@ -106,6 +106,83 @@ function sanitizeMetadata(meta) {
   return meta;
 }
 
+const ANALYTICS_CLIENT_PLATFORMS = new Set([
+  'ios',
+  'android',
+]);
+const MAX_CLIENT_HEADER_LENGTH = 100;
+
+function cleanClientHeader(value) {
+  if (typeof value !== 'string') return null;
+  const clean = value.trim().slice(0, MAX_CLIENT_HEADER_LENGTH);
+  return clean || null;
+}
+
+export function analyticsClientContextFromHeaders(headers = {}) {
+  const explicitPlatform = cleanClientHeader(
+    headers.clientPlatform
+  )?.toLowerCase() || null;
+  const iosVersion = cleanClientHeader(headers.iosVersion);
+  const iosBuild = cleanClientHeader(headers.iosBuild);
+  const androidVersion = cleanClientHeader(headers.androidVersion);
+  const androidBuild = cleanClientHeader(headers.androidBuild);
+
+  let clientPlatform = 'unknown';
+  let clientPlatformSource = 'unknown';
+
+  if (
+    explicitPlatform &&
+    ANALYTICS_CLIENT_PLATFORMS.has(explicitPlatform)
+  ) {
+    clientPlatform = explicitPlatform;
+    clientPlatformSource = 'x-client-platform';
+  } else if (!explicitPlatform) {
+    const hasIosHint = Boolean(iosVersion || iosBuild);
+    const hasAndroidHint = Boolean(
+      androidVersion || androidBuild
+    );
+
+    if (hasIosHint && !hasAndroidHint) {
+      clientPlatform = 'ios';
+      clientPlatformSource = 'ios-header-fallback';
+    } else if (hasAndroidHint && !hasIosHint) {
+      clientPlatform = 'android';
+      clientPlatformSource = 'android-header-fallback';
+    }
+  }
+
+  const clientVersion =
+    clientPlatform === 'ios'
+      ? iosVersion
+      : clientPlatform === 'android'
+        ? androidVersion
+        : null;
+  const clientBuild =
+    clientPlatform === 'ios'
+      ? iosBuild
+      : clientPlatform === 'android'
+        ? androidBuild
+        : null;
+
+  return Object.freeze({
+    clientPlatform,
+    clientVersion,
+    clientBuild,
+    clientPlatformSource,
+    clientAnalyticsVersion: 'platform_v1',
+  });
+}
+
+function analyticsClientContext(req) {
+  return analyticsClientContextFromHeaders({
+    clientPlatform: req.get('x-client-platform'),
+    iosVersion: req.get('x-ios-version'),
+    iosBuild: req.get('x-ios-build'),
+    androidVersion: req.get('x-android-version'),
+    androidBuild: req.get('x-android-build'),
+  });
+}
+
 
 export function isEntitlementUsable(row) {
   if (!row) return false;
@@ -234,12 +311,20 @@ export function createAnalyticsRouter(pool, options = {}) {
     };
   }
 
-  async function recordEvent(userId, eventName, metadata) {
+  async function recordEvent(
+    userId,
+    eventName,
+    metadata,
+    clientContext
+  ) {
     const context = await subscriptionContext(userId);
 
+    // Platform/build values are derived from request headers on the server.
+    // Spread them last so arbitrary client metadata cannot spoof the platform.
     const enrichedMetadata = {
       ...(metadata || {}),
       ...context,
+      ...(clientContext || {}),
     };
 
     await pool.query(
@@ -266,8 +351,16 @@ export function createAnalyticsRouter(pool, options = {}) {
 
       const userId = identity.userId;
 
+      const clientContext =
+        analyticsClientContext(req);
+
       await recordActiveDay(userId);
-      await recordEvent(userId, 'app_opened', null);
+      await recordEvent(
+        userId,
+        'app_opened',
+        null,
+        clientContext
+      );
 
       return res.json({ success: true });
     } catch (err) {
@@ -312,7 +405,15 @@ export function createAnalyticsRouter(pool, options = {}) {
         });
       }
 
-      await recordEvent(userId, eventName, cleanMeta);
+      const clientContext =
+        analyticsClientContext(req);
+
+      await recordEvent(
+        userId,
+        eventName,
+        cleanMeta,
+        clientContext
+      );
       await recordActiveDay(userId);
 
       return res.json({ success: true });
@@ -421,6 +522,133 @@ export function createAnalyticsRouter(pool, options = {}) {
            COUNT(*) FILTER (WHERE tier = 'legacy_unknown') AS unknown_dau
          FROM ranked
          WHERE rn = 1`,
+        [tz]
+      );
+
+      const platformUsersQ = pool.query(
+        `WITH t AS (
+           SELECT (now() AT TIME ZONE $1)::date AS today
+         ),
+         installation_accounts AS (
+           SELECT DISTINCT ON (installation_id)
+             installation_id,
+             account_id
+           FROM account_installations
+           ORDER BY
+             installation_id,
+             (unlinked_at IS NULL) DESC,
+             updated_at DESC,
+             linked_at DESC
+         ),
+         excluded_accounts AS (
+           SELECT DISTINCT ia.account_id
+           FROM excluded_analytics_users excluded
+           JOIN installation_accounts ia
+             ON ia.installation_id = excluded.user_id
+           WHERE ia.account_id IS NOT NULL
+         ),
+         platform_activity AS (
+           SELECT DISTINCT
+             COALESCE(
+               'account:' || ia.account_id::text,
+               'installation:' || e.user_id
+             ) AS analytics_user_key,
+             e.metadata->>'clientPlatform' AS platform,
+             (e.created_at AT TIME ZONE $1)::date AS active_date
+           FROM user_events e
+           LEFT JOIN installation_accounts ia
+             ON ia.installation_id = e.user_id
+           WHERE e.metadata->>'clientPlatform' IN ('ios', 'android')
+             AND NOT EXISTS (
+               SELECT 1
+               FROM excluded_analytics_users x
+               WHERE x.user_id = e.user_id
+             )
+             AND (
+               ia.account_id IS NULL
+               OR NOT EXISTS (
+                 SELECT 1
+                 FROM excluded_accounts ea
+                 WHERE ea.account_id = ia.account_id
+               )
+             )
+         )
+         SELECT
+           COUNT(DISTINCT analytics_user_key)
+             FILTER (
+               WHERE platform = 'ios'
+                 AND active_date = t.today
+             ) AS ios_dau,
+           COUNT(DISTINCT analytics_user_key)
+             FILTER (
+               WHERE platform = 'ios'
+                 AND active_date >= t.today - 6
+             ) AS ios_wau,
+           COUNT(DISTINCT analytics_user_key)
+             FILTER (
+               WHERE platform = 'ios'
+                 AND active_date >= t.today - 29
+             ) AS ios_mau,
+           COUNT(DISTINCT analytics_user_key)
+             FILTER (
+               WHERE platform = 'android'
+                 AND active_date = t.today
+             ) AS android_dau,
+           COUNT(DISTINCT analytics_user_key)
+             FILTER (
+               WHERE platform = 'android'
+                 AND active_date >= t.today - 6
+             ) AS android_wau,
+           COUNT(DISTINCT analytics_user_key)
+             FILTER (
+               WHERE platform = 'android'
+                 AND active_date >= t.today - 29
+             ) AS android_mau
+         FROM platform_activity
+         CROSS JOIN t`,
+        [tz]
+      );
+
+      const todayByPlatformQ = pool.query(
+        `SELECT
+           COALESCE(
+             NULLIF(metadata->>'clientPlatform', ''),
+             'unknown'
+           ) AS platform,
+           COUNT(*) FILTER (
+             WHERE event_name = 'app_opened'
+           ) AS app_opens,
+           COUNT(DISTINCT COALESCE(
+             NULLIF(metadata->>'debateId', ''),
+             id::text
+           )) FILTER (
+             WHERE event_name = 'debate_started'
+           ) AS debate_starts,
+           COUNT(DISTINCT COALESCE(
+             NULLIF(metadata->>'debateId', ''),
+             id::text
+           )) FILTER (
+             WHERE event_name = 'debate_completed'
+           ) AS debate_completions,
+           COUNT(*) FILTER (
+             WHERE event_name = 'daily_challenge_completed'
+           ) AS daily_challenge_completions,
+           COUNT(*) FILTER (
+             WHERE event_name = 'paywall_viewed'
+           ) AS paywall_views,
+           COUNT(*) FILTER (
+             WHERE event_name = 'purchase_completed'
+           ) AS purchases_completed
+         FROM user_events e
+         WHERE (e.created_at AT TIME ZONE $1)::date =
+               (now() AT TIME ZONE $1)::date
+           AND NOT EXISTS (
+             SELECT 1
+             FROM excluded_analytics_users x
+             WHERE x.user_id = e.user_id
+           )
+         GROUP BY 1
+         ORDER BY 1`,
         [tz]
       );
 
@@ -662,21 +890,34 @@ export function createAnalyticsRouter(pool, options = {}) {
         users,
         today,
         tier,
+        platformUsers,
+        todayByPlatform,
         subscriptions,
         retention,
       ] = await Promise.all([
         usersQ,
         todayQ,
         tierQ,
+        platformUsersQ,
+        todayByPlatformQ,
         subscriptionsQ,
         retentionQ,
       ]);
+
+      const platformRows = Object.fromEntries(
+        todayByPlatform.rows.map((row) => [
+          row.platform,
+          row,
+        ])
+      );
 
       return res.json({
         success: true,
         timezone: tz,
         users: users.rows[0],
+        platformUsers: platformUsers.rows[0],
         today: today.rows[0],
+        todayByPlatform: platformRows,
         todayByTier: tier.rows[0],
         subscriptions: subscriptions.rows[0],
         retention: retention.rows[0],
