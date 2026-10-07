@@ -233,44 +233,109 @@ export function createAnalyticsRouter(pool, options = {}) {
   async function subscriptionContext(userId) {
     const result = await pool.query(
       `
+      WITH linked_account AS (
+        SELECT ai.account_id
+        FROM account_installations ai
+        WHERE ai.installation_id = $1
+          AND ai.unlinked_at IS NULL
+        ORDER BY
+          ai.updated_at DESC,
+          ai.linked_at DESC
+        LIMIT 1
+      ),
+      entitlement_candidates AS (
+        SELECT
+          se.status,
+          se.is_trial,
+          se.product_id,
+          se.environment,
+          se.expires_date,
+          se.grace_period_expires_date,
+          se.revocation_date,
+          se.auto_renew_enabled,
+          se.pro_access_source,
+          se.is_recurring_pro,
+          se.is_lifetime_pro,
+          COALESCE(se.pricing_cohort, 'unknown')
+            AS pricing_cohort,
+          'app_store'::text AS subscription_store,
+          se.updated_at
+        FROM subscription_entitlements se
+        WHERE se.user_id = $1
+           OR EXISTS (
+             SELECT 1
+             FROM subscription_installation_links link
+             WHERE link.original_transaction_id =
+                   se.original_transaction_id
+               AND link.environment = se.environment
+               AND link.user_id = $1
+           )
+
+        UNION ALL
+
+        SELECT
+          gp.normalized_status AS status,
+          gp.is_trial,
+          gp.product_id,
+          CASE
+            WHEN gp.test_purchase = true
+              THEN 'Test'
+            ELSE 'Production'
+          END AS environment,
+          gp.expires_date,
+          CASE
+            WHEN gp.normalized_status = 'grace_period'
+              THEN gp.expires_date
+            ELSE NULL::timestamptz
+          END AS grace_period_expires_date,
+          NULL::timestamptz AS revocation_date,
+          gp.auto_renew_enabled,
+          'google_play'::text AS pro_access_source,
+          TRUE AS is_recurring_pro,
+          FALSE AS is_lifetime_pro,
+          COALESCE(gp.pricing_cohort, 'unknown')
+            AS pricing_cohort,
+          'google_play'::text AS subscription_store,
+          gp.updated_at
+        FROM google_play_subscription_entitlements gp
+        INNER JOIN linked_account account
+          ON account.account_id = gp.account_id
+      )
       SELECT
-        se.status,
-        se.is_trial,
-        se.product_id,
-        se.environment,
-        se.expires_date,
-        se.grace_period_expires_date,
-        se.revocation_date,
-        se.auto_renew_enabled,
-        se.pro_access_source,
-        se.is_recurring_pro,
-        se.is_lifetime_pro,
-        COALESCE(se.pricing_cohort, 'unknown') AS pricing_cohort
-      FROM subscription_entitlements se
-      WHERE se.user_id = $1
-         OR EXISTS (
-           SELECT 1
-           FROM subscription_installation_links link
-           WHERE link.original_transaction_id = se.original_transaction_id
-             AND link.environment = se.environment
-             AND link.user_id = $1
-         )
+        status,
+        is_trial,
+        product_id,
+        environment,
+        expires_date,
+        grace_period_expires_date,
+        revocation_date,
+        auto_renew_enabled,
+        pro_access_source,
+        is_recurring_pro,
+        is_lifetime_pro,
+        pricing_cohort,
+        subscription_store
+      FROM entitlement_candidates
       ORDER BY
         CASE
-          WHEN se.is_lifetime_pro = true
-            AND se.status = 'active'
-            AND se.revocation_date IS NULL
+          WHEN is_lifetime_pro = true
+            AND status = 'active'
+            AND revocation_date IS NULL
             THEN 0
-          WHEN se.status IN ('trial', 'active')
-            AND se.expires_date > NOW()
+          WHEN status IN ('trial', 'active')
+            AND expires_date > NOW()
             THEN 1
-          WHEN se.status = 'grace_period'
-            AND se.grace_period_expires_date > NOW()
+          WHEN status = 'grace_period'
+            AND grace_period_expires_date > NOW()
             THEN 1
           ELSE 2
         END,
-        CASE WHEN se.environment = 'Production' THEN 0 ELSE 1 END,
-        se.updated_at DESC
+        CASE
+          WHEN environment = 'Production'
+            THEN 0
+          ELSE 1
+        END,
+        updated_at DESC
       LIMIT 1
       `,
       [userId]
@@ -292,6 +357,8 @@ export function createAnalyticsRouter(pool, options = {}) {
       subscriptionStatus: entitlement?.status || 'none',
       subscriptionProductId: entitlement?.product_id || null,
       subscriptionEnvironment: entitlement?.environment || null,
+      subscriptionStore:
+        entitlement?.subscription_store || 'none',
       subscriptionAccessSource:
         entitlement?.pro_access_source || 'unknown',
       subscriptionIsRecurring:
@@ -306,7 +373,7 @@ export function createAnalyticsRouter(pool, options = {}) {
         entitlement?.environment === 'Production' &&
         entitlement?.is_recurring_pro === true &&
         analyticsAccessTier === 'paid_pro',
-      analyticsVersion: 'july31_analytics_v1',
+      analyticsVersion: 'cross_platform_analytics_v2',
       pricingCohortAnalyticsVersion: 'founding_pricing_v1',
     };
   }
