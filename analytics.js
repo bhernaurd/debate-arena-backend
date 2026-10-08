@@ -1024,6 +1024,17 @@ export function createAnalyticsRouter(pool, options = {}) {
                   AND link.environment = se.environment
                   AND link.user_id = x.user_id
               )
+              OR EXISTS (
+                SELECT 1
+                FROM account_subscription_ownership ownership
+                INNER JOIN account_installations ai
+                  ON ai.account_id = ownership.account_id
+                WHERE ownership.original_transaction_id =
+                      se.original_transaction_id
+                  AND ownership.environment = se.environment
+                  AND ownership.ownership_status = 'active'
+                  AND ai.installation_id = x.user_id
+              )
          )`
       );
 
