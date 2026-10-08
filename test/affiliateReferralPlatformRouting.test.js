@@ -65,19 +65,34 @@ test('builds the canonical Google Play listing URL', () => {
   );
 });
 
+test('encodes the creator code into Google Play Install Referrer', () => {
+  const url = new URL(
+    buildGooglePlayListingUrl(
+      'com.bhernaurd.theagora',
+      ' creator123 '
+    )
+  );
+
+  assert.equal(url.origin, 'https://play.google.com');
+  assert.equal(url.searchParams.get('id'), 'com.bhernaurd.theagora');
+  assert.equal(url.searchParams.get('referrer'), 'ref=CREATOR123');
+  assert.match(url.toString(), /referrer=ref%3DCREATOR123/);
+});
+
 test('desktop landing page exposes both stores and preserves visible creator identity', () => {
   const html = renderReferralStoreLandingPage({
-    creatorCode: 'MAXAGORA',
+    creatorCode: 'CREATOR123',
     appleUrl:
-      'https://apps.apple.com/redeem?ctx=offercodes&id=6762416967&code=MAXAGORA',
+      'https://apps.apple.com/redeem?ctx=offercodes&id=6762416967&code=CREATOR123',
     googlePlayUrl:
-      'https://play.google.com/store/apps/details?id=com.bhernaurd.theagora',
+      'https://play.google.com/store/apps/details?id=com.bhernaurd.theagora&referrer=ref%3DCREATOR123',
   });
 
-  assert.match(html, /MAXAGORA/);
+  assert.match(html, /CREATOR123/);
   assert.match(html, /Download on the App Store/);
   assert.match(html, /Get it on Google Play/);
   assert.match(html, /apps\.apple\.com\/redeem/);
   assert.match(html, /play\.google\.com\/store\/apps\/details/);
+  assert.match(html, /referrer=ref%3DCREATOR123/);
   assert.match(html, /navigator\.maxTouchPoints > 1/);
 });
