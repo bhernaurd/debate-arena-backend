@@ -153,6 +153,146 @@ function environmentFlag(value, fallback = false) {
   );
 }
 
+export function classifyAffiliateReferralPlatform({
+  userAgent = '',
+  clientPlatform = '',
+} = {}) {
+  const ua = String(userAgent || '').toLowerCase();
+  const platform = String(clientPlatform || '').replaceAll('"', '').toLowerCase();
+
+  if (platform.includes('android') || ua.includes('android')) {
+    return 'android';
+  }
+
+  if (
+    platform.includes('ios') ||
+    /iphone|ipad|ipod/.test(ua)
+  ) {
+    return 'ios';
+  }
+
+  return 'other';
+}
+
+export function buildGooglePlayListingUrl(
+  packageName = 'com.bhernaurd.theagora'
+) {
+  const cleanPackage = String(packageName || '').trim();
+  if (!/^[A-Za-z0-9_.]+$/.test(cleanPackage)) {
+    throw new Error('Google Play package name is invalid.');
+  }
+
+  return (
+    'https://play.google.com/store/apps/details?id=' +
+    encodeURIComponent(cleanPackage)
+  );
+}
+
+export function renderReferralStoreLandingPage({
+  creatorCode,
+  appleUrl,
+  googlePlayUrl,
+} = {}) {
+  const safeCode = escapeHtml(creatorCode);
+  const safeAppleUrl = escapeHtml(appleUrl);
+  const safeGooglePlayUrl = escapeHtml(googlePlayUrl);
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex,nofollow,noarchive" />
+  <title>Get The Agora</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #09080d;
+      --panel: #15121c;
+      --border: rgba(216,171,82,.28);
+      --gold: #d8ab52;
+      --gold-soft: #f0d89f;
+      --text: #f7f2e8;
+      --muted: #a9a2b3;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--text); }
+    body {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at 50% -15%, rgba(111,74,151,.18), transparent 34rem), var(--bg);
+    }
+    main {
+      width: min(520px, 100%);
+      padding: 34px;
+      border: 1px solid rgba(255,255,255,.08);
+      border-radius: 22px;
+      background: linear-gradient(180deg, rgba(23,20,31,.98), rgba(14,12,19,.98));
+      text-align: center;
+      box-shadow: 0 24px 80px rgba(0,0,0,.34);
+    }
+    .eyebrow { color: var(--gold); letter-spacing: .16em; font-size: 11px; font-weight: 750; }
+    h1 { margin: 12px 0 10px; font-family: Georgia, "Times New Roman", serif; font-size: 38px; font-weight: 500; }
+    p { margin: 0; color: var(--muted); line-height: 1.55; }
+    .code {
+      display: inline-block;
+      margin: 18px 0 24px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--gold-soft);
+      background: rgba(216,171,82,.07);
+      font-weight: 750;
+      letter-spacing: .08em;
+    }
+    .stores { display: grid; gap: 12px; }
+    a {
+      display: block;
+      padding: 14px 16px;
+      border-radius: 13px;
+      border: 1px solid rgba(255,255,255,.09);
+      background: rgba(255,255,255,.04);
+      color: var(--text);
+      text-decoration: none;
+      font-weight: 700;
+    }
+    a:hover, a:focus-visible {
+      border-color: var(--border);
+      background: rgba(216,171,82,.08);
+      outline: none;
+    }
+    .note { margin-top: 18px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="eyebrow">THE AGORA</div>
+    <h1>Choose your device</h1>
+    <p>Your creator referral is ready. Download The Agora from your app store.</p>
+    <div class="code">${safeCode}</div>
+    <div class="stores">
+      <a href="${safeAppleUrl}">Download on the App Store</a>
+      <a href="${safeGooglePlayUrl}">Get it on Google Play</a>
+    </div>
+    <p class="note">Already have The Agora installed? Open this referral link on your phone.</p>
+  </main>
+  <script>
+    // iPadOS can present a desktop-style Macintosh user agent. Detect its
+    // touch-capable desktop identity here so it still follows the Apple path.
+    if (
+      navigator.platform === 'MacIntel' &&
+      navigator.maxTouchPoints > 1
+    ) {
+      window.location.replace(${JSON.stringify(appleUrl || '')});
+    }
+  </script>
+</body>
+</html>`;
+}
+
 
 function privateApiHeaders(_req, res, next) {
   res.removeHeader('Access-Control-Allow-Origin');
@@ -3066,6 +3206,13 @@ export function createAffiliateRouter(pool, options = {}) {
   const router = express.Router();
   const adminKey = options.adminKey || process.env.AFFILIATE_ADMIN_KEY;
   const appAppleId = options.appAppleId || process.env.AFFILIATE_APPLE_APP_ID || '6762416967';
+  const googlePlayPackageName =
+    options.googlePlayPackageName ||
+    process.env.GOOGLE_PLAY_PACKAGE_NAME ||
+    'com.bhernaurd.theagora';
+  const googlePlayListingUrl = buildGooglePlayListingUrl(
+    googlePlayPackageName
+  );
   const tokenEncryptionKey = options.tokenEncryptionKey || process.env.AFFILIATE_TOKEN_ENCRYPTION_KEY;
   const appClipHandoffEnabled =
     options.appClipHandoffEnabled ??
@@ -3463,14 +3610,15 @@ export function createAffiliateRouter(pool, options = {}) {
           return null;
         }
       })();
+      const platform = classifyAffiliateReferralPlatform({
+        userAgent: req.get('user-agent'),
+        clientPlatform: req.get('sec-ch-ua-platform'),
+      });
 
-      if (appClipHandoffEnabled) {
-        // The branded domain is the primary App Clip invocation URL. When iOS
-        // recognizes the associated-domain experience, this HTTP route is never
-        // shown. If a browser does reach Railway, preserve click analytics,
-        // create the same cryptographic handoff, and immediately redirect to
-        // Apple's default App Clip URL. No intermediate "creator offer ready"
-        // page is shown.
+      if (platform === 'ios' && appClipHandoffEnabled) {
+        // Installed/supported Apple devices normally intercept the branded
+        // associated-domain URL before this HTTP handler. If Safari reaches
+        // the backend, keep the existing App Clip fallback and exact handoff.
         const result = await affiliateReferralHandoffService
           .createForReferral({
             code: req.params.code,
@@ -3481,13 +3629,46 @@ export function createAffiliateRouter(pool, options = {}) {
         return res.redirect(302, result.redirectUrl);
       }
 
+      // For Android and desktop/unknown clients, record the referral click
+      // without creating an Apple-only App Clip handoff. This also validates
+      // that the creator code is active.
       const result = await service.recordReferralClick({
         code: req.params.code,
         referrerHost,
       });
 
       res.setHeader('Cache-Control', 'no-store');
-      return res.redirect(302, result.redirectUrl);
+
+      if (platform === 'android') {
+        // Step 1 only: route Android browser traffic to Google Play. The next
+        // affiliate step will add the Install Referrer payload that carries
+        // the creator code through a fresh install.
+        return res.redirect(302, googlePlayListingUrl);
+      }
+
+      if (platform === 'ios') {
+        return res.redirect(302, result.redirectUrl);
+      }
+
+      res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Referrer-Policy', 'no-referrer');
+      res.setHeader('Content-Security-Policy',
+        "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; frame-ancestors 'none'"
+      );
+
+      return res
+        .status(200)
+        .type('html')
+        .send(
+          renderReferralStoreLandingPage({
+            creatorCode:
+              result?.affiliate?.normalized_code ||
+              String(req.params.code || '').trim().toUpperCase(),
+            appleUrl: result.redirectUrl,
+            googlePlayUrl: googlePlayListingUrl,
+          })
+        );
     } catch (error) {
       if (error?.statusCode === 404) {
         return res.status(404).type('text/plain').send('This referral link is not active.');
