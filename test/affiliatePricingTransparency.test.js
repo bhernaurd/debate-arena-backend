@@ -235,7 +235,7 @@ test('partner dashboard includes current pricing and active price-tier transpare
   assert.match(html, /activePriceTierRows/);
   assert.doesNotMatch(html, /apple\.preservedPrices/);
   assert.match(html, /Active .* Subscribers/);
-  assert.match(html, /latest verified Apple paid transaction/);
+  assert.match(html, /latest verified App Store or Google Play paid subscription state/);
   assert.match(html, /Creator Offer/);
   assert.doesNotMatch(html, /\$0\.99 Promo/);
 });
