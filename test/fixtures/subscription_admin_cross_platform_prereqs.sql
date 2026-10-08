@@ -71,7 +71,7 @@ CREATE TABLE subscription_admin_customers_v1 (
     expires_date TIMESTAMPTZ,
     grace_period_expires_date TIMESTAMPTZ,
     revocation_date TIMESTAMPTZ,
-    expiration_intent TEXT,
+    expiration_intent INTEGER,
     last_transaction_id TEXT,
     last_notification_type TEXT,
     last_notification_subtype TEXT,
