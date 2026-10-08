@@ -47,6 +47,7 @@ import { createRankedRatingService } from './lib/rankedRatingService.js';
 import { createRankedDebateEngineService } from './lib/rankedDebateEngineService.js';
 import { createCrossPlatformProAccessService } from './lib/crossPlatformProAccessService.js';
 import { createGooglePlaySubscriptionService } from './lib/googlePlaySubscriptionService.js';
+import { createAffiliateGooglePlayAttributionService } from './lib/affiliateGooglePlayAttributionService.js';
 import { createRankedTopicGeneratorService } from './lib/rankedTopicGeneratorService.js';
 import { createAiContentReportService } from './lib/aiContentReportService.js';
 import { appendAgoraAiSafetyPolicy } from './lib/aiSafetyPolicy.js';
@@ -438,7 +439,7 @@ const affiliateSubscriptionAttributionService =
 
 if (!affiliateSubscriptionAttributionEnabled) {
   console.warn(
-    '[AffiliateAttribution] Live Apple subscription attribution is disabled. Stored verified transactions can be reconciled later.'
+    '[AffiliateAttribution] Live Apple and Google Play subscription attribution is disabled. Stored verified transactions can be reconciled later.'
   );
 }
 
@@ -471,9 +472,15 @@ const accountProAccessService =
     pool,
   });
 
+const affiliateGooglePlayAttributionService =
+  affiliateSubscriptionAttributionEnabled
+    ? createAffiliateGooglePlayAttributionService({ pool })
+    : null;
+
 const googlePlaySubscriptionService =
   createGooglePlaySubscriptionService({
     pool,
+    affiliateGooglePlayAttributionService,
   });
 
 const accountMirrorService =
