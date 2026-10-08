@@ -51,7 +51,10 @@ test('accounts UI shows events per account and aggregate download geography', ()
 test('analytics app-open no longer accepts customer storefront country', () => {
   const source = fs.readFileSync('analytics.js', 'utf8');
   assert.doesNotMatch(source, /storefrontCountryCode/);
-  assert.match(source, /await recordEvent\(userId, 'app_opened', null\)/);
+  assert.match(
+    source,
+    /await recordEvent\(\s*userId,\s*'app_opened',\s*null,\s*clientContext\s*\)/
+  );
 });
 
 test('daily Sales & Trends import includes the app initial-download row but ignores unrelated apps', async () => {
