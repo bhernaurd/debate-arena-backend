@@ -145,6 +145,12 @@ test('partner dashboard exposes the approved affiliate metrics without a creator
   assert.match(html, /Lifetime Commission Earned/);
   assert.match(html, /Lifetime Paid/);
   assert.match(html, /Subscriber Activity/);
+  assert.match(html, /App Store Active/);
+  assert.match(html, /Google Play Active/);
+  assert.match(html, /<th>Subscriber<\/th><th>Store<\/th><th>Offer<\/th>/);
+  assert.match(html, /App Store/);
+  assert.match(html, /Google Play/);
+  assert.match(html, /Pending Store State/);
   assert.match(html, /Free-trial access is excluded from commission/);
   assert.doesNotMatch(html, /Commission-Earning Subscribers/);
   assert.doesNotMatch(html, />Canceling<\/div>/);
@@ -171,6 +177,9 @@ test('dashboard service derives anonymous subscriber state from verified Apple s
   assert.match(source, /subscriberAlias/);
   assert.match(source, /subscriber_display_name/);
   assert.match(source, /subscriberDisplayName/);
+  assert.match(source, /platform: 'app_store'/);
+  assert.match(source, /appStoreCurrentSubscribers/);
+  assert.match(source, /googlePlayCurrentSubscribers/);
   assert.match(source, /autoRenewDisabledAt/);
   assert.match(source, /firstStandardPaidAt/);
   assert.match(source, /previous_offer_cancelled/);
