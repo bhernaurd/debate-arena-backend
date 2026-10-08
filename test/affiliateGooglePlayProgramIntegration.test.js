@@ -37,8 +37,8 @@ test('migration stores permanent Google affiliate ownership without raw purchase
 
 test('Google affiliate billing ledger is order-id idempotent and separates trial from paid orders', () => {
   assert.match(migration, /CREATE TABLE IF NOT EXISTS affiliate_google_play_billing_events/);
-  assert.match(migration, /event_type IN \('trial_start', 'paid_order'\)/);
-  assert.match(migration, /UNIQUE \(google_order_id\)/);
+  assert.match(migration, /event_key TEXT NOT NULL UNIQUE/);
+  assert.match(migration, /event_type IN \('trial_start', 'paid_order', 'reversal'\)/);
   assert.match(migration, /test_purchase BOOLEAN NOT NULL DEFAULT FALSE/);
 });
 
@@ -51,9 +51,12 @@ test('verified Google purchase service records affiliate ownership inside entitl
   assert.match(googleService, /billingEventAt/);
 });
 
-test('RTDN timestamp is used for recurring affiliate billing event timing', () => {
+test('RTDN timestamps drive renewals and voided purchases drive affiliate reversals', () => {
   assert.match(rtdnService, /notification\.eventTimeMillis/);
   assert.match(rtdnService, /billingEventAt/);
+  assert.match(rtdnService, /voidedPurchaseNotification/);
+  assert.match(rtdnService, /recordVoidedAffiliatePurchase/);
+  assert.match(rtdnService, /googleOrderId: orderId/);
 });
 
 test('affiliate dashboard combines verified Apple and Google subscriber state', () => {
@@ -66,6 +69,8 @@ test('affiliate dashboard combines verified Apple and Google subscriber state', 
 test('affiliate payout calculation includes only verified paid Google orders', () => {
   assert.match(programService, /FROM affiliate_google_play_billing_events/);
   assert.match(programService, /event_type = 'paid_order'/);
+  assert.match(programService, /AS reversed/);
+  assert.match(programService, /if \(event\.reversed === true\) continue/);
   assert.match(programService, /test_purchase = \$2/);
   assert.match(programService, /Google Play ·/);
   assert.match(programService, /missing_google_play_base_price_rule/);
@@ -76,4 +81,10 @@ test('new verified Google billing events refresh derived affiliate payout state'
   assert.match(server, /refreshMonthlyPayout/);
   assert.match(server, /system_google_play_billing/);
   assert.match(server, /America\/Chicago/);
+});
+
+test('Google refund accounting refreshes the original paid-order month', () => {
+  assert.match(googleService, /result\.originalEventAt/);
+  assert.match(googleService, /new Date\(result\.originalEventAt\)\.toISOString\(\)/);
+  assert.match(programService, /reversed paid order in sourceRows/);
 });
