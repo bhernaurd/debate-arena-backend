@@ -14,7 +14,7 @@ const EVENT_AT = new Date('2026-10-08T04:00:00.000Z');
 
 function createDatabase() {
   const attributions = new Map();
-  const orders = new Set();
+  const eventKeys = new Set();
   const billingEvents = [];
 
   const client = {
@@ -95,23 +95,25 @@ function createDatabase() {
       }
 
       if (sql.includes('INSERT INTO affiliate_google_play_billing_events')) {
-        const orderId = values[3];
-        if (orders.has(orderId)) {
+        const eventKey = values[3];
+        const orderId = values[4];
+        if (eventKeys.has(eventKey)) {
           return { rows: [], rowCount: 0 };
         }
-        orders.add(orderId);
+        eventKeys.add(eventKey);
         billingEvents.push({
           affiliateId: values[0],
           accountId: values[1],
           tokenHash: values[2],
+          eventKey,
           orderId,
-          productId: values[4],
-          offerId: values[6],
-          eventType: values[7],
-          eventAt: values[8],
-          testPurchase: values[9],
+          productId: values[5],
+          offerId: values[7],
+          eventType: values[8],
+          eventAt: values[9],
+          testPurchase: values[10],
         });
-        return { rows: [{ id: String(orders.size) }], rowCount: 1 };
+        return { rows: [{ id: String(eventKeys.size) }], rowCount: 1 };
       }
 
       throw new Error('Unexpected SQL: ' + sql.trim().slice(0, 120));
@@ -120,11 +122,55 @@ function createDatabase() {
 
   return {
     attributions,
-    orders,
+    eventKeys,
     billingEvents,
     client,
     pool: {
-      query: async () => ({ rows: [] }),
+      async query(text, values = []) {
+        const sql = String(text);
+        if (
+          sql.includes('WITH owned AS') &&
+          sql.includes("'reversal'") &&
+          sql.includes('affiliate_google_play_billing_events')
+        ) {
+          const tokenHash = values[0];
+          const eventKey = values[1];
+          const orderId = values[2];
+          const eventAt = values[3];
+          const attribution = attributions.get(tokenHash);
+          if (!attribution || eventKeys.has(eventKey)) {
+            return { rows: [], rowCount: 0 };
+          }
+
+          eventKeys.add(eventKey);
+          const original = billingEvents.find(
+            (event) =>
+              event.orderId === orderId &&
+              event.eventType === 'paid_order'
+          );
+          billingEvents.push({
+            affiliateId: attribution.affiliate_id,
+            accountId: attribution.account_id,
+            tokenHash,
+            eventKey,
+            orderId,
+            productId: attribution.product_id,
+            offerId: attribution.attribution_offer_id,
+            eventType: 'reversal',
+            eventAt,
+            testPurchase: false,
+          });
+          return {
+            rows: [{
+              affiliate_id: attribution.affiliate_id,
+              test_purchase: false,
+              original_event_at: original?.eventAt || null,
+            }],
+            rowCount: 1,
+          };
+        }
+        return { rows: [] };
+      },
     },
   };
 }
@@ -218,6 +264,56 @@ test('trial conversion and renewals become idempotent paid billing events', asyn
   assert.deepEqual(
     db.billingEvents.map((event) => event.eventType),
     ['trial_start', 'paid_order', 'paid_order']
+  );
+});
+
+test('voided Google order records one reversal and returns the original commission date', async () => {
+  const db = createDatabase();
+  const service = createAffiliateGooglePlayAttributionService({
+    pool: db.pool,
+  });
+
+  await service.recordVerifiedPurchase({
+    client: db.client,
+    ...purchase(),
+  });
+
+  const paidAt = new Date('2026-10-15T04:00:00.000Z');
+  await service.recordVerifiedPurchase({
+    client: db.client,
+    ...purchase({
+      latestOrderId: 'GPA.PAID.REFUND',
+      isTrial: false,
+      normalizedStatus: 'active',
+      billingEventAt: paidAt,
+    }),
+  });
+
+  const reversed = await service.recordVoidedPurchase({
+    purchaseTokenSha256: TOKEN_A,
+    googleOrderId: 'GPA.PAID.REFUND',
+    eventAt: new Date('2026-11-03T04:00:00.000Z'),
+  });
+
+  assert.equal(reversed.attributed, true);
+  assert.equal(reversed.billingEventCreated, true);
+  assert.equal(
+    new Date(reversed.originalEventAt).toISOString(),
+    paidAt.toISOString()
+  );
+
+  const duplicate = await service.recordVoidedPurchase({
+    purchaseTokenSha256: TOKEN_A,
+    googleOrderId: 'GPA.PAID.REFUND',
+    eventAt: new Date('2026-11-03T04:01:00.000Z'),
+  });
+  assert.equal(duplicate.billingEventCreated, false);
+
+  assert.deepEqual(
+    db.billingEvents
+      .filter((event) => event.orderId === 'GPA.PAID.REFUND')
+      .map((event) => event.eventType),
+    ['paid_order', 'reversal']
   );
 });
 
