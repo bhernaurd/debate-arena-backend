@@ -57,8 +57,13 @@ try {
   await client.query(
     `
       INSERT INTO accounts (id, status, display_name)
-      VALUES ($1::uuid, 'active', 'Android Test User');
+      VALUES ($1::uuid, 'active', 'Android Test User')
+    `,
+    [accountId]
+  );
 
+  await client.query(
+    `
       INSERT INTO account_google_identities (
         account_id,
         email,
@@ -70,11 +75,21 @@ try {
         'android-ci@example.com',
         'Android Test User',
         NOW()
-      );
+      )
+    `,
+    [accountId]
+  );
 
+  await client.query(
+    `
       INSERT INTO affiliates (id, display_name, custom_code)
-      VALUES ($2::uuid, 'Creator CI', 'CREATORCI');
+      VALUES ($1::uuid, 'Creator CI', 'CREATORCI')
+    `,
+    [affiliateId]
+  );
 
+  await client.query(
+    `
       INSERT INTO google_play_subscription_entitlements (
         purchase_token_sha256,
         account_id,
@@ -93,8 +108,8 @@ try {
         pricing_cohort_source
       )
       VALUES (
-        $3,
-        $1::uuid,
+        $1,
+        $2::uuid,
         'agora_pro_monthly',
         'monthly-standard',
         'creator-seven-day-trial',
@@ -108,8 +123,13 @@ try {
         NOW() + INTERVAL '7 days',
         'standard',
         'paywall'
-      );
+      )
+    `,
+    [tokenHash, accountId]
+  );
 
+  await client.query(
+    `
       INSERT INTO affiliate_google_play_subscription_attributions (
         purchase_token_sha256,
         affiliate_id,
@@ -117,13 +137,13 @@ try {
         attribution_source
       )
       VALUES (
-        $3,
+        $1,
         $2::uuid,
         'CREATORCI',
         'account_creator_code'
-      );
+      )
     `,
-    [accountId, affiliateId, tokenHash]
+    [tokenHash, affiliateId]
   );
 
   const googleCustomer = await client.query(
