@@ -43,8 +43,9 @@ test('owner subscription projections combine App Store and Google Play', () => {
 });
 
 test('Google Play current state maps into subscriber trial paid churn and affiliate fields', () => {
-  assert.match(migration, /google\.normalized_status = 'on_hold'/);
-  assert.match(migration, /google\.normalized_status IN \('paused', 'expired', 'replaced'\)/);
+  assert.match(migration, /entitlement\.normalized_status = 'on_hold'[\s\S]*THEN 'billing_retry'/);
+  assert.match(migration, /entitlement\.normalized_status IN \('paused', 'expired', 'replaced'\)[\s\S]*THEN 'expired'/);
+  assert.match(migration, /google\.dashboard_status::text AS status/);
   assert.match(migration, /google\.is_trial = FALSE[\s\S]*google\.has_pro_access[\s\S]*recurring_revenue_active/);
   assert.match(migration, /google\.is_trial = TRUE[\s\S]*google\.has_pro_access[\s\S]*trial_active/);
   assert.match(migration, /google\.auto_renew_enabled = FALSE[\s\S]*google\.has_pro_access[\s\S]*canceling/);
