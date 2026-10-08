@@ -78,3 +78,6 @@ jobs:
 
       - name: Validate migration 053 against PostgreSQL
         run: node scripts/validateSubscriptionAdminCrossPlatformMigration.js
+
+      - name: Validate cross-platform subscription behavior
+        run: node scripts/validateSubscriptionAdminCrossPlatformBehavior.js
