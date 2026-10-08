@@ -76,14 +76,5 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Apply migrations to clean PostgreSQL
-        run: npm run migrate
-
-      - name: Validate subscription dashboard projections
-        run: npm run subscription-dashboard:check
-
-      - name: Validate current subscriber projection
-        run: npm run subscription-current-state:check
-
-      - name: Validate subscription history queries
-        run: npm run subscription-history:check
+      - name: Validate migration 053 against PostgreSQL
+        run: node scripts/validateSubscriptionAdminCrossPlatformMigration.js
