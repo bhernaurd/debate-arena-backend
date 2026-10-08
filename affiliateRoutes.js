@@ -759,6 +759,26 @@ function renderPartnerDashboardPage(token) {
         <div class="mini-grid">
           <div class="mini">
             <div class="metric-heading">
+              <div class="label">App Store Active</div>
+              ${renderInfoButton(
+                'App Store Active',
+                'Referred subscribers who currently have active Pro access through the Apple App Store. Trials and paid subscriptions are both included.'
+              )}
+            </div>
+            <div class="value" id="appStoreCurrentSubscribers">—</div>
+          </div>
+          <div class="mini">
+            <div class="metric-heading">
+              <div class="label">Google Play Active</div>
+              ${renderInfoButton(
+                'Google Play Active',
+                'Referred subscribers who currently have active Pro access through Google Play on Android. Trials and paid subscriptions are both included.'
+              )}
+            </div>
+            <div class="value" id="googlePlayCurrentSubscribers">—</div>
+          </div>
+          <div class="mini">
+            <div class="metric-heading">
               <div class="label">Trial Active</div>
               ${renderInfoButton(
                 'Trial Active',
@@ -802,7 +822,7 @@ function renderPartnerDashboardPage(token) {
               <div class="label">Billing Retry</div>
               ${renderInfoButton(
                 'Billing Retry',
-                'Subscribers whose renewal payment failed and for whom Apple is attempting billing recovery. They are kept in this separate current-state bucket while recovery is pending.'
+                'Subscribers whose renewal payment failed and whose app store is attempting billing recovery. They are kept in this separate current-state bucket while recovery is pending.'
               )}
             </div>
             <div class="value" id="billingRetry">—</div>
@@ -819,10 +839,10 @@ function renderPartnerDashboardPage(token) {
           </div>
           <div class="mini hidden" id="pendingStateBox">
             <div class="metric-heading">
-              <div class="label">Pending Apple State</div>
+              <div class="label">Pending Store State</div>
               ${renderInfoButton(
-                'Pending Apple State',
-                'A verified referral exists, but the latest entitlement state has not arrived yet. This temporary safeguard prevents the subscriber from being silently omitted or double-counted while store data is still syncing.'
+                'Pending Store State',
+                'A verified referral exists, but the latest entitlement state has not arrived yet. This temporary safeguard prevents the subscriber from being silently omitted or double-counted while App Store or Google Play data is still syncing.'
               )}
             </div>
             <div class="value" id="pendingStateSubscribers">—</div>
@@ -1479,6 +1499,7 @@ function renderPartnerDashboardPage(token) {
 
         return '<tr>' +
           '<td><strong>' + html(item.subscriberLabel || item.subscriberAlias || 'Subscriber') + '</strong></td>' +
+          '<td>' + html(item.platform === 'google_play' ? 'Google Play' : 'App Store') + '</td>' +
           '<td>' + html(item.offerLabel || '—') + '</td>' +
           '<td>' + html(dateLabel(item.joinedAt, true)) + '</td>' +
           '<td>' + currentStateBadge(item.currentState) + '</td>' +
@@ -1491,7 +1512,7 @@ function renderPartnerDashboardPage(token) {
 
       return '<div class="activity-wrap"><table class="activity-table">' +
         '<thead><tr>' +
-          '<th>Subscriber</th><th>Offer</th><th>Joined</th><th>Current State</th>' +
+          '<th>Subscriber</th><th>Store</th><th>Offer</th><th>Joined</th><th>Current State</th>' +
           '<th>Auto-Renew</th><th>Auto-Renew Off</th><th>First Full-Price Payment</th><th>Access Ends</th>' +
         '</tr></thead><tbody>' + rows + '</tbody></table></div>';
     }
@@ -1511,6 +1532,14 @@ function renderPartnerDashboardPage(token) {
       text('partnerCode', data.affiliate.customCode);
       text('totalReferrals', number(o.totalReferrals));
       text('currentSubscribers', number(o.currentSubscribers ?? o.activeSubscribers));
+      text(
+        'appStoreCurrentSubscribers',
+        o.appStoreCurrentSubscribers == null ? '—' : number(o.appStoreCurrentSubscribers)
+      );
+      text(
+        'googlePlayCurrentSubscribers',
+        o.googlePlayCurrentSubscribers == null ? '—' : number(o.googlePlayCurrentSubscribers)
+      );
       text('cancelledSubscribers', number(o.cancelledSubscribers));
       text('estimatedThisMonth', money(o.estimatedThisMonth));
       text('currentlyOwed', money(o.currentlyOwed));
@@ -1605,6 +1634,14 @@ function renderPartnerDashboardPage(token) {
 
       const subscriberRows = [
         row('Referrals Acquired in Selected Period', number(s.newReferrals)),
+        row(
+          'App Store Active From Period',
+          s.appStoreCurrentSubscribers == null ? '—' : number(s.appStoreCurrentSubscribers)
+        ),
+        row(
+          'Google Play Active From Period',
+          s.googlePlayCurrentSubscribers == null ? '—' : number(s.googlePlayCurrentSubscribers)
+        ),
         row('Trial Active', number(s.promoActiveSubscribers ?? s.promoSubscribers)),
         row('Trial Cancelled Before Paid', number(s.trialCancelingSubscribers)),
         row('Paid + Renewing', number(s.paidRenewingSubscribers)),
@@ -1614,7 +1651,7 @@ function renderPartnerDashboardPage(token) {
       ];
       if (Number(s.pendingStateSubscribers || 0) > 0) {
         subscriberRows.push(
-          row('Pending Apple State', number(s.pendingStateSubscribers))
+          row('Pending Store State', number(s.pendingStateSubscribers))
         );
       }
       document.getElementById('subscriberBreakdown').innerHTML = subscriberRows.join('');
