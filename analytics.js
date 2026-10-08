@@ -39,6 +39,13 @@ export const ANALYTICS_ALLOWED_EVENTS = new Set([
   'restore_no_active_subscription',
   'restore_failed',
 
+  // Ranked funnel
+  'ranked_placement_started',
+  'ranked_placement_completed',
+  'ranked_ladder_started',
+  'ranked_ladder_completed',
+  'ranked_forfeited',
+
   // Learn ecosystem
   'learn_hub_viewed',
   'learn_card_opened',
