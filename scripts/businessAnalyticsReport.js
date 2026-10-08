@@ -141,6 +141,12 @@ export async function buildDailyBusinessAnalytics(client) {
         WHERE event_name = 'restore_completed'
           AND metadata->>'activeSubscriptionFound' = 'true'
       ) AS successful_restores,
+      COUNT(*) FILTER (
+        WHERE event_name = 'restore_no_active_subscription'
+      ) AS restore_no_active_subscription,
+      COUNT(*) FILTER (
+        WHERE event_name = 'restore_failed'
+      ) AS restore_failures,
       (SELECT COUNT(*) FROM started_sessions) AS purchase_start_sessions,
       (SELECT COUNT(*) FROM completed_sessions) AS purchase_completed_sessions,
       (
@@ -153,6 +159,64 @@ export async function buildDailyBusinessAnalytics(client) {
         )
       ) AS completed_started_sessions
     FROM events;
+  `);
+
+  const rankedFunnelResult = await client.query(`
+    WITH bounds AS (
+      SELECT
+        (((NOW() AT TIME ZONE 'America/Chicago')::date - 1)::timestamp AT TIME ZONE 'America/Chicago') AS start_time,
+        (((NOW() AT TIME ZONE 'America/Chicago')::date)::timestamp AT TIME ZONE 'America/Chicago') AS end_time
+    ),
+    ranked_events AS (
+      SELECT
+        e.event_name,
+        e.metadata,
+        NULLIF(BTRIM(e.metadata->>'debateId'), '') AS debate_id,
+        ROW_NUMBER() OVER (
+          PARTITION BY
+            e.event_name,
+            COALESCE(NULLIF(BTRIM(e.metadata->>'debateId'), ''), e.id::text)
+          ORDER BY e.created_at ASC, e.id ASC
+        ) AS rn
+      FROM user_events e
+      CROSS JOIN bounds b
+      WHERE e.created_at >= b.start_time
+        AND e.created_at < b.end_time
+        AND e.event_name IN (
+          'ranked_placement_started',
+          'ranked_placement_completed',
+          'ranked_ladder_started',
+          'ranked_ladder_completed',
+          'ranked_forfeited'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM excluded_analytics_users x WHERE x.user_id = e.user_id
+        )
+    )
+    SELECT
+      COUNT(*) FILTER (
+        WHERE rn = 1 AND event_name = 'ranked_placement_started'
+      ) AS placement_starts,
+      COUNT(*) FILTER (
+        WHERE rn = 1 AND event_name = 'ranked_placement_completed'
+      ) AS placement_completions,
+      COUNT(*) FILTER (
+        WHERE rn = 1
+          AND event_name = 'ranked_forfeited'
+          AND metadata->>'rankedKind' = 'placement'
+      ) AS placement_forfeits,
+      COUNT(*) FILTER (
+        WHERE rn = 1 AND event_name = 'ranked_ladder_started'
+      ) AS ladder_starts,
+      COUNT(*) FILTER (
+        WHERE rn = 1 AND event_name = 'ranked_ladder_completed'
+      ) AS ladder_completions,
+      COUNT(*) FILTER (
+        WHERE rn = 1
+          AND event_name = 'ranked_forfeited'
+          AND metadata->>'rankedKind' = 'ladder'
+      ) AS ladder_forfeits
+    FROM ranked_events;
   `);
 
   const subscriptionResult = await client.query(`
@@ -535,6 +599,11 @@ export async function buildDailyBusinessAnalytics(client) {
         WHERE event_name IN (
           'debate_started',
           'debate_completed',
+          'ranked_placement_started',
+          'ranked_placement_completed',
+          'ranked_ladder_started',
+          'ranked_ladder_completed',
+          'ranked_forfeited',
           'report_generation_started',
           'report_generation_completed',
           'report_generation_failed'
@@ -560,6 +629,7 @@ export async function buildDailyBusinessAnalytics(client) {
 
   const tiers = new Map(tierResult.rows.map((row) => [row.tier, row]));
   const paywall = paywallResult.rows[0] || {};
+  const rankedFunnel = rankedFunnelResult.rows[0] || {};
   const subscriptions = subscriptionResult.rows[0] || {};
   const insights = insightResult.rows[0] || {};
   const progressive = progressiveResult.rows[0] || {};
@@ -603,7 +673,11 @@ export async function buildDailyBusinessAnalytics(client) {
     `<b>Session-linked purchase completion:</b> ${toNumber(paywall.completed_started_sessions)} of ${toNumber(paywall.purchase_start_sessions)} started sessions (${percent(paywall.completed_started_sessions, paywall.purchase_start_sessions)})`,
     `<b>Completed sessions observed:</b> ${toNumber(paywall.purchase_completed_sessions)}`,
     `<b>Cancelled / pending / failed:</b> ${toNumber(paywall.purchase_cancellations)} / ${toNumber(paywall.purchase_pending)} / ${toNumber(paywall.purchase_failures)}`,
-    `<b>Successful restores:</b> ${toNumber(paywall.successful_restores)} of ${toNumber(paywall.restore_starts)} attempts`,
+    `<b>Restore outcomes:</b> ${toNumber(paywall.successful_restores)} successful / ${toNumber(paywall.restore_no_active_subscription)} no active subscription / ${toNumber(paywall.restore_failures)} failed (${toNumber(paywall.restore_starts)} attempts)`,
+    ``,
+    `<b>Ranked Funnel</b>`,
+    `<b>Placement:</b> ${toNumber(rankedFunnel.placement_starts)} starts / ${toNumber(rankedFunnel.placement_completions)} completions / ${toNumber(rankedFunnel.placement_forfeits)} forfeits`,
+    `<b>Ladder:</b> ${toNumber(rankedFunnel.ladder_starts)} starts / ${toNumber(rankedFunnel.ladder_completions)} completions / ${toNumber(rankedFunnel.ladder_forfeits)} forfeits`,
     ``,
     `<b>End-to-End Report Wait by Tier</b>`,
     ...clientPerformanceLines,
