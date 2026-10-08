@@ -47,6 +47,19 @@ test('Subscribers tab offers activity, newest, and oldest sorting',()=>{
   new vm.Script(script,{filename:'subscription-admin-client.js'});
 });
 
+test('Subscribers and customer detail show store and creator attribution',()=>{
+  const html=renderFinalDashboard();
+  assert.match(html,/<th>Store<\/th><th>Creator<\/th>/);
+  assert.match(html,/Google Play/);
+  assert.match(html,/App Store/);
+  assert.match(html,/affiliate_display_name/);
+  assert.match(html,/affiliate_code/);
+  assert.match(html,/Affiliate attribution/);
+  assert.match(html,/affiliate_attribution_source/);
+  assert.match(html,/t\.store_platform==='google_play'/);
+  assert.match(html,/e\.store_platform==='google_play'/);
+});
+
 test('customer API uses a validated server-side sort',()=>{
   const source=fs.readFileSync(new URL('../subscriptionAdminRoutes.js',import.meta.url),'utf8');
   assert.match(source,/CUSTOMER_SORTS/);
