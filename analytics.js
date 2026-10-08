@@ -361,18 +361,38 @@ export function createAnalyticsRouter(pool, options = {}) {
             AND status = 'active'
             AND revocation_date IS NULL
             THEN 0
-          WHEN status IN ('trial', 'active')
+          WHEN subscription_store IN ('app_store', 'google_play')
+            AND is_trial = false
+            AND (
+              (status = 'active' AND expires_date > NOW())
+              OR (
+                status = 'grace_period'
+                AND grace_period_expires_date > NOW()
+              )
+            )
+            THEN 1
+          WHEN subscription_store IN ('app_store', 'google_play')
+            AND is_trial = true
+            AND (
+              (status = 'trial' AND expires_date > NOW())
+              OR (
+                status = 'grace_period'
+                AND grace_period_expires_date > NOW()
+              )
+            )
+            THEN 2
+          WHEN subscription_store = 'manual'
+            AND status = 'active'
             AND expires_date > NOW()
-            THEN 1
-          WHEN status = 'grace_period'
-            AND grace_period_expires_date > NOW()
-            THEN 1
-          ELSE 2
+            THEN 3
+          ELSE 4
         END,
         CASE
           WHEN environment = 'Production'
             THEN 0
-          ELSE 1
+          WHEN environment = 'Test'
+            THEN 1
+          ELSE 2
         END,
         updated_at DESC
       LIMIT 1
