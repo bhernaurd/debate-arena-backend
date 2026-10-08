@@ -40,6 +40,7 @@ test('owner subscription projections combine App Store and Google Play', () => {
   assert.match(migration, /FROM google_play_subscription_entitlements entitlement/);
   assert.match(migration, /affiliate_google_play_subscription_attributions/);
   assert.match(migration, /'google_play'::text AS store_platform/);
+  assert.match(migration, /NULL::integer AS expiration_intent/);
 });
 
 test('Google Play current state maps into subscriber trial paid churn and affiliate fields', () => {
