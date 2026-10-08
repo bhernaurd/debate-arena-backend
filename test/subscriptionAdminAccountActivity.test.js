@@ -12,7 +12,7 @@ test('account activity route supports newest-first account creation inspection',
   assert.match(source, /FROM accounts a/);
   assert.match(source, /account_apple_identities/);
   assert.match(source, /affiliate_account_referrals/);
-  assert.match(source, /subscription_admin_current_customers_v1/);
+  assert.match(source, /subscription_admin_cross_platform_current_customers_v1/);
   assert.match(source, /LIMIT 200/);
 });
 
