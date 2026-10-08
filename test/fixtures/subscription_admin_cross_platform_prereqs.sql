@@ -167,3 +167,37 @@ CREATE TABLE subscription_events (
     event_at TIMESTAMPTZ,
     metadata JSONB
 );
+
+
+-- Empty Apple reporting tables let the cross-platform history service execute in
+-- PostgreSQL CI without inventing Android financial values.
+CREATE TABLE app_store_sales_report_rows (
+    report_date DATE,
+    product_id TEXT,
+    customer_currency TEXT,
+    proceeds_currency TEXT,
+    gross_customer_amount NUMERIC,
+    developer_proceeds_amount NUMERIC
+);
+
+CREATE TABLE app_store_sales_report_imports (
+    report_date DATE,
+    report_type TEXT,
+    report_subtype TEXT,
+    frequency TEXT,
+    imported_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE app_store_finance_report_rows (
+    report_date DATE,
+    region_code TEXT,
+    period_start DATE,
+    period_end DATE,
+    partner_share_currency TEXT,
+    extended_partner_share NUMERIC,
+    product_id TEXT
+);
+
+CREATE TABLE app_store_finance_report_imports (
+    imported_at TIMESTAMPTZ DEFAULT NOW()
+);
