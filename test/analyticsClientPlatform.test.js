@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
 
 import express from 'express';
@@ -249,5 +250,112 @@ test('Google Play Pro is classified as paid Pro in Android analytics metadata', 
   assert.equal(metadata.analyticsAccessTier, 'paid_pro');
   assert.equal(metadata.subscriptionStore, 'google_play');
   assert.equal(metadata.subscriptionAccessSource, 'google_play');
+  assert.equal(metadata.revenueEligible, true);
+});
+
+
+test('account-owned Apple and manual Pro sources are part of analytics entitlement lookup', () => {
+  const source = fs.readFileSync(
+    new URL('../analytics.js', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(source, /FROM account_subscription_ownership ownership/);
+  assert.match(source, /ownership\.ownership_status = 'active'/);
+  assert.match(source, /FROM account_manual_pro_grants manual/);
+  assert.match(source, /manual\.expires_at IS NULL/);
+  assert.match(source, /'manual'::text AS subscription_store/);
+});
+
+test('manual Pro is classified as Pro but never as store revenue', async () => {
+  const future = new Date(Date.now() + 60_000).toISOString();
+  const pool = createPoolRecorder([
+    {
+      status: 'active',
+      is_trial: false,
+      product_id: 'agora_pro_manual',
+      environment: 'Manual',
+      expires_date: future,
+      grace_period_expires_date: null,
+      revocation_date: null,
+      auto_renew_enabled: null,
+      pro_access_source: 'manual',
+      is_recurring_pro: false,
+      is_lifetime_pro: false,
+      pricing_cohort: 'unknown',
+      subscription_store: 'manual',
+    },
+  ]);
+
+  await withAnalyticsServer(pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/event`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Installation-ID': 'android-review-installation-123',
+        'X-Client-Platform': 'android',
+        'X-Android-Version': '4.3',
+        'X-Android-Build': '6',
+      },
+      body: JSON.stringify({
+        userId: 'android-review-installation-123',
+        eventName: 'app_opened',
+        metadata: {},
+      }),
+    });
+
+    assert.equal(response.status, 200);
+  });
+
+  assert.equal(pool.eventRows.length, 1);
+  const metadata = pool.eventRows[0].metadata;
+  assert.equal(metadata.analyticsAccessTier, 'paid_pro');
+  assert.equal(metadata.subscriptionStore, 'manual');
+  assert.equal(metadata.subscriptionAccessSource, 'manual');
+  assert.equal(metadata.revenueEligible, false);
+});
+
+test('App Store Pro remains classified as paid Pro for linked-account analytics', async () => {
+  const future = new Date(Date.now() + 60_000).toISOString();
+  const pool = createPoolRecorder([
+    {
+      status: 'active',
+      is_trial: false,
+      product_id: 'agora_pro_yearly',
+      environment: 'Production',
+      expires_date: future,
+      grace_period_expires_date: null,
+      revocation_date: null,
+      auto_renew_enabled: true,
+      pro_access_source: 'app_store',
+      is_recurring_pro: true,
+      is_lifetime_pro: false,
+      pricing_cohort: 'standard',
+      subscription_store: 'app_store',
+    },
+  ]);
+
+  await withAnalyticsServer(pool, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/event`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Installation-ID': 'ios-linked-installation-123',
+        'X-iOS-Build': '812',
+      },
+      body: JSON.stringify({
+        userId: 'ios-linked-installation-123',
+        eventName: 'paywall_viewed',
+        metadata: {},
+      }),
+    });
+
+    assert.equal(response.status, 200);
+  });
+
+  const metadata = pool.eventRows[0].metadata;
+  assert.equal(metadata.clientPlatform, 'ios');
+  assert.equal(metadata.analyticsAccessTier, 'paid_pro');
+  assert.equal(metadata.subscriptionStore, 'app_store');
   assert.equal(metadata.revenueEligible, true);
 });
