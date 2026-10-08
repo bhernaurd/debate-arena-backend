@@ -175,17 +175,33 @@ export function classifyAffiliateReferralPlatform({
 }
 
 export function buildGooglePlayListingUrl(
-  packageName = 'com.bhernaurd.theagora'
+  packageName = 'com.bhernaurd.theagora',
+  creatorCode = null
 ) {
   const cleanPackage = String(packageName || '').trim();
   if (!/^[A-Za-z0-9_.]+$/.test(cleanPackage)) {
     throw new Error('Google Play package name is invalid.');
   }
 
-  return (
-    'https://play.google.com/store/apps/details?id=' +
-    encodeURIComponent(cleanPackage)
-  );
+  const url = new URL('https://play.google.com/store/apps/details');
+  url.searchParams.set('id', cleanPackage);
+
+  if (creatorCode != null) {
+    const cleanCode = String(creatorCode || '').trim().toUpperCase();
+    if (!/^[A-Z0-9]{2,64}$/.test(cleanCode)) {
+      throw new Error('Creator code is invalid.');
+    }
+
+    // Google Play preserves this encoded payload through installation.
+    // AffiliateAttributionManager reads it via the Install Referrer API and
+    // already recognizes the "ref" query parameter.
+    url.searchParams.set(
+      'referrer',
+      new URLSearchParams({ ref: cleanCode }).toString()
+    );
+  }
+
+  return url.toString();
 }
 
 export function renderReferralStoreLandingPage({
@@ -3210,9 +3226,6 @@ export function createAffiliateRouter(pool, options = {}) {
     options.googlePlayPackageName ||
     process.env.GOOGLE_PLAY_PACKAGE_NAME ||
     'com.bhernaurd.theagora';
-  const googlePlayListingUrl = buildGooglePlayListingUrl(
-    googlePlayPackageName
-  );
   const tokenEncryptionKey = options.tokenEncryptionKey || process.env.AFFILIATE_TOKEN_ENCRYPTION_KEY;
   const appClipHandoffEnabled =
     options.appClipHandoffEnabled ??
@@ -3639,11 +3652,19 @@ export function createAffiliateRouter(pool, options = {}) {
 
       res.setHeader('Cache-Control', 'no-store');
 
+      const normalizedCreatorCode =
+        result?.affiliate?.normalized_code ||
+        String(req.params.code || '').trim().toUpperCase();
+      const googlePlayReferralUrl = buildGooglePlayListingUrl(
+        googlePlayPackageName,
+        normalizedCreatorCode
+      );
+
       if (platform === 'android') {
-        // Step 1 only: route Android browser traffic to Google Play. The next
-        // affiliate step will add the Install Referrer payload that carries
-        // the creator code through a fresh install.
-        return res.redirect(302, googlePlayListingUrl);
+        // If the Android app is not installed, the verified App Link falls
+        // through to this route. Google Play preserves the creator code in its
+        // Install Referrer payload so the first app launch can recover it.
+        return res.redirect(302, googlePlayReferralUrl);
       }
 
       if (platform === 'ios') {
@@ -3662,11 +3683,9 @@ export function createAffiliateRouter(pool, options = {}) {
         .type('html')
         .send(
           renderReferralStoreLandingPage({
-            creatorCode:
-              result?.affiliate?.normalized_code ||
-              String(req.params.code || '').trim().toUpperCase(),
+            creatorCode: normalizedCreatorCode,
             appleUrl: result.redirectUrl,
-            googlePlayUrl: googlePlayListingUrl,
+            googlePlayUrl: googlePlayReferralUrl,
           })
         );
     } catch (error) {
