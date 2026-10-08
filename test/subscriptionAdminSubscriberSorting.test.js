@@ -47,13 +47,14 @@ test('Subscribers tab offers activity, newest, and oldest sorting',()=>{
   new vm.Script(script,{filename:'subscription-admin-client.js'});
 });
 
-test('Subscribers and customer detail show store and creator attribution',()=>{
+test('Subscribers and customer detail show store and referral attribution',()=>{
   const html=renderFinalDashboard();
-  assert.match(html,/<th>Store<\/th><th>Creator<\/th>/);
+  assert.match(html,/<th>Store<\/th><th>Referral<\/th>/);
   assert.match(html,/Google Play/);
   assert.match(html,/App Store/);
   assert.match(html,/affiliate_display_name/);
   assert.match(html,/affiliate_code/);
+  assert.match(html,/\['Referral',c\.affiliate_display_name/);
   assert.match(html,/Affiliate attribution/);
   assert.match(html,/affiliate_attribution_source/);
   assert.match(html,/t\.store_platform==='google_play'/);
