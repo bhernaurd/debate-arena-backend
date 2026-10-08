@@ -359,3 +359,97 @@ test('App Store Pro remains classified as paid Pro for linked-account analytics'
   assert.equal(metadata.subscriptionStore, 'app_store');
   assert.equal(metadata.revenueEligible, true);
 });
+
+
+test('analytics entitlement precedence cannot downgrade paid Pro to trial or manual access', () => {
+  const source = fs.readFileSync(
+    new URL('../analytics.js', import.meta.url),
+    'utf8'
+  );
+
+  const paidStore = source.indexOf(
+    "WHEN subscription_store IN ('app_store', 'google_play')\n" +
+    "            AND is_trial = false"
+  );
+  const storeTrial = source.indexOf(
+    "WHEN subscription_store IN ('app_store', 'google_play')\n" +
+    "            AND is_trial = true"
+  );
+  const manual = source.indexOf(
+    "WHEN subscription_store = 'manual'"
+  );
+
+  assert.ok(paidStore >= 0);
+  assert.ok(storeTrial > paidStore);
+  assert.ok(manual > storeTrial);
+});
+
+test('daily and platform analytics apply account-level test-user exclusions', () => {
+  const source = fs.readFileSync(
+    new URL('../analytics.js', import.meta.url),
+    'utf8'
+  );
+
+  const todayStart = source.indexOf('const todayQ = pool.query(');
+  const tierStart = source.indexOf('const tierQ = pool.query(');
+  const platformStart = source.indexOf(
+    'const todayByPlatformQ = pool.query('
+  );
+  const subscriptionsStart = source.indexOf(
+    'const subscriptionsQ = pool.query('
+  );
+
+  assert.ok(todayStart >= 0 && tierStart > todayStart);
+  assert.ok(platformStart >= 0 && subscriptionsStart > platformStart);
+
+  const todayQuery = source.slice(todayStart, tierStart);
+  const platformQuery = source.slice(
+    platformStart,
+    subscriptionsStart
+  );
+
+  for (const query of [todayQuery, platformQuery]) {
+    assert.match(query, /excluded_accounts AS/);
+    assert.match(query, /LEFT JOIN installation_accounts ia/);
+    assert.match(
+      query,
+      /ea\.account_id = ia\.account_id/
+    );
+  }
+});
+
+test('App Store subscription summary excludes entitlements owned by excluded accounts', () => {
+  const source = fs.readFileSync(
+    new URL('../analytics.js', import.meta.url),
+    'utf8'
+  );
+
+  const subscriptionsStart = source.indexOf(
+    'const subscriptionsQ = pool.query('
+  );
+  const googlePlayStart = source.indexOf(
+    'const googlePlaySubscriptionsQ = pool.query('
+  );
+  assert.ok(
+    subscriptionsStart >= 0 &&
+    googlePlayStart > subscriptionsStart
+  );
+
+  const appStoreQuery = source.slice(
+    subscriptionsStart,
+    googlePlayStart
+  );
+
+  assert.match(
+    appStoreQuery,
+    /FROM account_subscription_ownership ownership/
+  );
+  assert.match(
+    appStoreQuery,
+    /ownership\.ownership_status = 'active'/
+  );
+  assert.match(
+    appStoreQuery,
+    /ai\.installation_id = x\.user_id/
+  );
+});
