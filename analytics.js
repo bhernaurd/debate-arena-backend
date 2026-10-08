@@ -36,6 +36,7 @@ export const ANALYTICS_ALLOWED_EVENTS = new Set([
   'purchase_failed',
   'restore_started',
   'restore_completed',
+  'restore_no_active_subscription',
   'restore_failed',
 
   // Learn ecosystem
