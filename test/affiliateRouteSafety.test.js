@@ -212,7 +212,7 @@ test('App Clip referral handoffs have a safe rollout gate plus an owner-only Tes
   assert.match(source, /createForTesting/);
   assert.match(source, /router\.post\('\/api\/affiliate\/referral-handoffs',/);
   assert.match(source, /handoffToken: result\.handoffToken/);
-  assert.match(source, /branded domain is the primary App Clip invocation URL/);
+  assert.match(source, /keep the existing App Clip fallback and exact handoff/);
   assert.match(source, /return res\.redirect\(302, result\.redirectUrl\)/);
   assert.doesNotMatch(source, /Creator offer ready/);
   assert.doesNotMatch(source, /Open The Agora<\/a>/);

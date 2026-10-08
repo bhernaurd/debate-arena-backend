@@ -7,6 +7,7 @@ import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
 import rateLimit from 'express-rate-limit';
 import pg from 'pg';
+import { DateTime } from 'luxon';
 
 import { createDailyChallengeRouter } from './dailyChallenge.js';
 import { createPushRouter } from './pushRoutes.js';
@@ -47,6 +48,8 @@ import { createRankedRatingService } from './lib/rankedRatingService.js';
 import { createRankedDebateEngineService } from './lib/rankedDebateEngineService.js';
 import { createCrossPlatformProAccessService } from './lib/crossPlatformProAccessService.js';
 import { createGooglePlaySubscriptionService } from './lib/googlePlaySubscriptionService.js';
+import { createAffiliateGooglePlayAttributionService } from './lib/affiliateGooglePlayAttributionService.js';
+import { createAffiliateProgramService } from './lib/affiliateProgramService.js';
 import { createRankedTopicGeneratorService } from './lib/rankedTopicGeneratorService.js';
 import { createAiContentReportService } from './lib/aiContentReportService.js';
 import { appendAgoraAiSafetyPolicy } from './lib/aiSafetyPolicy.js';
@@ -438,7 +441,7 @@ const affiliateSubscriptionAttributionService =
 
 if (!affiliateSubscriptionAttributionEnabled) {
   console.warn(
-    '[AffiliateAttribution] Live Apple subscription attribution is disabled. Stored verified transactions can be reconciled later.'
+    '[AffiliateAttribution] Live Apple and Google Play subscription attribution is disabled. Stored verified transactions can be reconciled later.'
   );
 }
 
@@ -471,9 +474,61 @@ const accountProAccessService =
     pool,
   });
 
+const affiliateProgramService = createAffiliateProgramService({
+  pool,
+  appAppleId:
+    process.env.AFFILIATE_APPLE_APP_ID || '6762416967',
+  tokenEncryptionKey:
+    process.env.AFFILIATE_TOKEN_ENCRYPTION_KEY,
+  partnerBaseUrl:
+    process.env.AFFILIATE_PARTNER_BASE_URL,
+  referralBaseUrl:
+    process.env.AFFILIATE_REFERRAL_BASE_URL ||
+    'https://debate-arena-backend-production.up.railway.app',
+  publicReferralBaseUrl:
+    process.env.AFFILIATE_PUBLIC_REFERRAL_BASE_URL ||
+    'https://theagoraphilosophy.app',
+  appClipReferralEnabled:
+    affiliateAppClipHandoffEnabled,
+  appClipBundleId:
+    process.env.AFFILIATE_APP_CLIP_BUNDLE_ID ||
+    'com.bhernaurd.TheAgora.Clip',
+});
+
+const affiliateGooglePlayAttributionService =
+  affiliateSubscriptionAttributionEnabled
+    ? createAffiliateGooglePlayAttributionService({ pool })
+    : null;
+
 const googlePlaySubscriptionService =
   createGooglePlaySubscriptionService({
     pool,
+    affiliateGooglePlayAttributionService,
+    onAffiliateBillingEvent:
+      affiliateSubscriptionAttributionEnabled
+        ? async ({
+            affiliateId,
+            eventAt,
+            testPurchase,
+          }) => {
+            const payoutPeriod = DateTime
+              .fromISO(eventAt, {
+                zone: 'America/Chicago',
+              })
+              .startOf('month')
+              .toISODate();
+
+            await affiliateProgramService.refreshMonthlyPayout({
+              affiliateId,
+              payoutPeriod,
+              finalize: false,
+              actor:
+                testPurchase
+                  ? 'system_google_play_test_billing'
+                  : 'system_google_play_billing',
+            });
+          }
+        : null,
   });
 
 const accountMirrorService =
@@ -681,6 +736,7 @@ app.use('/api/account', accountAuthRouter);
 app.use('/affiliate', affiliatePortalLimiter);
 app.use(createAffiliateCurrentOfferDashboardMiddleware(pool));
 app.use(createAffiliateRouter(pool, {
+  service: affiliateProgramService,
   accountAuthService,
   affiliateSubscriptionAttributionService,
   appClipHandoffEnabled: affiliateAppClipHandoffEnabled,
