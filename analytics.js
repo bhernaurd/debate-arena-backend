@@ -270,6 +270,45 @@ export function createAnalyticsRouter(pool, options = {}) {
                AND link.environment = se.environment
                AND link.user_id = $1
            )
+           OR EXISTS (
+             SELECT 1
+             FROM account_subscription_ownership ownership
+             INNER JOIN linked_account account
+               ON account.account_id = ownership.account_id
+             WHERE ownership.original_transaction_id =
+                   se.original_transaction_id
+               AND ownership.environment = se.environment
+               AND ownership.ownership_status = 'active'
+           )
+
+        UNION ALL
+
+        SELECT
+          'active'::text AS status,
+          FALSE AS is_trial,
+          'agora_pro_manual'::text AS product_id,
+          'Manual'::text AS environment,
+          COALESCE(
+            manual.expires_at,
+            NOW() + INTERVAL '100 years'
+          ) AS expires_date,
+          NULL::timestamptz AS grace_period_expires_date,
+          manual.revoked_at AS revocation_date,
+          NULL::boolean AS auto_renew_enabled,
+          'manual'::text AS pro_access_source,
+          FALSE AS is_recurring_pro,
+          FALSE AS is_lifetime_pro,
+          'unknown'::text AS pricing_cohort,
+          'manual'::text AS subscription_store,
+          manual.updated_at
+        FROM account_manual_pro_grants manual
+        INNER JOIN linked_account account
+          ON account.account_id = manual.account_id
+        WHERE manual.revoked_at IS NULL
+          AND (
+            manual.expires_at IS NULL
+            OR manual.expires_at > NOW()
+          )
 
         UNION ALL
 
