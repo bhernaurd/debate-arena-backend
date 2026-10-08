@@ -89,13 +89,14 @@ CREATE TABLE IF NOT EXISTS affiliate_google_play_billing_events (
         REFERENCES affiliate_google_play_subscription_attributions(purchase_token_sha256)
         ON DELETE RESTRICT,
 
+    event_key TEXT NOT NULL UNIQUE,
     google_order_id TEXT NOT NULL,
     product_id TEXT NOT NULL,
     base_plan_id TEXT,
     offer_id TEXT,
 
     event_type TEXT NOT NULL
-        CHECK (event_type IN ('trial_start', 'paid_order')),
+        CHECK (event_type IN ('trial_start', 'paid_order', 'reversal')),
 
     event_at TIMESTAMPTZ NOT NULL,
     test_purchase BOOLEAN NOT NULL DEFAULT FALSE,
@@ -105,8 +106,8 @@ CREATE TABLE IF NOT EXISTS affiliate_google_play_billing_events (
     observed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    CONSTRAINT affiliate_google_play_billing_order_unique
-        UNIQUE (google_order_id),
+    CONSTRAINT affiliate_google_play_event_key_nonempty
+        CHECK (length(btrim(event_key)) BETWEEN 1 AND 300),
 
     CONSTRAINT affiliate_google_play_order_nonempty
         CHECK (length(btrim(google_order_id)) BETWEEN 1 AND 255)
@@ -129,7 +130,7 @@ COMMENT ON TABLE affiliate_google_play_subscription_attributions IS
 'Permanent affiliate ownership for verified Google Play subscription purchase tokens. Initial ownership requires the shared creator offer plus the authenticated account creator-code claim; linked replacement tokens inherit that ownership.';
 
 COMMENT ON TABLE affiliate_google_play_billing_events IS
-'Idempotent verified Google Play affiliate billing observations keyed by Google order ID. paid_order rows are eligible for base-price affiliate commission; free-trial rows are never commissionable.';
+'Idempotent verified Google Play affiliate billing observations. paid_order rows are commissionable unless a reversal exists for the same Google order ID; trial_start rows are never commissionable.';
 ),
 
     product_id TEXT,
