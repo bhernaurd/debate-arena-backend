@@ -38,7 +38,7 @@ test('migration stores permanent Google affiliate ownership without raw purchase
 test('Google affiliate billing ledger is order-id idempotent and separates trial from paid orders', () => {
   assert.match(migration, /CREATE TABLE IF NOT EXISTS affiliate_google_play_billing_events/);
   assert.match(migration, /event_key TEXT NOT NULL UNIQUE/);
-  assert.match(migration, /event_type IN \('trial_start', 'paid_order', 'reversal'\)/);
+  assert.match(migration, /event_type\s+IN\s*\(\s*'trial_start'\s*,\s*'paid_order'\s*,\s*'reversal'\s*\)/);
   assert.match(migration, /test_purchase BOOLEAN NOT NULL DEFAULT FALSE/);
 });
 
