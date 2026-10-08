@@ -60,6 +60,9 @@ test('owner APIs read cross-platform customer metrics timelines and events', () 
   assert.match(routes, /subscription_admin_cross_platform_transaction_timeline_v1/);
   assert.match(routes, /subscription_admin_cross_platform_events_v1/);
   assert.match(dashboardRoutes, /subscription_admin_cross_platform_current_customers_v1/);
+  assert.match(routes, /store_platform/);
+  assert.match(routes, /affiliate_display_name/);
+  assert.match(routes, /affiliate_attribution_source/);
 });
 
 test('subscriber history and UI expose Google Play alongside App Store', () => {
