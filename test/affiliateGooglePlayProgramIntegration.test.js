@@ -64,6 +64,10 @@ test('affiliate dashboard combines verified Apple and Google subscriber state', 
   assert.match(programService, /affiliate_google_play_subscription_attributions/);
   assert.match(programService, /mergeExactSubscriberSnapshots/);
   assert.match(programService, /verified_cross_platform_subscriptions/);
+  assert.match(programService, /platform: 'app_store'/);
+  assert.match(programService, /platform: 'google_play'/);
+  assert.match(programService, /appStoreCurrentSubscribers/);
+  assert.match(programService, /googlePlayCurrentSubscribers/);
 });
 
 test('affiliate payout calculation includes only verified paid Google orders', () => {
