@@ -713,7 +713,10 @@ SELECT
     'google_play'::text AS store_platform
 FROM google_play_subscription_state_events event
 WHERE
-    event.change_kind = 'snapshot'
+    (
+        event.change_kind = 'snapshot'
+        AND event.normalized_status <> 'pending'
+    )
     OR (
         event.previous_latest_order_id IS NOT NULL
         AND event.previous_latest_order_id IS DISTINCT FROM event.latest_order_id
