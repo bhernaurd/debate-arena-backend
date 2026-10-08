@@ -36,7 +36,15 @@ export const ANALYTICS_ALLOWED_EVENTS = new Set([
   'purchase_failed',
   'restore_started',
   'restore_completed',
+  'restore_no_active_subscription',
   'restore_failed',
+
+  // Ranked funnel
+  'ranked_placement_started',
+  'ranked_placement_completed',
+  'ranked_ladder_started',
+  'ranked_ladder_completed',
+  'ranked_forfeited',
 
   // Learn ecosystem
   'learn_hub_viewed',
@@ -106,6 +114,83 @@ function sanitizeMetadata(meta) {
   return meta;
 }
 
+const ANALYTICS_CLIENT_PLATFORMS = new Set([
+  'ios',
+  'android',
+]);
+const MAX_CLIENT_HEADER_LENGTH = 100;
+
+function cleanClientHeader(value) {
+  if (typeof value !== 'string') return null;
+  const clean = value.trim().slice(0, MAX_CLIENT_HEADER_LENGTH);
+  return clean || null;
+}
+
+export function analyticsClientContextFromHeaders(headers = {}) {
+  const explicitPlatform = cleanClientHeader(
+    headers.clientPlatform
+  )?.toLowerCase() || null;
+  const iosVersion = cleanClientHeader(headers.iosVersion);
+  const iosBuild = cleanClientHeader(headers.iosBuild);
+  const androidVersion = cleanClientHeader(headers.androidVersion);
+  const androidBuild = cleanClientHeader(headers.androidBuild);
+
+  let clientPlatform = 'unknown';
+  let clientPlatformSource = 'unknown';
+
+  if (
+    explicitPlatform &&
+    ANALYTICS_CLIENT_PLATFORMS.has(explicitPlatform)
+  ) {
+    clientPlatform = explicitPlatform;
+    clientPlatformSource = 'x-client-platform';
+  } else if (!explicitPlatform) {
+    const hasIosHint = Boolean(iosVersion || iosBuild);
+    const hasAndroidHint = Boolean(
+      androidVersion || androidBuild
+    );
+
+    if (hasIosHint && !hasAndroidHint) {
+      clientPlatform = 'ios';
+      clientPlatformSource = 'ios-header-fallback';
+    } else if (hasAndroidHint && !hasIosHint) {
+      clientPlatform = 'android';
+      clientPlatformSource = 'android-header-fallback';
+    }
+  }
+
+  const clientVersion =
+    clientPlatform === 'ios'
+      ? iosVersion
+      : clientPlatform === 'android'
+        ? androidVersion
+        : null;
+  const clientBuild =
+    clientPlatform === 'ios'
+      ? iosBuild
+      : clientPlatform === 'android'
+        ? androidBuild
+        : null;
+
+  return Object.freeze({
+    clientPlatform,
+    clientVersion,
+    clientBuild,
+    clientPlatformSource,
+    clientAnalyticsVersion: 'platform_v1',
+  });
+}
+
+function analyticsClientContext(req) {
+  return analyticsClientContextFromHeaders({
+    clientPlatform: req.get('x-client-platform'),
+    iosVersion: req.get('x-ios-version'),
+    iosBuild: req.get('x-ios-build'),
+    androidVersion: req.get('x-android-version'),
+    androidBuild: req.get('x-android-build'),
+  });
+}
+
 
 export function isEntitlementUsable(row) {
   if (!row) return false;
@@ -156,44 +241,168 @@ export function createAnalyticsRouter(pool, options = {}) {
   async function subscriptionContext(userId) {
     const result = await pool.query(
       `
+      WITH linked_account AS (
+        SELECT ai.account_id
+        FROM account_installations ai
+        WHERE ai.installation_id = $1
+          AND ai.unlinked_at IS NULL
+        ORDER BY
+          ai.updated_at DESC,
+          ai.linked_at DESC
+        LIMIT 1
+      ),
+      entitlement_candidates AS (
+        SELECT
+          se.status,
+          se.is_trial,
+          se.product_id,
+          se.environment,
+          se.expires_date,
+          se.grace_period_expires_date,
+          se.revocation_date,
+          se.auto_renew_enabled,
+          se.pro_access_source,
+          se.is_recurring_pro,
+          se.is_lifetime_pro,
+          COALESCE(se.pricing_cohort, 'unknown')
+            AS pricing_cohort,
+          'app_store'::text AS subscription_store,
+          se.updated_at
+        FROM subscription_entitlements se
+        WHERE se.user_id = $1
+           OR EXISTS (
+             SELECT 1
+             FROM subscription_installation_links link
+             WHERE link.original_transaction_id =
+                   se.original_transaction_id
+               AND link.environment = se.environment
+               AND link.user_id = $1
+           )
+           OR EXISTS (
+             SELECT 1
+             FROM account_subscription_ownership ownership
+             INNER JOIN linked_account account
+               ON account.account_id = ownership.account_id
+             WHERE ownership.original_transaction_id =
+                   se.original_transaction_id
+               AND ownership.environment = se.environment
+               AND ownership.ownership_status = 'active'
+           )
+
+        UNION ALL
+
+        SELECT
+          'active'::text AS status,
+          FALSE AS is_trial,
+          'agora_pro_manual'::text AS product_id,
+          'Manual'::text AS environment,
+          COALESCE(
+            manual.expires_at,
+            NOW() + INTERVAL '100 years'
+          ) AS expires_date,
+          NULL::timestamptz AS grace_period_expires_date,
+          manual.revoked_at AS revocation_date,
+          NULL::boolean AS auto_renew_enabled,
+          'manual'::text AS pro_access_source,
+          FALSE AS is_recurring_pro,
+          FALSE AS is_lifetime_pro,
+          'unknown'::text AS pricing_cohort,
+          'manual'::text AS subscription_store,
+          manual.updated_at
+        FROM account_manual_pro_grants manual
+        INNER JOIN linked_account account
+          ON account.account_id = manual.account_id
+        WHERE manual.revoked_at IS NULL
+          AND (
+            manual.expires_at IS NULL
+            OR manual.expires_at > NOW()
+          )
+
+        UNION ALL
+
+        SELECT
+          gp.normalized_status AS status,
+          gp.is_trial,
+          gp.product_id,
+          CASE
+            WHEN gp.test_purchase = true
+              THEN 'Test'
+            ELSE 'Production'
+          END AS environment,
+          gp.expires_date,
+          CASE
+            WHEN gp.normalized_status = 'grace_period'
+              THEN gp.expires_date
+            ELSE NULL::timestamptz
+          END AS grace_period_expires_date,
+          NULL::timestamptz AS revocation_date,
+          gp.auto_renew_enabled,
+          'google_play'::text AS pro_access_source,
+          TRUE AS is_recurring_pro,
+          FALSE AS is_lifetime_pro,
+          COALESCE(gp.pricing_cohort, 'unknown')
+            AS pricing_cohort,
+          'google_play'::text AS subscription_store,
+          gp.updated_at
+        FROM google_play_subscription_entitlements gp
+        INNER JOIN linked_account account
+          ON account.account_id = gp.account_id
+      )
       SELECT
-        se.status,
-        se.is_trial,
-        se.product_id,
-        se.environment,
-        se.expires_date,
-        se.grace_period_expires_date,
-        se.revocation_date,
-        se.auto_renew_enabled,
-        se.pro_access_source,
-        se.is_recurring_pro,
-        se.is_lifetime_pro,
-        COALESCE(se.pricing_cohort, 'unknown') AS pricing_cohort
-      FROM subscription_entitlements se
-      WHERE se.user_id = $1
-         OR EXISTS (
-           SELECT 1
-           FROM subscription_installation_links link
-           WHERE link.original_transaction_id = se.original_transaction_id
-             AND link.environment = se.environment
-             AND link.user_id = $1
-         )
+        status,
+        is_trial,
+        product_id,
+        environment,
+        expires_date,
+        grace_period_expires_date,
+        revocation_date,
+        auto_renew_enabled,
+        pro_access_source,
+        is_recurring_pro,
+        is_lifetime_pro,
+        pricing_cohort,
+        subscription_store
+      FROM entitlement_candidates
       ORDER BY
         CASE
-          WHEN se.is_lifetime_pro = true
-            AND se.status = 'active'
-            AND se.revocation_date IS NULL
+          WHEN is_lifetime_pro = true
+            AND status = 'active'
+            AND revocation_date IS NULL
             THEN 0
-          WHEN se.status IN ('trial', 'active')
-            AND se.expires_date > NOW()
+          WHEN subscription_store IN ('app_store', 'google_play')
+            AND is_trial = false
+            AND (
+              (status = 'active' AND expires_date > NOW())
+              OR (
+                status = 'grace_period'
+                AND grace_period_expires_date > NOW()
+              )
+            )
             THEN 1
-          WHEN se.status = 'grace_period'
-            AND se.grace_period_expires_date > NOW()
+          WHEN subscription_store IN ('app_store', 'google_play')
+            AND is_trial = true
+            AND (
+              (status = 'trial' AND expires_date > NOW())
+              OR (
+                status = 'grace_period'
+                AND grace_period_expires_date > NOW()
+              )
+            )
+            THEN 2
+          WHEN subscription_store = 'manual'
+            AND status = 'active'
+            AND expires_date > NOW()
+            THEN 3
+          ELSE 4
+        END,
+        CASE
+          WHEN environment = 'Production'
+            THEN 0
+          WHEN environment = 'Test'
             THEN 1
           ELSE 2
         END,
-        CASE WHEN se.environment = 'Production' THEN 0 ELSE 1 END,
-        se.updated_at DESC
+        updated_at DESC
       LIMIT 1
       `,
       [userId]
@@ -215,6 +424,8 @@ export function createAnalyticsRouter(pool, options = {}) {
       subscriptionStatus: entitlement?.status || 'none',
       subscriptionProductId: entitlement?.product_id || null,
       subscriptionEnvironment: entitlement?.environment || null,
+      subscriptionStore:
+        entitlement?.subscription_store || 'none',
       subscriptionAccessSource:
         entitlement?.pro_access_source || 'unknown',
       subscriptionIsRecurring:
@@ -229,17 +440,25 @@ export function createAnalyticsRouter(pool, options = {}) {
         entitlement?.environment === 'Production' &&
         entitlement?.is_recurring_pro === true &&
         analyticsAccessTier === 'paid_pro',
-      analyticsVersion: 'july31_analytics_v1',
+      analyticsVersion: 'cross_platform_analytics_v2',
       pricingCohortAnalyticsVersion: 'founding_pricing_v1',
     };
   }
 
-  async function recordEvent(userId, eventName, metadata) {
+  async function recordEvent(
+    userId,
+    eventName,
+    metadata,
+    clientContext
+  ) {
     const context = await subscriptionContext(userId);
 
+    // Platform/build values are derived from request headers on the server.
+    // Spread them last so arbitrary client metadata cannot spoof the platform.
     const enrichedMetadata = {
       ...(metadata || {}),
       ...context,
+      ...(clientContext || {}),
     };
 
     await pool.query(
@@ -266,8 +485,16 @@ export function createAnalyticsRouter(pool, options = {}) {
 
       const userId = identity.userId;
 
+      const clientContext =
+        analyticsClientContext(req);
+
       await recordActiveDay(userId);
-      await recordEvent(userId, 'app_opened', null);
+      await recordEvent(
+        userId,
+        'app_opened',
+        null,
+        clientContext
+      );
 
       return res.json({ success: true });
     } catch (err) {
@@ -312,7 +539,15 @@ export function createAnalyticsRouter(pool, options = {}) {
         });
       }
 
-      await recordEvent(userId, eventName, cleanMeta);
+      const clientContext =
+        analyticsClientContext(req);
+
+      await recordEvent(
+        userId,
+        eventName,
+        cleanMeta,
+        clientContext
+      );
       await recordActiveDay(userId);
 
       return res.json({ success: true });
@@ -352,7 +587,25 @@ export function createAnalyticsRouter(pool, options = {}) {
       );
 
       const todayQ = pool.query(
-        `SELECT
+        `WITH installation_accounts AS (
+           SELECT DISTINCT ON (installation_id)
+             installation_id,
+             account_id
+           FROM account_installations
+           ORDER BY
+             installation_id,
+             (unlinked_at IS NULL) DESC,
+             updated_at DESC,
+             linked_at DESC
+         ),
+         excluded_accounts AS (
+           SELECT DISTINCT ia.account_id
+           FROM excluded_analytics_users excluded
+           JOIN installation_accounts ia
+             ON ia.installation_id = excluded.user_id
+           WHERE ia.account_id IS NOT NULL
+         )
+         SELECT
            COUNT(*) FILTER (WHERE event_name = 'app_opened')                    AS app_opens_today,
            COUNT(DISTINCT COALESCE(NULLIF(metadata->>'debateId', ''), id::text))
              FILTER (WHERE event_name = 'debate_started')                       AS debate_starts_today,
@@ -365,12 +618,22 @@ export function createAnalyticsRouter(pool, options = {}) {
            COUNT(*) FILTER (WHERE event_name = 'paywall_viewed')                AS paywall_views_today,
            COUNT(*) FILTER (WHERE event_name = 'purchase_completed')            AS purchases_completed_today
          FROM user_events e
+         LEFT JOIN installation_accounts ia
+           ON ia.installation_id = e.user_id
          WHERE (e.created_at AT TIME ZONE $1)::date =
                (now() AT TIME ZONE $1)::date
            AND NOT EXISTS (
              SELECT 1
              FROM excluded_analytics_users x
              WHERE x.user_id = e.user_id
+           )
+           AND (
+             ia.account_id IS NULL
+             OR NOT EXISTS (
+               SELECT 1
+               FROM excluded_accounts ea
+               WHERE ea.account_id = ia.account_id
+             )
            )`,
         [tz]
       );
@@ -421,6 +684,161 @@ export function createAnalyticsRouter(pool, options = {}) {
            COUNT(*) FILTER (WHERE tier = 'legacy_unknown') AS unknown_dau
          FROM ranked
          WHERE rn = 1`,
+        [tz]
+      );
+
+      const platformUsersQ = pool.query(
+        `WITH t AS (
+           SELECT (now() AT TIME ZONE $1)::date AS today
+         ),
+         installation_accounts AS (
+           SELECT DISTINCT ON (installation_id)
+             installation_id,
+             account_id
+           FROM account_installations
+           ORDER BY
+             installation_id,
+             (unlinked_at IS NULL) DESC,
+             updated_at DESC,
+             linked_at DESC
+         ),
+         excluded_accounts AS (
+           SELECT DISTINCT ia.account_id
+           FROM excluded_analytics_users excluded
+           JOIN installation_accounts ia
+             ON ia.installation_id = excluded.user_id
+           WHERE ia.account_id IS NOT NULL
+         ),
+         platform_activity AS (
+           SELECT DISTINCT
+             COALESCE(
+               'account:' || ia.account_id::text,
+               'installation:' || e.user_id
+             ) AS analytics_user_key,
+             e.metadata->>'clientPlatform' AS platform,
+             (e.created_at AT TIME ZONE $1)::date AS active_date
+           FROM user_events e
+           LEFT JOIN installation_accounts ia
+             ON ia.installation_id = e.user_id
+           WHERE e.metadata->>'clientPlatform' IN ('ios', 'android')
+             AND NOT EXISTS (
+               SELECT 1
+               FROM excluded_analytics_users x
+               WHERE x.user_id = e.user_id
+             )
+             AND (
+               ia.account_id IS NULL
+               OR NOT EXISTS (
+                 SELECT 1
+                 FROM excluded_accounts ea
+                 WHERE ea.account_id = ia.account_id
+               )
+             )
+         )
+         SELECT
+           COUNT(DISTINCT analytics_user_key)
+             FILTER (
+               WHERE platform = 'ios'
+                 AND active_date = t.today
+             ) AS ios_dau,
+           COUNT(DISTINCT analytics_user_key)
+             FILTER (
+               WHERE platform = 'ios'
+                 AND active_date >= t.today - 6
+             ) AS ios_wau,
+           COUNT(DISTINCT analytics_user_key)
+             FILTER (
+               WHERE platform = 'ios'
+                 AND active_date >= t.today - 29
+             ) AS ios_mau,
+           COUNT(DISTINCT analytics_user_key)
+             FILTER (
+               WHERE platform = 'android'
+                 AND active_date = t.today
+             ) AS android_dau,
+           COUNT(DISTINCT analytics_user_key)
+             FILTER (
+               WHERE platform = 'android'
+                 AND active_date >= t.today - 6
+             ) AS android_wau,
+           COUNT(DISTINCT analytics_user_key)
+             FILTER (
+               WHERE platform = 'android'
+                 AND active_date >= t.today - 29
+             ) AS android_mau
+         FROM platform_activity
+         CROSS JOIN t`,
+        [tz]
+      );
+
+      const todayByPlatformQ = pool.query(
+        `WITH installation_accounts AS (
+           SELECT DISTINCT ON (installation_id)
+             installation_id,
+             account_id
+           FROM account_installations
+           ORDER BY
+             installation_id,
+             (unlinked_at IS NULL) DESC,
+             updated_at DESC,
+             linked_at DESC
+         ),
+         excluded_accounts AS (
+           SELECT DISTINCT ia.account_id
+           FROM excluded_analytics_users excluded
+           JOIN installation_accounts ia
+             ON ia.installation_id = excluded.user_id
+           WHERE ia.account_id IS NOT NULL
+         )
+         SELECT
+           COALESCE(
+             NULLIF(e.metadata->>'clientPlatform', ''),
+             'unknown'
+           ) AS platform,
+           COUNT(*) FILTER (
+             WHERE e.event_name = 'app_opened'
+           ) AS app_opens,
+           COUNT(DISTINCT COALESCE(
+             NULLIF(e.metadata->>'debateId', ''),
+             e.id::text
+           )) FILTER (
+             WHERE e.event_name = 'debate_started'
+           ) AS debate_starts,
+           COUNT(DISTINCT COALESCE(
+             NULLIF(e.metadata->>'debateId', ''),
+             e.id::text
+           )) FILTER (
+             WHERE e.event_name = 'debate_completed'
+           ) AS debate_completions,
+           COUNT(*) FILTER (
+             WHERE e.event_name = 'daily_challenge_completed'
+           ) AS daily_challenge_completions,
+           COUNT(*) FILTER (
+             WHERE e.event_name = 'paywall_viewed'
+           ) AS paywall_views,
+           COUNT(*) FILTER (
+             WHERE e.event_name = 'purchase_completed'
+           ) AS purchases_completed
+         FROM user_events e
+         LEFT JOIN installation_accounts ia
+           ON ia.installation_id = e.user_id
+         WHERE (e.created_at AT TIME ZONE $1)::date =
+               (now() AT TIME ZONE $1)::date
+           AND NOT EXISTS (
+             SELECT 1
+             FROM excluded_analytics_users x
+             WHERE x.user_id = e.user_id
+           )
+           AND (
+             ia.account_id IS NULL
+             OR NOT EXISTS (
+               SELECT 1
+               FROM excluded_accounts ea
+               WHERE ea.account_id = ia.account_id
+             )
+           )
+         GROUP BY 1
+         ORDER BY 1`,
         [tz]
       );
 
@@ -614,6 +1032,158 @@ export function createAnalyticsRouter(pool, options = {}) {
                   AND link.environment = se.environment
                   AND link.user_id = x.user_id
               )
+              OR EXISTS (
+                SELECT 1
+                FROM account_subscription_ownership ownership
+                INNER JOIN account_installations ai
+                  ON ai.account_id = ownership.account_id
+                WHERE ownership.original_transaction_id =
+                      se.original_transaction_id
+                  AND ownership.environment = se.environment
+                  AND ownership.ownership_status = 'active'
+                  AND ai.installation_id = x.user_id
+              )
+         )`
+      );
+
+      const googlePlaySubscriptionsQ = pool.query(
+        `SELECT
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND is_trial = true
+               AND normalized_status IN (
+                 'trial',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_trials,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND is_trial = false
+               AND normalized_status IN (
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_paid_subscribers,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND normalized_status IN (
+                 'trial',
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_pro_access,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND product_id = 'agora_pro_monthly'
+               AND is_trial = false
+               AND normalized_status IN (
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS paid_monthly,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND product_id = 'agora_pro_yearly'
+               AND is_trial = false
+               AND normalized_status IN (
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS paid_yearly,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND COALESCE(pricing_cohort, 'unknown') =
+                   'founding_2026'
+               AND is_trial = true
+               AND normalized_status IN (
+                 'trial',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_founding_trials,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND COALESCE(pricing_cohort, 'unknown') =
+                   'founding_2026'
+               AND is_trial = false
+               AND normalized_status IN (
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_founding_paid_subscribers,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND COALESCE(pricing_cohort, 'unknown') =
+                   'standard'
+               AND is_trial = true
+               AND normalized_status IN (
+                 'trial',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_standard_trials,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND COALESCE(pricing_cohort, 'unknown') =
+                   'standard'
+               AND is_trial = false
+               AND normalized_status IN (
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_standard_paid_subscribers,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND COALESCE(pricing_cohort, 'unknown') =
+                   'unknown'
+               AND normalized_status IN (
+                 'trial',
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_unknown_cohort,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND normalized_status IN (
+                 'trial',
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+               AND auto_renew_enabled = false
+           ) AS active_auto_renew_off,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND normalized_status = 'on_hold'
+           ) AS on_hold_subscriptions,
+           COUNT(*) FILTER (
+             WHERE test_purchase = false
+               AND normalized_status = 'paused'
+           ) AS paused_subscriptions,
+           COUNT(*) FILTER (
+             WHERE test_purchase = true
+               AND normalized_status IN (
+                 'trial',
+                 'active',
+                 'grace_period'
+               )
+               AND expires_date > NOW()
+           ) AS active_test_purchases
+         FROM google_play_subscription_entitlements gp
+         WHERE NOT EXISTS (
+           SELECT 1
+           FROM account_installations ai
+           INNER JOIN excluded_analytics_users x
+             ON x.user_id = ai.installation_id
+           WHERE ai.account_id = gp.account_id
          )`
       );
 
@@ -662,23 +1232,42 @@ export function createAnalyticsRouter(pool, options = {}) {
         users,
         today,
         tier,
+        platformUsers,
+        todayByPlatform,
         subscriptions,
+        googlePlaySubscriptions,
         retention,
       ] = await Promise.all([
         usersQ,
         todayQ,
         tierQ,
+        platformUsersQ,
+        todayByPlatformQ,
         subscriptionsQ,
+        googlePlaySubscriptionsQ,
         retentionQ,
       ]);
+
+      const platformRows = Object.fromEntries(
+        todayByPlatform.rows.map((row) => [
+          row.platform,
+          row,
+        ])
+      );
 
       return res.json({
         success: true,
         timezone: tz,
         users: users.rows[0],
+        platformUsers: platformUsers.rows[0],
         today: today.rows[0],
+        todayByPlatform: platformRows,
         todayByTier: tier.rows[0],
         subscriptions: subscriptions.rows[0],
+        subscriptionsByStore: {
+          appStore: subscriptions.rows[0],
+          googlePlay: googlePlaySubscriptions.rows[0],
+        },
         retention: retention.rows[0],
       });
     } catch (err) {
