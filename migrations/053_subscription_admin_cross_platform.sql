@@ -372,7 +372,7 @@ SELECT
         ELSE NULL
     END::timestamptz AS grace_period_expires_date,
     NULL::timestamptz AS revocation_date,
-    NULL::text AS expiration_intent,
+    NULL::integer AS expiration_intent,
     google.latest_order_id::text AS last_transaction_id,
     NULL::text AS last_notification_type,
     NULL::text AS last_notification_subtype,
