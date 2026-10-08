@@ -579,7 +579,25 @@ export function createAnalyticsRouter(pool, options = {}) {
       );
 
       const todayQ = pool.query(
-        `SELECT
+        `WITH installation_accounts AS (
+           SELECT DISTINCT ON (installation_id)
+             installation_id,
+             account_id
+           FROM account_installations
+           ORDER BY
+             installation_id,
+             (unlinked_at IS NULL) DESC,
+             updated_at DESC,
+             linked_at DESC
+         ),
+         excluded_accounts AS (
+           SELECT DISTINCT ia.account_id
+           FROM excluded_analytics_users excluded
+           JOIN installation_accounts ia
+             ON ia.installation_id = excluded.user_id
+           WHERE ia.account_id IS NOT NULL
+         )
+         SELECT
            COUNT(*) FILTER (WHERE event_name = 'app_opened')                    AS app_opens_today,
            COUNT(DISTINCT COALESCE(NULLIF(metadata->>'debateId', ''), id::text))
              FILTER (WHERE event_name = 'debate_started')                       AS debate_starts_today,
@@ -592,12 +610,22 @@ export function createAnalyticsRouter(pool, options = {}) {
            COUNT(*) FILTER (WHERE event_name = 'paywall_viewed')                AS paywall_views_today,
            COUNT(*) FILTER (WHERE event_name = 'purchase_completed')            AS purchases_completed_today
          FROM user_events e
+         LEFT JOIN installation_accounts ia
+           ON ia.installation_id = e.user_id
          WHERE (e.created_at AT TIME ZONE $1)::date =
                (now() AT TIME ZONE $1)::date
            AND NOT EXISTS (
              SELECT 1
              FROM excluded_analytics_users x
              WHERE x.user_id = e.user_id
+           )
+           AND (
+             ia.account_id IS NULL
+             OR NOT EXISTS (
+               SELECT 1
+               FROM excluded_accounts ea
+               WHERE ea.account_id = ia.account_id
+             )
            )`,
         [tz]
       );
@@ -736,42 +764,70 @@ export function createAnalyticsRouter(pool, options = {}) {
       );
 
       const todayByPlatformQ = pool.query(
-        `SELECT
+        `WITH installation_accounts AS (
+           SELECT DISTINCT ON (installation_id)
+             installation_id,
+             account_id
+           FROM account_installations
+           ORDER BY
+             installation_id,
+             (unlinked_at IS NULL) DESC,
+             updated_at DESC,
+             linked_at DESC
+         ),
+         excluded_accounts AS (
+           SELECT DISTINCT ia.account_id
+           FROM excluded_analytics_users excluded
+           JOIN installation_accounts ia
+             ON ia.installation_id = excluded.user_id
+           WHERE ia.account_id IS NOT NULL
+         )
+         SELECT
            COALESCE(
-             NULLIF(metadata->>'clientPlatform', ''),
+             NULLIF(e.metadata->>'clientPlatform', ''),
              'unknown'
            ) AS platform,
            COUNT(*) FILTER (
-             WHERE event_name = 'app_opened'
+             WHERE e.event_name = 'app_opened'
            ) AS app_opens,
            COUNT(DISTINCT COALESCE(
-             NULLIF(metadata->>'debateId', ''),
-             id::text
+             NULLIF(e.metadata->>'debateId', ''),
+             e.id::text
            )) FILTER (
-             WHERE event_name = 'debate_started'
+             WHERE e.event_name = 'debate_started'
            ) AS debate_starts,
            COUNT(DISTINCT COALESCE(
-             NULLIF(metadata->>'debateId', ''),
-             id::text
+             NULLIF(e.metadata->>'debateId', ''),
+             e.id::text
            )) FILTER (
-             WHERE event_name = 'debate_completed'
+             WHERE e.event_name = 'debate_completed'
            ) AS debate_completions,
            COUNT(*) FILTER (
-             WHERE event_name = 'daily_challenge_completed'
+             WHERE e.event_name = 'daily_challenge_completed'
            ) AS daily_challenge_completions,
            COUNT(*) FILTER (
-             WHERE event_name = 'paywall_viewed'
+             WHERE e.event_name = 'paywall_viewed'
            ) AS paywall_views,
            COUNT(*) FILTER (
-             WHERE event_name = 'purchase_completed'
+             WHERE e.event_name = 'purchase_completed'
            ) AS purchases_completed
          FROM user_events e
+         LEFT JOIN installation_accounts ia
+           ON ia.installation_id = e.user_id
          WHERE (e.created_at AT TIME ZONE $1)::date =
                (now() AT TIME ZONE $1)::date
            AND NOT EXISTS (
              SELECT 1
              FROM excluded_analytics_users x
              WHERE x.user_id = e.user_id
+           )
+           AND (
+             ia.account_id IS NULL
+             OR NOT EXISTS (
+               SELECT 1
+               FROM excluded_accounts ea
+               WHERE ea.account_id = ia.account_id
+             )
            )
          GROUP BY 1
          ORDER BY 1`,
