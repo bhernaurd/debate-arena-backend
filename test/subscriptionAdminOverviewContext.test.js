@@ -30,6 +30,8 @@ test('Overview uses compact monthly context',()=>{
   assert.match(html,/new this month/); assert.match(html,/first paid this month/); assert.match(html,/started this month/); assert.match(html,/Month to date/); assert.match(html,/overviewAppleHint/);
   const overview=html.match(/<section id="view-overview">([\s\S]*?)<section id="view-breakdown"/i)?.[1]||'';
   assert.doesNotMatch(overview,/historyPeriod|breakdownPeriod/);
+  assert.match(html,/metric\('App Store Active Pro',m\.app_store_active_pro_entitlements\|\|0/);
+  assert.match(html,/metric\('Google Play Active Pro',m\.google_play_active_pro_entitlements\|\|0/);
 });
 test('Accounts has its own acquisition tab and is removed from Subscriber Analytics',()=>{
   const html=renderFinalDashboard();

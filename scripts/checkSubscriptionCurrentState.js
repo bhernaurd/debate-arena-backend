@@ -21,7 +21,7 @@ const pool = new Pool({
 async function main() {
     const viewResult = await pool.query(`
         SELECT
-            to_regclass('public.subscription_admin_current_customers_v1') IS NOT NULL
+            to_regclass('public.subscription_admin_cross_platform_current_customers_v1') IS NOT NULL
                 AS has_current_customer_view;
     `);
 
@@ -41,25 +41,25 @@ async function main() {
         await Promise.all([
             pool.query(`
                 SELECT *
-                FROM subscription_admin_business_metrics_v1;
+                FROM subscription_admin_cross_platform_business_metrics_v1;
             `),
             pool.query(`
                 SELECT COUNT(*)::int AS duplicate_current_customer_rows
                 FROM (
                     SELECT customer_key, environment
-                    FROM subscription_admin_current_customers_v1
+                    FROM subscription_admin_cross_platform_current_customers_v1
                     GROUP BY customer_key, environment
                     HAVING COUNT(*) > 1
                 ) duplicates;
             `),
             pool.query(`
                 SELECT COUNT(*)::int AS superseded_canceling_chains
-                FROM subscription_admin_customers_v1 old_chain
+                FROM subscription_admin_cross_platform_customers_v1 old_chain
                 WHERE old_chain.environment = 'Production'
                   AND old_chain.canceling
                   AND EXISTS (
                     SELECT 1
-                    FROM subscription_admin_customers_v1 current_chain
+                    FROM subscription_admin_cross_platform_customers_v1 current_chain
                     WHERE current_chain.environment = old_chain.environment
                       AND current_chain.customer_key = old_chain.customer_key
                       AND current_chain.original_transaction_id <> old_chain.original_transaction_id
@@ -77,12 +77,12 @@ async function main() {
             `),
             pool.query(`
                 SELECT COUNT(*)::int AS invalid_current_canceling_rows
-                FROM subscription_admin_current_customers_v1 current_customer
+                FROM subscription_admin_cross_platform_current_customers_v1 current_customer
                 WHERE current_customer.environment = 'Production'
                   AND current_customer.canceling
                   AND EXISTS (
                     SELECT 1
-                    FROM subscription_admin_customers_v1 other_chain
+                    FROM subscription_admin_cross_platform_customers_v1 other_chain
                     WHERE other_chain.environment = current_customer.environment
                       AND other_chain.customer_key = current_customer.customer_key
                       AND other_chain.original_transaction_id <> current_customer.original_transaction_id

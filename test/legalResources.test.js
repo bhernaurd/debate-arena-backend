@@ -29,7 +29,7 @@ function assertPublicDocument(source, title, appName = LEGACY_APP_NAME) {
 test('public legal resources identify the app and operator', () => {
     assertPublicDocument(privacy, 'Privacy Policy', CURRENT_APP_NAME);
     assertPublicDocument(deletion, 'Account Deletion', CURRENT_APP_NAME);
-    assertPublicDocument(terms, 'Terms of Use');
+    assertPublicDocument(terms, 'Terms of Use', CURRENT_APP_NAME);
 });
 
 test('privacy policy exposes the external account-deletion path', () => {

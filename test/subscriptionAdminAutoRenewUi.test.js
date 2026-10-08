@@ -36,6 +36,9 @@ test('Subscriber Analytics shows Apple auto-renew freshness and drawer shows per
   assert.match(html, /api\('\/auto-renew-verification'\)/);
   assert.match(html, /function autoRenewDetail\(c\)/);
   assert.match(html, /verified '\+age/);
+  assert.match(html, /store_platform==='google_play'/);
+  assert.match(html, /Google Play verified/);
+  assert.match(html, /last_verified_at/);
   assert.match(html, /\['Auto-renew',autoRenewDetail\(c\)\]/);
   const script = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/i)?.[1] || '';
   assert.ok(script);

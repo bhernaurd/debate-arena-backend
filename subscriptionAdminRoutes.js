@@ -196,6 +196,12 @@ function normalizeMetrics(row = {}) {
     'billing_retry_subscriptions',
     'revoked_entitlements',
     'affiliate_attributed_recurring_chains',
+    'app_store_active_pro_entitlements',
+    'google_play_active_pro_entitlements',
+    'app_store_active_paid_subscribers',
+    'google_play_active_paid_subscribers',
+    'app_store_active_trials',
+    'google_play_active_trials',
     'sandbox_active_pro_entitlements',
   ];
 
@@ -274,10 +280,10 @@ export function createSubscriptionAdminRouter(
         statusResult,
         recentResult,
       ] = await Promise.all([
-          pool.query('SELECT * FROM subscription_admin_business_metrics_v1'),
+          pool.query('SELECT * FROM subscription_admin_cross_platform_business_metrics_v1'),
           pool.query(`
             SELECT COUNT(*)::int AS trials_ending
-            FROM subscription_admin_current_customers_v1
+            FROM subscription_admin_cross_platform_current_customers_v1
             WHERE environment = 'Production'
               AND trial_active
               AND auto_renew_enabled = FALSE
@@ -289,14 +295,14 @@ export function createSubscriptionAdminRouter(
               COUNT(*) FILTER (WHERE recurring_revenue_active)::int AS paid_recurring,
               COUNT(*) FILTER (WHERE trial_active)::int AS trials,
               ROUND(COALESCE(SUM(estimated_mrr_usd), 0), 2) AS estimated_mrr_usd
-            FROM subscription_admin_current_customers_v1
+            FROM subscription_admin_cross_platform_current_customers_v1
             WHERE environment = 'Production'
             GROUP BY pro_access_source
             ORDER BY pro_access_source
           `),
           pool.query(`
             SELECT status, COUNT(*)::int AS count
-            FROM subscription_admin_current_customers_v1
+            FROM subscription_admin_cross_platform_current_customers_v1
             WHERE environment = 'Production'
             GROUP BY status
             ORDER BY count DESC, status ASC
@@ -306,6 +312,7 @@ export function createSubscriptionAdminRouter(
               customer_key,
               original_transaction_id,
               environment,
+              store_platform,
               account_id,
               account_display_name,
               account_email,
@@ -322,13 +329,15 @@ export function createSubscriptionAdminRouter(
               access_ends_at,
               pricing_cohort,
               affiliate_code,
+              affiliate_display_name,
+              affiliate_attribution_source,
               latest_transaction_id,
               latest_transaction_reason,
               latest_transaction_signed_date,
               currency,
               price_milliunits,
               updated_at
-            FROM subscription_admin_current_customers_v1
+            FROM subscription_admin_cross_platform_current_customers_v1
             WHERE environment = 'Production'
             ORDER BY
               COALESCE(latest_transaction_signed_date, updated_at) DESC NULLS LAST,
@@ -371,7 +380,7 @@ export function createSubscriptionAdminRouter(
 
       const countResult = await pool.query(
         `SELECT COUNT(*)::int AS count
-         FROM subscription_admin_current_customers_v1
+         FROM subscription_admin_cross_platform_current_customers_v1
          ${filters.whereSql}`,
         filters.values
       );
@@ -386,6 +395,7 @@ export function createSubscriptionAdminRouter(
           customer_key,
           original_transaction_id,
           environment,
+          store_platform,
           account_id,
           account_status,
           account_display_name,
@@ -410,9 +420,9 @@ export function createSubscriptionAdminRouter(
           access_ends_at,
           (
             SELECT MIN(COALESCE(history.original_purchase_date, history.purchase_date, history.created_at))
-            FROM subscription_admin_customers_v1 history
-            WHERE history.customer_key = subscription_admin_current_customers_v1.customer_key
-              AND history.environment = subscription_admin_current_customers_v1.environment
+            FROM subscription_admin_cross_platform_customers_v1 history
+            WHERE history.customer_key = subscription_admin_cross_platform_current_customers_v1.customer_key
+              AND history.environment = subscription_admin_cross_platform_current_customers_v1.environment
           ) AS subscriber_since,
           purchase_date,
           original_purchase_date,
@@ -435,7 +445,7 @@ export function createSubscriptionAdminRouter(
           estimated_mrr_usd,
           created_at,
           updated_at
-        FROM subscription_admin_current_customers_v1
+        FROM subscription_admin_cross_platform_current_customers_v1
         ${filters.whereSql}
         ORDER BY ${customerSortSql(sort)}
         LIMIT ${limitParam}
@@ -470,7 +480,7 @@ export function createSubscriptionAdminRouter(
       const chainsResult = await pool.query(
         `
         SELECT *
-        FROM subscription_admin_customers_v1
+        FROM subscription_admin_cross_platform_customers_v1
         WHERE customer_key = $1
         ORDER BY
           CASE WHEN environment = 'Production' THEN 0 ELSE 1 END,
@@ -494,8 +504,8 @@ export function createSubscriptionAdminRouter(
         pool.query(
           `
           SELECT timeline.*
-          FROM subscription_admin_transaction_timeline_v1 timeline
-          JOIN subscription_admin_customers_v1 customer
+          FROM subscription_admin_cross_platform_transaction_timeline_v1 timeline
+          JOIN subscription_admin_cross_platform_customers_v1 customer
             ON customer.original_transaction_id = timeline.original_transaction_id
            AND customer.environment = timeline.environment
           WHERE customer.customer_key = $1
@@ -519,6 +529,7 @@ export function createSubscriptionAdminRouter(
             event.event_type,
             event.subtype,
             event.environment,
+            event.store_platform,
             event.product_id,
             event.status_after,
             event.is_trial,
@@ -526,8 +537,8 @@ export function createSubscriptionAdminRouter(
             event.expires_date,
             event.event_at,
             event.metadata
-          FROM subscription_events event
-          JOIN subscription_admin_customers_v1 customer
+          FROM subscription_admin_cross_platform_events_v1 event
+          JOIN subscription_admin_cross_platform_customers_v1 customer
             ON customer.original_transaction_id = event.original_transaction_id
            AND customer.environment = event.environment
           WHERE customer.customer_key = $1
@@ -594,6 +605,7 @@ export function createSubscriptionAdminRouter(
           event.event_type,
           event.subtype,
           event.environment,
+          event.store_platform,
           event.product_id,
           event.status_after,
           event.is_trial,
@@ -607,8 +619,8 @@ export function createSubscriptionAdminRouter(
           customer.account_email,
           customer.pro_access_source,
           customer.affiliate_code
-        FROM subscription_events event
-        LEFT JOIN subscription_admin_customers_v1 customer
+        FROM subscription_admin_cross_platform_events_v1 event
+        LEFT JOIN subscription_admin_cross_platform_customers_v1 customer
           ON customer.original_transaction_id = event.original_transaction_id
          AND customer.environment = event.environment
         ${whereSql}

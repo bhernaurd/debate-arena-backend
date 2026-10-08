@@ -21,11 +21,11 @@ const pool = new Pool({
 async function main() {
     const viewsResult = await pool.query(`
         SELECT
-            to_regclass('public.subscription_admin_customers_v1') IS NOT NULL
+            to_regclass('public.subscription_admin_cross_platform_customers_v1') IS NOT NULL
                 AS has_customer_view,
-            to_regclass('public.subscription_admin_business_metrics_v1') IS NOT NULL
+            to_regclass('public.subscription_admin_cross_platform_business_metrics_v1') IS NOT NULL
                 AS has_metrics_view,
-            to_regclass('public.subscription_admin_transaction_timeline_v1') IS NOT NULL
+            to_regclass('public.subscription_admin_cross_platform_transaction_timeline_v1') IS NOT NULL
                 AS has_timeline_view;
     `);
 
@@ -39,7 +39,7 @@ async function main() {
         console.log('[SubscriptionDashboard] Readiness:', {
             ready: false,
             views,
-            reason: 'Run migration 027_subscription_admin_dashboard_views.sql first.',
+            reason: 'Run migration 053_subscription_admin_cross_platform.sql first.',
         });
         process.exitCode = 1;
         return;
@@ -47,7 +47,7 @@ async function main() {
 
     const metricsResult = await pool.query(`
         SELECT *
-        FROM subscription_admin_business_metrics_v1;
+        FROM subscription_admin_cross_platform_business_metrics_v1;
     `);
 
     const integrityResult = await pool.query(`
@@ -72,7 +72,7 @@ async function main() {
                 WHERE is_lifetime_pro
                   AND access_ends_at IS NOT NULL
             ) AS lifetime_with_access_end
-        FROM subscription_admin_customers_v1;
+        FROM subscription_admin_cross_platform_customers_v1;
     `);
 
     const identityResult = await pool.query(`
@@ -81,7 +81,7 @@ async function main() {
             COUNT(*) FILTER (WHERE account_id IS NOT NULL) AS linked_accounts,
             COUNT(*) FILTER (WHERE account_email IS NOT NULL) AS rows_with_email,
             COUNT(*) FILTER (WHERE affiliate_id IS NOT NULL) AS affiliate_attributed_rows
-        FROM subscription_admin_customers_v1;
+        FROM subscription_admin_cross_platform_customers_v1;
     `);
 
     const integrity = integrityResult.rows[0] || {};

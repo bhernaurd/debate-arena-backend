@@ -281,7 +281,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
             BOOL_OR(trial_active) AS trial_active,
             BOOL_OR(recurring_revenue_active) AS paid_active,
             BOOL_OR(is_lifetime_pro AND has_pro_access) AS lifetime_active
-          FROM subscription_admin_current_customers_v1
+          FROM subscription_admin_cross_platform_current_customers_v1
           WHERE account_id = a.id
             AND environment = 'Production'
         ) sub ON TRUE
