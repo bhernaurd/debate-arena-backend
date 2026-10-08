@@ -691,7 +691,7 @@ function renderPartnerDashboardPage(token) {
     </div>
 
     <div id="dataNotice" class="notice">
-      No verified affiliate subscription activity yet. Subscriber metrics will populate as verified Apple transactions arrive; financial totals appear after payout data is calculated and reconciled.
+      No verified affiliate subscription activity yet. Subscriber metrics will populate as verified App Store or Google Play subscriptions arrive; financial totals appear after payout data is calculated and reconciled.
     </div>
 
     <section id="overviewTab">
@@ -822,7 +822,7 @@ function renderPartnerDashboardPage(token) {
               <div class="label">Pending Apple State</div>
               ${renderInfoButton(
                 'Pending Apple State',
-                'A verified referral exists, but the latest entitlement state has not arrived yet. This temporary safeguard prevents the subscriber from being silently omitted or double-counted while Apple data is still syncing.'
+                'A verified referral exists, but the latest entitlement state has not arrived yet. This temporary safeguard prevents the subscriber from being silently omitted or double-counted while store data is still syncing.'
               )}
             </div>
             <div class="value" id="pendingStateSubscribers">—</div>
@@ -1300,8 +1300,8 @@ function renderPartnerDashboardPage(token) {
           ? number(tier.count == null ? 0 : tier.count)
           : '—';
         const info = exactCountsAvailable
-          ? 'Active paid subscribers grouped by the price on their latest verified Apple paid transaction. The 7-day free trial is excluded.'
-          : 'Price-tier counts will appear once verified Apple subscription-chain data is available for this affiliate.';
+          ? 'Active paid subscribers grouped by the price on their latest verified App Store or Google Play paid subscription state. The 7-day free trial is excluded.'
+          : 'Price-tier counts will appear once verified subscription-chain data is available for this affiliate.';
         return '<div class="row"><span class="name name-with-info">' +
           html(label) +
           '<button class="info-button" type="button" aria-label="About ' + html(label) + '" aria-expanded="false" aria-describedby="infoTooltip" data-info-title="' + html(label) + '" data-info-text="' + html(info) + '">i</button>' +
@@ -1593,14 +1593,14 @@ function renderPartnerDashboardPage(token) {
       renderActivePriceTierRows(data);
 
       const freshnessValue = data.dataFreshness?.latestVerifiedSubscriptionAt || data.dataFreshness?.latestAppleStateDate;
-      text('freshness', freshnessValue ? 'Apple data through ' + dateLabel(freshnessValue, true) : 'Awaiting Apple data');
+      text('freshness', freshnessValue ? 'Subscription data through ' + dateLabel(freshnessValue, true) : 'Awaiting Apple data');
       const dataNotice = document.getElementById('dataNotice');
       const hasHistoricalReferrals = Number(data.historicalOffer?.totalSignups || 0) > 0;
       const awaitingCurrentProgram = data.dataFreshness?.status === 'awaiting_apple_data';
       dataNotice.style.display = awaitingCurrentProgram ? 'block' : 'none';
       if (awaitingCurrentProgram && hasHistoricalReferrals) {
         dataNotice.textContent =
-          'No verified activity in the current 7-day trial program yet. Previous-offer referrals are preserved below; financial totals update as verified Apple payout data is calculated and reconciled.';
+          'No verified activity in the current 7-day trial program yet. Previous-offer referrals are preserved below; financial totals update as verified App Store and Google Play billing data is calculated and reconciled.';
       }
 
       const subscriberRows = [
