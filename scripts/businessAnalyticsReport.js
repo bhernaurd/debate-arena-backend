@@ -141,6 +141,12 @@ export async function buildDailyBusinessAnalytics(client) {
         WHERE event_name = 'restore_completed'
           AND metadata->>'activeSubscriptionFound' = 'true'
       ) AS successful_restores,
+      COUNT(*) FILTER (
+        WHERE event_name = 'restore_no_active_subscription'
+      ) AS restore_no_active_subscription,
+      COUNT(*) FILTER (
+        WHERE event_name = 'restore_failed'
+      ) AS restore_failures,
       (SELECT COUNT(*) FROM started_sessions) AS purchase_start_sessions,
       (SELECT COUNT(*) FROM completed_sessions) AS purchase_completed_sessions,
       (
@@ -603,7 +609,7 @@ export async function buildDailyBusinessAnalytics(client) {
     `<b>Session-linked purchase completion:</b> ${toNumber(paywall.completed_started_sessions)} of ${toNumber(paywall.purchase_start_sessions)} started sessions (${percent(paywall.completed_started_sessions, paywall.purchase_start_sessions)})`,
     `<b>Completed sessions observed:</b> ${toNumber(paywall.purchase_completed_sessions)}`,
     `<b>Cancelled / pending / failed:</b> ${toNumber(paywall.purchase_cancellations)} / ${toNumber(paywall.purchase_pending)} / ${toNumber(paywall.purchase_failures)}`,
-    `<b>Successful restores:</b> ${toNumber(paywall.successful_restores)} of ${toNumber(paywall.restore_starts)} attempts`,
+    `<b>Restore outcomes:</b> ${toNumber(paywall.successful_restores)} successful / ${toNumber(paywall.restore_no_active_subscription)} no active subscription / ${toNumber(paywall.restore_failures)} failed (${toNumber(paywall.restore_starts)} attempts)`,
     ``,
     `<b>End-to-End Report Wait by Tier</b>`,
     ...clientPerformanceLines,
