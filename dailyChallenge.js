@@ -58,7 +58,7 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 // Keep this env-configurable so you can change the Anthropic model in Railway
 // without editing code.
 const DAILY_CHALLENGE_MODEL =
-    process.env.DAILY_CHALLENGE_MODEL || 'claude-sonnet-4-5-20250929';
+    process.env.DAILY_CHALLENGE_MODEL || 'claude-sonnet-5-5';
 
 // A second editorial pass verifies source fidelity and semantic novelty before
 // a generated challenge is accepted. By default it uses the same model, but
