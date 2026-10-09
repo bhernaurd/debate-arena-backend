@@ -27,7 +27,7 @@ function configuration(overrides = {}) {
         topic_generator_version: 'ranked-topic-v1',
         rp_formula_version: 'ranked-rp-v1',
         debate_model_provider: 'anthropic',
-        debate_model_name: 'claude-sonnet-4-5-20250929',
+        debate_model_name: 'claude-sonnet-5-5',
         ...overrides,
     };
 }
@@ -98,7 +98,7 @@ function debate(overrides = {}) {
         topic_model_name: 'claude-haiku-4-5-20251001',
         topic_generated_at: NOW,
         model_provider: 'anthropic',
-        model_name: 'claude-sonnet-4-5-20250929',
+        model_name: 'claude-sonnet-5-5',
         state_version: 1,
         started_at: NOW,
         last_activity_at: NOW,
@@ -328,7 +328,7 @@ test('starts placement trial one with its server-required mode and Sonnet debate
     assert.equal(result.accountId, ACCOUNT_ID);
     assert.equal(result.placementTrial.trialNumber, 1);
     assert.equal(result.placementTrial.requiredMode, 'guided');
-    assert.equal(result.activeDebate.modelName, 'claude-sonnet-4-5-20250929');
+    assert.equal(result.activeDebate.modelName, 'claude-sonnet-5-5');
     assert.equal(result.activeDebate.philosopherId, 'socrates');
     assert.equal(state.profile.placement_status, 'in_progress');
     assert.equal(state.request.status, 'completed');

@@ -77,7 +77,7 @@ const REQUIRE_INSTALLATION_HEADER =
 
 // Keep this model consistent with the rest of your backend.
 const DEFAULT_CLAUDE_MODEL =
-    process.env.CLAUDE_MODEL || 'claude-sonnet-4-5-20250929';
+    process.env.CLAUDE_MODEL || 'claude-sonnet-5-5';
 
 // Optional Pro model override.
 // When no separate Pro model is configured, Pro uses the same Sonnet model
