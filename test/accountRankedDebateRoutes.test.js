@@ -196,7 +196,7 @@ function activeDebate(
         modelProvider:
             'anthropic',
         modelName:
-            'claude-sonnet-4-5-20250929',
+            'claude-sonnet-5-5',
         stateVersion:
             2,
         startedAt:
