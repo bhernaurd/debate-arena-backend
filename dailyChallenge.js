@@ -1966,7 +1966,12 @@ Return exactly:
             const message = await client.messages.create({
                 model: DAILY_CHALLENGE_FIDELITY_MODEL,
                 max_tokens: 450,
-                temperature: 0,
+                ...(
+                    String(DAILY_CHALLENGE_FIDELITY_MODEL)
+                        .startsWith('claude-sonnet-5-5')
+                        ? {}
+                        : { temperature: 0 }
+                ),
                 messages: [{ role: 'user', content: userPrompt }],
                 system: systemPrompt,
             });
@@ -2197,7 +2202,12 @@ Return this exact JSON with no other text:
     const message = await client.messages.create({
         model: DAILY_CHALLENGE_MODEL,
         max_tokens: 1400,
-        temperature: 0.8,
+        ...(
+            String(DAILY_CHALLENGE_MODEL)
+                .startsWith('claude-sonnet-5-5')
+                ? {}
+                : { temperature: 0.8 }
+        ),
         messages: [{ role: 'user', content: userPrompt }],
         system: systemPrompt,
     });

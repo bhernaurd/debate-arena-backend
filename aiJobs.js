@@ -1136,7 +1136,11 @@ async function callClaudeForJob(job) {
             {
                 model: selectedModel,
                 max_tokens: maxTokens,
-                temperature,
+                ...(
+                    String(selectedModel).startsWith('claude-sonnet-5-5')
+                        ? {}
+                        : { temperature }
+                ),
                 system: systemPrompt,
                 messages,
             },
