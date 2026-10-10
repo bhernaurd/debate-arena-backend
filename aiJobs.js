@@ -130,14 +130,6 @@ const SONNET_55_DIRECT_RESPONSE_JOB_TYPES = new Set([
     'daily_reply',
 ]);
 
-// Cache only ongoing replies. This avoids the cache-write premium on an
-// opening a user may abandon, while allowing longer conversations to reuse
-// their stable prompt/history prefix at the cheaper cache-read rate.
-const PROMPT_CACHE_JOB_TYPES = new Set([
-    'debate_reply',
-    'daily_reply',
-]);
-
 // Standard Balanced debates use a smaller one-call output budget so replies
 // stay mobile-friendly without adding extra Claude compression calls.
 // Guided, Relentless, Daily Challenge, reports, and insights are unchanged.
@@ -419,10 +411,6 @@ function shouldUseDirectSonnet55Response(job, model) {
         isSonnet55Model(model) &&
         SONNET_55_DIRECT_RESPONSE_JOB_TYPES.has(job?.job_type)
     );
-}
-
-function shouldUsePromptCaching(job) {
-    return PROMPT_CACHE_JOB_TYPES.has(job?.job_type);
 }
 
 function claudeUsageForLog(response) {
@@ -1202,12 +1190,6 @@ async function callClaudeForJob(job) {
             }
         } else {
             requestPayload.temperature = temperature;
-        }
-
-        // Use Anthropic's default 5-minute ephemeral cache only once a
-        // conversation is in progress.
-        if (shouldUsePromptCaching(job)) {
-            requestPayload.cache_control = { type: 'ephemeral' };
         }
 
         const response = await createClaudeMessageWithRetry(
