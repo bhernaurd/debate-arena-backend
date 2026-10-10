@@ -57,6 +57,34 @@ test('conversation replies use automatic caching without changing model or outpu
   assert.equal(optimized.max_tokens, payload.max_tokens);
 });
 
+test('Sonnet 5.5 chat replies remain cost-optimized without temperature', () => {
+  const payload = {
+    model: 'claude-sonnet-5-5',
+    max_tokens: 360,
+    thinking: { type: 'between_tools' },
+    system: 'Stable philosopher instructions.\n\nSCORE TIMING:\nThe user has now sent 3 visible debate responses.\nInclude a score.',
+    messages: [
+      { role: 'user', content: 'First claim' },
+      { role: 'assistant', content: 'First reply' },
+      { role: 'user', content: 'Second claim' },
+    ],
+  };
+
+  const optimized = optimizeAnthropicPayloadForStack(
+    payload,
+    'Error\n at callClaudeForJob (file:///app/aiJobs.js:100:1)'
+  );
+
+  assert.deepEqual(optimized.cache_control, { type: 'ephemeral' });
+  assert.ok(Array.isArray(optimized.system));
+  assert.deepEqual(optimized.system[0].cache_control, { type: 'ephemeral' });
+  assert.match(systemText(optimized.system), /at least 2 visible debate responses/i);
+  assert.equal(optimized.temperature, undefined);
+  assert.deepEqual(optimized.thinking, { type: 'between_tools' });
+  assert.equal(optimized.model, payload.model);
+  assert.equal(optimized.max_tokens, 360);
+});
+
 test('openings avoid top-level automatic cache writes while stable system prefix can be cached', () => {
   const payload = {
     model: 'claude-sonnet-4-5-20250929',
