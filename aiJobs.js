@@ -118,6 +118,26 @@ const TEMPERATURE_BY_JOB_TYPE = {
     mirror_baseline_analysis: 0.2,
 };
 
+// Sonnet 5.5 uses adaptive up-front thinking by default. The Agora's live
+// conversational jobs do not use tools, so between_tools gives us normal
+// direct text output without spending output tokens on hidden reasoning.
+// Heavier one-off analysis jobs keep adaptive thinking for quality.
+const SONNET_55_MODEL_PREFIX = 'claude-sonnet-5-5';
+const SONNET_55_DIRECT_RESPONSE_JOB_TYPES = new Set([
+    'debate_opening',
+    'debate_reply',
+    'daily_opening',
+    'daily_reply',
+]);
+
+// Cache only ongoing replies. This avoids the cache-write premium on an
+// opening a user may abandon, while allowing longer conversations to reuse
+// their stable prompt/history prefix at the cheaper cache-read rate.
+const PROMPT_CACHE_JOB_TYPES = new Set([
+    'debate_reply',
+    'daily_reply',
+]);
+
 // Standard Balanced debates use a smaller one-call output budget so replies
 // stay mobile-friendly without adding extra Claude compression calls.
 // Guided, Relentless, Daily Challenge, reports, and insights are unchanged.
@@ -385,6 +405,41 @@ function modelForJob(job) {
     }
 
     return defaultModel;
+}
+
+function isSonnet55Model(model) {
+    return String(model || '')
+        .trim()
+        .toLowerCase()
+        .startsWith(SONNET_55_MODEL_PREFIX);
+}
+
+function shouldUseDirectSonnet55Response(job, model) {
+    return (
+        isSonnet55Model(model) &&
+        SONNET_55_DIRECT_RESPONSE_JOB_TYPES.has(job?.job_type)
+    );
+}
+
+function shouldUsePromptCaching(job) {
+    return PROMPT_CACHE_JOB_TYPES.has(job?.job_type);
+}
+
+function claudeUsageForLog(response) {
+    const usage = response?.usage;
+
+    if (!usage || typeof usage !== 'object') {
+        return null;
+    }
+
+    return {
+        inputTokens: usage.input_tokens ?? null,
+        outputTokens: usage.output_tokens ?? null,
+        cacheCreationInputTokens:
+            usage.cache_creation_input_tokens ?? null,
+        cacheReadInputTokens:
+            usage.cache_read_input_tokens ?? null,
+    };
 }
 
 function logSelectedModel(job, model, fallbackUsed = false) {
@@ -1132,28 +1187,66 @@ async function callClaudeForJob(job) {
     }
 
     async function runWithModel(selectedModel, fallbackUsed = false) {
+        const requestPayload = {
+            model: selectedModel,
+            max_tokens: maxTokens,
+            system: systemPrompt,
+            messages,
+        };
+
+        // Sonnet 5.5 rejects non-default sampling parameters. For live chat
+        // jobs, between_tools also disables unnecessary up-front thinking.
+        if (isSonnet55Model(selectedModel)) {
+            if (shouldUseDirectSonnet55Response(job, selectedModel)) {
+                requestPayload.thinking = { type: 'between_tools' };
+            }
+        } else {
+            requestPayload.temperature = temperature;
+        }
+
+        // Use Anthropic's default 5-minute ephemeral cache only once a
+        // conversation is in progress.
+        if (shouldUsePromptCaching(job)) {
+            requestPayload.cache_control = { type: 'ephemeral' };
+        }
+
         const response = await createClaudeMessageWithRetry(
-            {
-                model: selectedModel,
-                max_tokens: maxTokens,
-                ...(
-                    String(selectedModel).startsWith('claude-sonnet-5-5')
-                        ? {}
-                        : { temperature }
-                ),
-                system: systemPrompt,
-                messages,
-            },
+            requestPayload,
             `${job.job_type} ${job.id} using ${selectedModel}`
         );
 
-        const text = (response.content || [])
-            .filter((part) => part.type === 'text')
+        const contentBlocks = Array.isArray(response?.content)
+            ? response.content
+            : [];
+
+        const text = contentBlocks
+            .filter((part) => part?.type === 'text')
             .map((part) => part.text)
             .join('\n')
             .trim();
 
+        const usage = claudeUsageForLog(response);
+
+        console.log('[AIJobs] Claude usage:', {
+            jobId: job.id,
+            jobType: job.job_type,
+            model: selectedModel,
+            stopReason: response?.stop_reason || null,
+            usage,
+        });
+
         if (!text) {
+            console.error('[AIJobs] Claude response contained no text:', {
+                jobId: job.id,
+                jobType: job.job_type,
+                model: selectedModel,
+                stopReason: response?.stop_reason || null,
+                stopDetails: response?.stop_details || null,
+                contentBlockTypes: contentBlocks
+                    .map((part) => part?.type || 'unknown'),
+                usage,
+            });
+
             throw new Error('Claude returned an empty response.');
         }
 
