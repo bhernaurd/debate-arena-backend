@@ -15,6 +15,22 @@ test('Sonnet 4.5 standard token pricing is calculated correctly', () => {
   assert.equal(result.estimatedCostUsd, 18);
 });
 
+test('Sonnet 5.5 pricing uses the discounted cache-read rate', () => {
+  const pricing = pricingForAnthropicModel('claude-sonnet-5-5');
+  assert.equal(pricing.input, 2);
+  assert.equal(pricing.output, 10);
+  assert.equal(pricing.cache5m, 2.5);
+  assert.equal(pricing.cache1h, 4);
+  assert.equal(pricing.cacheRead, 0.10);
+
+  const result = calculateAnthropicEstimatedCost('claude-sonnet-5-5', {
+    input_tokens: 1_000_000,
+    output_tokens: 1_000_000,
+    cache_read_input_tokens: 1_000_000,
+  });
+  assert.equal(result.estimatedCostUsd, 12.10);
+});
+
 test('Haiku 4.5 standard token pricing is calculated correctly', () => {
   const result = calculateAnthropicEstimatedCost('claude-haiku-4-5-20251001', {
     input_tokens: 1_000_000,
