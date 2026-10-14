@@ -640,6 +640,127 @@ function renderPartnerDashboardPage(token) {
     .row:last-child { border-bottom: 0; }
     .row .name { color: #d7d1df; }
     .row .number { font-variant-numeric: tabular-nums; font-weight: 650; text-align: right; }
+    .breakdown-panels {
+      display: grid;
+      grid-template-columns: minmax(0, 1.15fr) minmax(0, .85fr);
+      gap: 14px;
+    }
+    .breakdown-card {
+      overflow: visible;
+    }
+    .breakdown-kpis {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 9px;
+      margin-bottom: 18px;
+    }
+    .breakdown-kpi {
+      border: 1px solid rgba(255,255,255,.065);
+      background: rgba(255,255,255,.022);
+      border-radius: 12px;
+      padding: 13px 14px;
+      min-width: 0;
+    }
+    .breakdown-kpi .kpi-label {
+      display: block;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+    .breakdown-kpi strong {
+      display: block;
+      margin-top: 6px;
+      font-size: 24px;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+    .breakdown-kpi.trial {
+      border-color: rgba(228,190,120,.16);
+      background: rgba(228,190,120,.035);
+    }
+    .breakdown-kpi.paid {
+      border-color: rgba(143,208,174,.16);
+      background: rgba(143,208,174,.032);
+    }
+    .breakdown-group + .breakdown-group {
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 1px solid rgba(255,255,255,.055);
+    }
+    .breakdown-group-title {
+      color: #8f8999;
+      font-size: 10px;
+      font-weight: 750;
+      letter-spacing: .09em;
+      text-transform: uppercase;
+      margin-bottom: 9px;
+    }
+    .breakdown-detail-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .breakdown-detail {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      min-width: 0;
+      padding: 10px 11px;
+      border: 1px solid rgba(255,255,255,.055);
+      background: rgba(255,255,255,.018);
+      border-radius: 10px;
+    }
+    .breakdown-detail span {
+      color: #bbb4c4;
+      font-size: 11px;
+      line-height: 1.3;
+    }
+    .breakdown-detail strong {
+      flex: 0 0 auto;
+      font-size: 14px;
+      font-variant-numeric: tabular-nums;
+    }
+    .performance-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 9px;
+    }
+    .performance-stat {
+      min-height: 112px;
+      border: 1px solid rgba(255,255,255,.06);
+      background: linear-gradient(180deg, rgba(255,255,255,.028), rgba(255,255,255,.014));
+      border-radius: 12px;
+      padding: 14px;
+    }
+    .performance-stat.primary {
+      border-color: rgba(216,171,82,.16);
+      background: linear-gradient(180deg, rgba(216,171,82,.045), rgba(255,255,255,.014));
+    }
+    .performance-stat .performance-label {
+      color: #aaa3b4;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.3;
+    }
+    .performance-stat strong {
+      display: block;
+      margin-top: 8px;
+      color: #f1ecf3;
+      font-size: 26px;
+      line-height: 1;
+      letter-spacing: -.03em;
+      font-variant-numeric: tabular-nums;
+    }
+    .performance-stat.primary strong { color: var(--gold-soft); }
+    .performance-stat small {
+      display: block;
+      margin-top: 9px;
+      color: #85808c;
+      font-size: 10px;
+      line-height: 1.35;
+    }
     .period-controls {
       display: flex;
       align-items: center;
@@ -768,6 +889,7 @@ function renderPartnerDashboardPage(token) {
       .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .financial-grid { grid-template-columns: 1fr; }
       .split { grid-template-columns: 1fr; }
+      .breakdown-panels { grid-template-columns: 1fr; }
       .overview-heading { align-items: flex-start; flex-direction: column; }
       .overview-heading p { text-align: left; }
       .platform-breakdown-row {
@@ -787,6 +909,13 @@ function renderPartnerDashboardPage(token) {
       .mini-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
       .platform-breakdown-row { padding: 14px; gap: 8px; }
       .platform-store { min-width: 0; }
+      .breakdown-kpis { grid-template-columns: 1fr 1fr 1fr; gap: 7px; }
+      .breakdown-kpi { padding: 11px; }
+      .breakdown-kpi strong { font-size: 21px; }
+      .breakdown-detail-grid { grid-template-columns: 1fr; }
+      .performance-grid { grid-template-columns: 1fr 1fr; gap: 7px; }
+      .performance-stat { min-height: 102px; padding: 12px; }
+      .performance-stat strong { font-size: 23px; }
       .tabs { width: 100%; }
       .tab { flex: 1; }
       .payout-grid { grid-template-columns: repeat(2, 1fr); }
@@ -1067,20 +1196,100 @@ function renderPartnerDashboardPage(token) {
         </div>
       </div>
 
-      <div class="split">
-        <article class="card">
+      <div class="breakdown-panels">
+        <article class="card breakdown-card">
           <div class="section-title"><div class="title-with-info"><h2>Subscriber Breakdown</h2>${renderInfoButton(
             'Subscriber Breakdown',
-            'Detailed subscription lifecycle for referrals acquired in the selected period, including trial cancellations, paid renewal state, billing retry, expiration, and pending store states. Historical ranges describe that cohort\'s state now, not a reconstructed historical snapshot.'
+            'A detailed view of the selected cohort, grouped into the referral funnel, platform activity, and subscription lifecycle states.'
           )}</div></div>
-          <div class="rows" id="subscriberBreakdown"></div>
+
+          <div class="breakdown-kpis">
+            <div class="breakdown-kpi">
+              <span class="kpi-label">Referrals</span>
+              <strong id="breakdownReferrals">—</strong>
+            </div>
+            <div class="breakdown-kpi trial">
+              <span class="kpi-label">Active Trials</span>
+              <strong id="breakdownActiveTrials">—</strong>
+            </div>
+            <div class="breakdown-kpi paid">
+              <span class="kpi-label">Paid Subscribers</span>
+              <strong id="breakdownPaidSubscribers">—</strong>
+            </div>
+          </div>
+
+          <div class="breakdown-group">
+            <div class="breakdown-group-title">Platform Activity</div>
+            <div class="breakdown-detail-grid">
+              <div class="breakdown-detail">
+                <span>App Store Active</span>
+                <strong id="breakdownAppStoreActive">—</strong>
+              </div>
+              <div class="breakdown-detail">
+                <span>Google Play Active</span>
+                <strong id="breakdownGooglePlayActive">—</strong>
+              </div>
+            </div>
+          </div>
+
+          <div class="breakdown-group">
+            <div class="breakdown-group-title">Lifecycle Details</div>
+            <div class="breakdown-detail-grid">
+              <div class="breakdown-detail">
+                <span>Trial Cancelled Before Paid</span>
+                <strong id="breakdownTrialCancelled">—</strong>
+              </div>
+              <div class="breakdown-detail">
+                <span>Paid + Renewing</span>
+                <strong id="breakdownPaidRenewing">—</strong>
+              </div>
+              <div class="breakdown-detail">
+                <span>Paid + Canceling</span>
+                <strong id="breakdownPaidCanceling">—</strong>
+              </div>
+              <div class="breakdown-detail">
+                <span>Billing Retry</span>
+                <strong id="breakdownBillingRetry">—</strong>
+              </div>
+              <div class="breakdown-detail">
+                <span>Expired</span>
+                <strong id="breakdownExpired">—</strong>
+              </div>
+              <div class="breakdown-detail hidden" id="breakdownPendingStateItem">
+                <span>Pending Store State</span>
+                <strong id="breakdownPendingState">—</strong>
+              </div>
+            </div>
+          </div>
         </article>
-        <article class="card">
-          <div class="section-title"><div class="title-with-info"><h2>Performance Breakdown</h2>${renderInfoButton(
-            'Performance Breakdown',
-            'Shows 7-day trial outcomes, paid conversion, current retention, and cancellation for referrals acquired in the selected range. Paid conversion means ever converted to a commission-earning subscription; active retention means still active now.'
+
+        <article class="card breakdown-card">
+          <div class="section-title"><div class="title-with-info"><h2>Performance</h2>${renderInfoButton(
+            'Performance',
+            'The most useful conversion and retention rates for the selected cohort. Trial non-conversions are shown as context under Trial Conversion instead of as a separate duplicate rate.'
           )}</div></div>
-          <div class="rows" id="performanceBreakdown"></div>
+          <div class="performance-grid">
+            <div class="performance-stat primary">
+              <span class="performance-label">Trial Conversion</span>
+              <strong id="breakdownTrialConversion">—</strong>
+              <small id="breakdownTrialNonConversions">—</small>
+            </div>
+            <div class="performance-stat">
+              <span class="performance-label">Paid Conversion</span>
+              <strong id="breakdownPaidConversion">—</strong>
+              <small>Ever reached a commission-earning paid subscription</small>
+            </div>
+            <div class="performance-stat">
+              <span class="performance-label">Active Retention</span>
+              <strong id="breakdownActiveRetention">—</strong>
+              <small>Still has subscription access now</small>
+            </div>
+            <div class="performance-stat">
+              <span class="performance-label">Cancellation Rate</span>
+              <strong id="breakdownCancellationRate">—</strong>
+              <small>Active subscribers with auto-renew turned off</small>
+            </div>
+          </div>
         </article>
       </div>
 
@@ -1719,45 +1928,71 @@ function renderPartnerDashboardPage(token) {
       text('freshness', freshnessValue ? 'Subscription data through ' + dateLabel(freshnessValue, true) : 'Awaiting Apple data');
       const dataNotice = document.getElementById('dataNotice');
       const hasHistoricalReferrals = Number(data.historicalOffer?.totalSignups || 0) > 0;
-      const awaitingCurrentProgram = data.dataFreshness?.status === 'awaiting_apple_data';
+      const hasVerifiedCurrentActivity =
+        Number(o.activeTrials || 0) > 0 ||
+        Number(o.paidSubscribers || 0) > 0 ||
+        Number(s.currentSubscribers || 0) > 0 ||
+        Number(s.newReferrals || 0) > 0;
+      const awaitingCurrentProgram =
+        data.dataFreshness?.status === 'awaiting_apple_data' &&
+        !hasVerifiedCurrentActivity;
       dataNotice.style.display = awaitingCurrentProgram ? 'block' : 'none';
       if (awaitingCurrentProgram && hasHistoricalReferrals) {
         dataNotice.textContent =
           'No verified activity in the current 7-day trial program yet. Previous-offer referrals are preserved below; financial totals update as verified App Store and Google Play billing data is calculated and reconciled.';
       }
 
-      const subscriberRows = [
-        row('Referrals Acquired in Selected Period', number(s.newReferrals)),
-        row(
-          'App Store Active From Period',
-          s.appStoreCurrentSubscribers == null ? '—' : number(s.appStoreCurrentSubscribers)
-        ),
-        row(
-          'Google Play Active From Period',
-          s.googlePlayCurrentSubscribers == null ? '—' : number(s.googlePlayCurrentSubscribers)
-        ),
-        row('Trial Active', number(s.promoActiveSubscribers ?? s.promoSubscribers)),
-        row('Trial Cancelled Before Paid', number(s.trialCancelingSubscribers)),
-        row('Paid + Renewing', number(s.paidRenewingSubscribers)),
-        row('Paid + Canceling', number(s.paidCancelingSubscribers)),
-        row('Billing Retry', number(s.billingRetry)),
-        row('Expired', number(s.expired)),
-      ];
-      if (Number(s.pendingStateSubscribers || 0) > 0) {
-        subscriberRows.push(
-          row('Pending Store State', number(s.pendingStateSubscribers))
+      const selectedPaidSubscribers =
+        s.paidSubscribers ??
+        (
+          Number(s.paidRenewingSubscribers || 0) +
+          Number(s.paidCancelingSubscribers || 0)
         );
-      }
-      document.getElementById('subscriberBreakdown').innerHTML = subscriberRows.join('');
+      const selectedActiveTrials =
+        s.activeTrials ??
+        (
+          Number(s.appStoreActiveTrials || 0) +
+          Number(s.googlePlayActiveTrials || 0)
+        ) ??
+        s.promoActiveSubscribers ??
+        s.promoSubscribers;
 
-      document.getElementById('performanceBreakdown').innerHTML = [
-        row('Trial Conversion Rate', percent(p.promoRenewalRate)),
-        row('Trial Non-Conversions', number(s.promoNonRenewals)),
-        row('Trial Non-Conversion Rate', percent(p.promoNonRenewalRate)),
-        row('Paid Conversion Rate', percent(p.paidConversionRate)),
-        row('Active Retention', percent(p.activeRetention)),
-        row('Cancellation Rate', percent(p.cancellationRate)),
-      ].join('');
+      text('breakdownReferrals', number(s.newReferrals));
+      text('breakdownActiveTrials', number(selectedActiveTrials));
+      text('breakdownPaidSubscribers', number(selectedPaidSubscribers));
+      text(
+        'breakdownAppStoreActive',
+        s.appStoreCurrentSubscribers == null ? '—' : number(s.appStoreCurrentSubscribers)
+      );
+      text(
+        'breakdownGooglePlayActive',
+        s.googlePlayCurrentSubscribers == null ? '—' : number(s.googlePlayCurrentSubscribers)
+      );
+      text('breakdownTrialCancelled', number(s.trialCancelingSubscribers));
+      text('breakdownPaidRenewing', number(s.paidRenewingSubscribers));
+      text('breakdownPaidCanceling', number(s.paidCancelingSubscribers));
+      text('breakdownBillingRetry', number(s.billingRetry));
+      text('breakdownExpired', number(s.expired));
+      text('breakdownPendingState', number(s.pendingStateSubscribers));
+
+      const breakdownPendingStateItem = document.getElementById('breakdownPendingStateItem');
+      breakdownPendingStateItem.classList.toggle(
+        'hidden',
+        s.pendingStateSubscribers == null ||
+        Number(s.pendingStateSubscribers || 0) === 0
+      );
+
+      text('breakdownTrialConversion', percent(p.promoRenewalRate));
+      text(
+        'breakdownTrialNonConversions',
+        s.promoNonRenewals == null
+          ? 'No completed-trial result yet'
+          : number(s.promoNonRenewals) + ' trial non-conversion' +
+            (Number(s.promoNonRenewals) === 1 ? '' : 's')
+      );
+      text('breakdownPaidConversion', percent(p.paidConversionRate));
+      text('breakdownActiveRetention', percent(p.activeRetention));
+      text('breakdownCancellationRate', percent(p.cancellationRate));
 
       const previousOfferSelected = b.previousOfferHistory || {};
       const previousOfferSelectedSignups = Number(previousOfferSelected.totalSignups || 0);

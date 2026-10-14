@@ -30,7 +30,8 @@ test('partner dashboard stays read-only and presents subscriber activity details
   assert.match(source, /Subscriber<\/th>/);
   assert.match(source, /Active Trials/);
   assert.match(source, /Paid Subscribers/);
-  assert.match(source, /Trial Active/);
+  assert.match(source, /Subscriber Breakdown/);
+  assert.match(source, /Lifecycle Details/);
   assert.match(source, /Trial Cancelled Before Paid/);
   assert.match(source, /Paid \+ Renewing/);
   assert.match(source, /Paid \+ Canceling/);
@@ -87,11 +88,11 @@ test('overview does not render detailed lifecycle state cards', () => {
   assert.doesNotMatch(overviewMarkup, /Paid \+ Canceling/);
   assert.doesNotMatch(overviewMarkup, /Billing Retry/);
   assert.doesNotMatch(overviewMarkup, />Expired</);
-  assert.match(source, /row\('Trial Cancelled Before Paid'/);
-  assert.match(source, /row\('Paid \+ Renewing'/);
-  assert.match(source, /row\('Paid \+ Canceling'/);
-  assert.match(source, /row\('Billing Retry'/);
-  assert.match(source, /row\('Expired'/);
+  assert.match(source, /id="breakdownTrialCancelled"/);
+  assert.match(source, /id="breakdownPaidRenewing"/);
+  assert.match(source, /id="breakdownPaidCanceling"/);
+  assert.match(source, /id="breakdownBillingRetry"/);
+  assert.match(source, /id="breakdownExpired"/);
 });
 
 test('breakdown includes range-scoped previous-offer history without mixing it into current trial states', () => {
@@ -103,19 +104,20 @@ test('breakdown includes range-scoped previous-offer history without mixing it i
   assert.match(source, /b\.previousOfferHistory/);
 });
 
-test('performance breakdown stays cohort-focused and does not repeat lifetime financial totals', () => {
-  const start = source.indexOf("document.getElementById('performanceBreakdown').innerHTML");
-  const end = source.indexOf("document.getElementById('subscriberActivity')", start);
+test('performance breakdown stays cohort-focused and compact', () => {
+  const start = source.indexOf('<div class="performance-grid">');
+  const end = source.indexOf('</article>', start);
 
-  assert.ok(start >= 0, 'performance breakdown render block should exist');
-  assert.ok(end > start, 'performance breakdown render block should have an end marker');
+  assert.ok(start >= 0, 'compact performance breakdown should exist');
+  assert.ok(end > start, 'compact performance breakdown should have an end marker');
 
   const block = source.slice(start, end);
-  assert.match(block, /Trial Conversion Rate/);
-  assert.match(block, /Trial Non-Conversions/);
-  assert.match(block, /Paid Conversion Rate/);
+  assert.match(block, /Trial Conversion/);
+  assert.match(block, /Paid Conversion/);
   assert.match(block, /Active Retention/);
   assert.match(block, /Cancellation Rate/);
+  assert.match(block, /breakdownTrialNonConversions/);
+  assert.doesNotMatch(block, /Trial Non-Conversion Rate/);
   assert.doesNotMatch(block, /Eligible Revenue Generated/);
   assert.doesNotMatch(block, /Lifetime Commission Earned/);
   assert.doesNotMatch(block, /Lifetime Paid/);
