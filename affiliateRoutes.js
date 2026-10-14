@@ -762,7 +762,7 @@ function renderPartnerDashboardPage(token) {
     <section id="overviewTab">
       <div class="overview-heading">
         <h2>At a glance</h2>
-        <p>Your verified referral and commission numbers, updated as store data is confirmed.</p>
+        <p>Follow the funnel from referral to trial to paid conversion, then see what you have earned.</p>
       </div>
       <div class="grid">
         <article class="card primary">
@@ -778,25 +778,25 @@ function renderPartnerDashboardPage(token) {
         </article>
         <article class="card primary">
           <div class="metric-heading">
-            <div class="label">Current Subscribers</div>
+            <div class="label">Active Trials</div>
             ${renderInfoButton(
-              'Current Subscribers',
-              'The number of referred subscribers who currently have access and have not turned off auto-renew. Anyone who has cancelled is counted only under Cancelled Subscribers, even if access remains until the end of the period.'
+              'Active Trials',
+              'Referred subscribers who are currently in the 7-day free trial and still have trial access. This includes trials whether auto-renew is still on or has already been turned off.'
             )}
           </div>
-          <div class="value" id="currentSubscribers">—</div>
-          <div class="subvalue">Active referrals with auto-renew still on</div>
+          <div class="value" id="activeTrials">—</div>
+          <div class="subvalue">Currently in the 7-day creator trial</div>
         </article>
         <article class="card primary">
           <div class="metric-heading">
-            <div class="label">Cancelled Subscribers</div>
+            <div class="label">Paid Subscribers</div>
             ${renderInfoButton(
-              'Cancelled Subscribers',
-              'The lifetime number of referred subscribers who turned off auto-renew across the current 7-day trial program and previous creator offers. They may still have access until the end of a paid period or trial.'
+              'Paid Subscribers',
+              'Referred subscribers who currently have paid Pro access. This includes paid subscribers who are renewing and paid subscribers who have turned off auto-renew but still have access through the end of their paid period.'
             )}
           </div>
-          <div class="value" id="cancelledSubscribers">—</div>
-          <div class="subvalue">Lifetime referrals with auto-renew turned off</div>
+          <div class="value" id="paidSubscribers">—</div>
+          <div class="subvalue">Active paid referrals after trial conversion</div>
         </article>
         <article class="card primary">
           <div class="metric-heading">
@@ -1600,7 +1600,20 @@ function renderPartnerDashboardPage(token) {
       text('partnerName', data.affiliate.displayName);
       text('partnerCode', data.affiliate.customCode);
       text('totalReferrals', number(o.totalReferrals));
-      text('currentSubscribers', number(o.currentSubscribers ?? o.activeSubscribers));
+      text(
+        'activeTrials',
+        number(o.promoActiveSubscribers ?? o.promoSubscribers)
+      );
+      text(
+        'paidSubscribers',
+        number(
+          o.commissionEarningSubscribers ??
+          (
+            Number(o.paidRenewingSubscribers || 0) +
+            Number(o.paidCancelingSubscribers || 0)
+          )
+        )
+      );
       text(
         'appStoreCurrentSubscribers',
         o.appStoreCurrentSubscribers == null ? '—' : number(o.appStoreCurrentSubscribers)
@@ -1609,7 +1622,6 @@ function renderPartnerDashboardPage(token) {
         'googlePlayCurrentSubscribers',
         o.googlePlayCurrentSubscribers == null ? '—' : number(o.googlePlayCurrentSubscribers)
       );
-      text('cancelledSubscribers', number(o.cancelledSubscribers));
       text('estimatedThisMonth', money(o.estimatedThisMonth));
       text('currentlyOwed', money(o.currentlyOwed));
 
