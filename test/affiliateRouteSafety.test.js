@@ -57,6 +57,9 @@ test('overview top metrics separate active trials from paid subscribers', () => 
   assert.match(source, /id="paidSubscribers"/);
   assert.match(source, /Currently in the 7-day creator trial/);
   assert.match(source, /Active paid referrals after trial conversion/);
+  assert.match(source, /o\.activeTrials/);
+  assert.match(source, /o\.appStoreActiveTrials/);
+  assert.match(source, /o\.googlePlayActiveTrials/);
   assert.match(source, /o\.commissionEarningSubscribers/);
   assert.match(source, /o\.paidRenewingSubscribers/);
   assert.match(source, /o\.paidCancelingSubscribers/);
