@@ -52,17 +52,23 @@ test('partner dashboard distinguishes inactive links from temporary server failu
   assert.match(source, /response\.status === 404 \|\| response\.status === 410/);
 });
 
-test('overview top metrics separate active trials from paid subscribers', () => {
+test('overview top metrics and compact platform breakdown separate trials from paid', () => {
   assert.match(source, /id="activeTrials"/);
   assert.match(source, /id="paidSubscribers"/);
   assert.match(source, /Currently in the 7-day creator trial/);
   assert.match(source, /Active paid referrals after trial conversion/);
+  assert.match(source, /Platform Breakdown/);
+  assert.match(source, /id="platformTrialsTotal"/);
+  assert.match(source, /id="platformAppStoreTrials"/);
+  assert.match(source, /id="platformGooglePlayTrials"/);
+  assert.match(source, /id="platformPaidTotal"/);
+  assert.match(source, /id="platformAppStorePaid"/);
+  assert.match(source, /id="platformGooglePlayPaid"/);
   assert.match(source, /o\.activeTrials/);
   assert.match(source, /o\.appStoreActiveTrials/);
   assert.match(source, /o\.googlePlayActiveTrials/);
-  assert.match(source, /o\.commissionEarningSubscribers/);
-  assert.match(source, /o\.paidRenewingSubscribers/);
-  assert.match(source, /o\.paidCancelingSubscribers/);
+  assert.match(source, /o\.appStorePaidSubscribers/);
+  assert.match(source, /o\.googlePlayPaidSubscribers/);
 });
 
 test('overview keeps lifetime referrals prominent while moving cancellation detail below the top row', () => {
@@ -70,6 +76,22 @@ test('overview keeps lifetime referrals prominent while moving cancellation deta
   assert.doesNotMatch(source, /id="cancelledSubscribers"/);
   assert.match(source, /Trial Cancelled Before Paid/);
   assert.match(source, /Paid \+ Canceling/);
+});
+
+test('overview does not render detailed lifecycle state cards', () => {
+  const overviewStart = source.indexOf('<section id="overviewTab">');
+  const breakdownStart = source.indexOf('<section id="breakdownTab"', overviewStart);
+  const overviewMarkup = source.slice(overviewStart, breakdownStart);
+  assert.doesNotMatch(overviewMarkup, /Trial Cancelled Before Paid/);
+  assert.doesNotMatch(overviewMarkup, /Paid \+ Renewing/);
+  assert.doesNotMatch(overviewMarkup, /Paid \+ Canceling/);
+  assert.doesNotMatch(overviewMarkup, /Billing Retry/);
+  assert.doesNotMatch(overviewMarkup, />Expired</);
+  assert.match(source, /row\('Trial Cancelled Before Paid'/);
+  assert.match(source, /row\('Paid \+ Renewing'/);
+  assert.match(source, /row\('Paid \+ Canceling'/);
+  assert.match(source, /row\('Billing Retry'/);
+  assert.match(source, /row\('Expired'/);
 });
 
 test('breakdown includes range-scoped previous-offer history without mixing it into current trial states', () => {
