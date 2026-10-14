@@ -456,6 +456,24 @@ export function createGooglePlaySubscriptionRouter({
                             'google_play_subscription_verification_failed',
                         retryable:
                             response.body.retryable,
+                        provider:
+                            error?.diagnostics?.provider ?? null,
+                        stage:
+                            error?.diagnostics?.stage ?? null,
+                        googleHttpStatus:
+                            error?.diagnostics?.googleHttpStatus ?? null,
+                        googleErrorCode:
+                            error?.diagnostics?.googleErrorCode ?? null,
+                        googleErrorStatus:
+                            error?.diagnostics?.googleErrorStatus ?? null,
+                        googleErrorReasons:
+                            error?.diagnostics?.googleErrorReasons ?? null,
+                        oauthError:
+                            error?.diagnostics?.oauthError ?? null,
+                        causeName:
+                            error?.diagnostics?.causeName ?? null,
+                        causeCode:
+                            error?.diagnostics?.causeCode ?? null,
                     }
                 );
             }
