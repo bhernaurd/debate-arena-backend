@@ -99,7 +99,8 @@ test('partner dashboard keeps lifecycle detail in Breakdown instead of the overv
   const html = renderPartnerDashboardPage('abcdefghijklmnopqrstuvwxyz0123456789ABCDE');
   assert.match(html, /Platform Breakdown/);
   assert.match(html, /Full lifecycle details are in Breakdown/);
-  assert.match(html, /Trial Active/);
+  assert.match(html, /Subscriber Breakdown/);
+  assert.match(html, /Lifecycle Details/);
   assert.match(html, /Trial Cancelled Before Paid/);
   assert.match(html, /Paid \+ Renewing/);
   assert.match(html, /Paid \+ Canceling/);
@@ -137,7 +138,7 @@ test('partner dashboard exposes the approved affiliate metrics without a creator
   assert.doesNotMatch(html, /Search creators/i);
   assert.match(html, /Active Trials/);
   assert.match(html, /Paid Subscribers/);
-  assert.match(html, /Trial Active/);
+  assert.match(html, /Subscriber Breakdown/);
   assert.match(html, /Trial Cancelled Before Paid/);
   assert.match(html, /Paid \+ Renewing/);
   assert.match(html, /Paid \+ Canceling/);
@@ -189,6 +190,9 @@ test('dashboard service derives anonymous subscriber state from verified Apple s
   assert.match(source, /googlePlayActiveTrials/);
   assert.match(source, /appStorePaidSubscribers/);
   assert.match(source, /googlePlayPaidSubscribers/);
+  assert.match(source, /rangeAppStoreActiveTrials/);
+  assert.match(source, /rangeGooglePlayActiveTrials/);
+  assert.match(source, /rangePaidSubscribers/);
   assert.match(source, /const activeTrials = hasExactSubscribers/);
   assert.match(source, /Number\(appStoreActiveTrials \|\| 0\) \+ Number\(googlePlayActiveTrials \|\| 0\)/);
   assert.match(source, /Number\(appStorePaidSubscribers \|\| 0\) \+/);
