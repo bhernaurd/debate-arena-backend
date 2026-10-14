@@ -510,6 +510,58 @@ function renderPartnerDashboardPage(token) {
       border-color: rgba(143,208,174,.16);
       background: linear-gradient(180deg, rgba(143,208,174,.045), rgba(255,255,255,.018));
     }
+    .platform-breakdown {
+      border: 1px solid rgba(255,255,255,.065);
+      background: linear-gradient(180deg, rgba(255,255,255,.026), rgba(255,255,255,.014));
+      border-radius: 15px;
+      overflow: hidden;
+    }
+    .platform-breakdown-row {
+      display: grid;
+      grid-template-columns: minmax(150px, 1fr) auto auto;
+      align-items: center;
+      gap: 12px;
+      padding: 16px 18px;
+      border-bottom: 1px solid rgba(255,255,255,.055);
+    }
+    .platform-breakdown-row:last-child { border-bottom: 0; }
+    .platform-total {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+      min-width: 0;
+    }
+    .platform-total .platform-label {
+      color: #d9d2df;
+      font-size: 13px;
+      font-weight: 700;
+    }
+    .platform-total .platform-total-value {
+      color: var(--gold-soft);
+      font-size: 22px;
+      font-weight: 760;
+      font-variant-numeric: tabular-nums;
+    }
+    .platform-store {
+      min-width: 132px;
+      padding: 9px 11px;
+      border: 1px solid rgba(154,185,223,.12);
+      background: rgba(154,185,223,.035);
+      border-radius: 11px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .platform-store span {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+    }
+    .platform-store strong {
+      font-size: 15px;
+      font-variant-numeric: tabular-nums;
+    }
     .metric-heading {
       display: flex;
       align-items: flex-start;
@@ -718,6 +770,12 @@ function renderPartnerDashboardPage(token) {
       .split { grid-template-columns: 1fr; }
       .overview-heading { align-items: flex-start; flex-direction: column; }
       .overview-heading p { text-align: left; }
+      .platform-breakdown-row {
+        grid-template-columns: 1fr 1fr;
+      }
+      .platform-total {
+        grid-column: 1 / -1;
+      }
     }
     @media (max-width: 520px) {
       .shell { width: min(100% - 22px, 1240px); padding-top: 24px; }
@@ -727,6 +785,8 @@ function renderPartnerDashboardPage(token) {
       .card { border-radius: 15px; padding: 16px; }
       .value { font-size: 27px; }
       .mini-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+      .platform-breakdown-row { padding: 14px; gap: 8px; }
+      .platform-store { min-width: 0; }
       .tabs { width: 100%; }
       .tab { flex: 1; }
       .payout-grid { grid-template-columns: repeat(2, 1fr); }
@@ -823,98 +883,36 @@ function renderPartnerDashboardPage(token) {
       </div>
 
       <div class="section">
-        <div class="section-title"><h2>Subscriber Snapshot</h2><span id="freshness"></span></div>
-        <div class="section-note">Each referred subscriber appears in one current state only.</div>
-        <div class="mini-grid">
-          <div class="mini platform">
-            <div class="metric-heading">
-              <div class="label">App Store Active</div>
-              ${renderInfoButton(
-                'App Store Active',
-                'Referred subscribers who currently have active Pro access through the Apple App Store. Trials and paid subscriptions are both included.'
-              )}
+        <div class="section-title"><h2>Platform Breakdown</h2><span id="freshness"></span></div>
+        <div class="section-note">A simple store-by-store view of your active trials and paid subscribers. Full lifecycle details are in Breakdown.</div>
+        <div class="platform-breakdown">
+          <div class="platform-breakdown-row">
+            <div class="platform-total">
+              <span class="platform-label">Active Trials</span>
+              <strong class="platform-total-value" id="platformTrialsTotal">—</strong>
             </div>
-            <div class="value" id="appStoreCurrentSubscribers">—</div>
+            <div class="platform-store">
+              <span>App Store</span>
+              <strong id="platformAppStoreTrials">—</strong>
+            </div>
+            <div class="platform-store">
+              <span>Google Play</span>
+              <strong id="platformGooglePlayTrials">—</strong>
+            </div>
           </div>
-          <div class="mini platform">
-            <div class="metric-heading">
-              <div class="label">Google Play Active</div>
-              ${renderInfoButton(
-                'Google Play Active',
-                'Referred subscribers who currently have active Pro access through Google Play on Android. Trials and paid subscriptions are both included.'
-              )}
+          <div class="platform-breakdown-row">
+            <div class="platform-total">
+              <span class="platform-label">Paid Subscribers</span>
+              <strong class="platform-total-value" id="platformPaidTotal">—</strong>
             </div>
-            <div class="value" id="googlePlayCurrentSubscribers">—</div>
-          </div>
-          <div class="mini status-trial">
-            <div class="metric-heading">
-              <div class="label">Trial Active</div>
-              ${renderInfoButton(
-                'Trial Active',
-                'Subscribers currently in the 7-day free trial with auto-renew still enabled.'
-              )}
+            <div class="platform-store">
+              <span>App Store</span>
+              <strong id="platformAppStorePaid">—</strong>
             </div>
-            <div class="value" id="promoActiveSubscribers">—</div>
-          </div>
-          <div class="mini status-trial">
-            <div class="metric-heading">
-              <div class="label">Trial Cancelled Before Paid</div>
-              ${renderInfoButton(
-                'Trial Cancelled Before Paid',
-                'Subscribers who started the 7-day free trial and turned off auto-renew before their first $7.99 monthly payment. They keep trial access until the trial expires.'
-              )}
+            <div class="platform-store">
+              <span>Google Play</span>
+              <strong id="platformGooglePlayPaid">—</strong>
             </div>
-            <div class="value" id="trialCancelingSubscribers">—</div>
-          </div>
-          <div class="mini status-paid">
-            <div class="metric-heading">
-              <div class="label">Paid + Renewing</div>
-              ${renderInfoButton(
-                'Paid + Renewing',
-                'Commission-earning paid subscribers who currently have access and still have auto-renew enabled.'
-              )}
-            </div>
-            <div class="value" id="paidRenewingSubscribers">—</div>
-          </div>
-          <div class="mini status-paid">
-            <div class="metric-heading">
-              <div class="label">Paid + Canceling</div>
-              ${renderInfoButton(
-                'Paid + Canceling',
-                'Commission-earning paid subscribers who turned off auto-renew but still have access until the end of their current paid period.'
-              )}
-            </div>
-            <div class="value" id="paidCancelingSubscribers">—</div>
-          </div>
-          <div class="mini">
-            <div class="metric-heading">
-              <div class="label">Billing Retry</div>
-              ${renderInfoButton(
-                'Billing Retry',
-                'Subscribers whose renewal payment failed and whose app store is attempting billing recovery. They are kept in this separate current-state bucket while recovery is pending.'
-              )}
-            </div>
-            <div class="value" id="billingRetry">—</div>
-          </div>
-          <div class="mini">
-            <div class="metric-heading">
-              <div class="label">Expired</div>
-              ${renderInfoButton(
-                'Expired',
-                'Referred subscriptions whose access has ended. Revoked or refunded entitlements with no current access are also treated as ended for this current-state view.'
-              )}
-            </div>
-            <div class="value" id="expired">—</div>
-          </div>
-          <div class="mini hidden" id="pendingStateBox">
-            <div class="metric-heading">
-              <div class="label">Pending Store State</div>
-              ${renderInfoButton(
-                'Pending Store State',
-                'A verified referral exists, but the latest entitlement state has not arrived yet. This temporary safeguard prevents the subscriber from being silently omitted or double-counted while App Store or Google Play data is still syncing.'
-              )}
-            </div>
-            <div class="value" id="pendingStateSubscribers">—</div>
           </div>
         </div>
       </div>
@@ -1073,7 +1071,7 @@ function renderPartnerDashboardPage(token) {
         <article class="card">
           <div class="section-title"><div class="title-with-info"><h2>Subscriber Breakdown</h2>${renderInfoButton(
             'Subscriber Breakdown',
-            'Shows referrals acquired in the selected period and places each one into exactly one current subscription state. Historical ranges describe that cohort\'s state now, not a reconstructed historical snapshot.'
+            'Detailed subscription lifecycle for referrals acquired in the selected period, including trial cancellations, paid renewal state, billing retry, expiration, and pending store states. Historical ranges describe that cohort\'s state now, not a reconstructed historical snapshot.'
           )}</div></div>
           <div class="rows" id="subscriberBreakdown"></div>
         </article>
@@ -1621,37 +1619,38 @@ function renderPartnerDashboardPage(token) {
           )
         )
       );
-      text(
-        'appStoreCurrentSubscribers',
-        o.appStoreCurrentSubscribers == null ? '—' : number(o.appStoreCurrentSubscribers)
-      );
-      text(
-        'googlePlayCurrentSubscribers',
-        o.googlePlayCurrentSubscribers == null ? '—' : number(o.googlePlayCurrentSubscribers)
-      );
       text('estimatedThisMonth', money(o.estimatedThisMonth));
       text('currentlyOwed', money(o.currentlyOwed));
 
+      const platformTrialsTotal =
+        o.activeTrials ??
+        (
+          Number(o.appStoreActiveTrials || 0) +
+          Number(o.googlePlayActiveTrials || 0)
+        );
+      const platformPaidTotal =
+        o.paidSubscribers ??
+        (
+          Number(o.appStorePaidSubscribers || 0) +
+          Number(o.googlePlayPaidSubscribers || 0)
+        );
+      text('platformTrialsTotal', number(platformTrialsTotal));
       text(
-        'promoActiveSubscribers',
-        number(
-          o.activeTrials ??
-          o.promoActiveSubscribers ??
-          o.promoSubscribers
-        )
+        'platformAppStoreTrials',
+        o.appStoreActiveTrials == null ? '—' : number(o.appStoreActiveTrials)
       );
-      text('trialCancelingSubscribers', number(o.trialCancelingSubscribers));
-      text('paidRenewingSubscribers', number(o.paidRenewingSubscribers));
-      text('paidCancelingSubscribers', number(o.paidCancelingSubscribers));
-      text('billingRetry', number(o.billingRetry));
-      text('expired', number(o.expired));
-      text('pendingStateSubscribers', number(o.pendingStateSubscribers));
-
-      const pendingStateBox = document.getElementById('pendingStateBox');
-      const pendingStateCount = Number(o.pendingStateSubscribers || 0);
-      pendingStateBox.classList.toggle(
-        'hidden',
-        o.pendingStateSubscribers == null || pendingStateCount === 0
+      text(
+        'platformGooglePlayTrials',
+        o.googlePlayActiveTrials == null ? '—' : number(o.googlePlayActiveTrials)
+      );
+      text('platformPaidTotal', number(platformPaidTotal));
+      text(
+        'platformAppStorePaid',
+        o.appStorePaidSubscribers == null ? '—' : number(o.appStorePaidSubscribers)
+      );
+      text(
+        'platformGooglePlayPaid',
+        o.googlePlayPaidSubscribers == null ? '—' : number(o.googlePlayPaidSubscribers)
       );
 
       text('promoNonRenewals', number(o.promoNonRenewals));
