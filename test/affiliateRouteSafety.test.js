@@ -28,7 +28,8 @@ test('admin affiliate creation keeps creator codes unique while allowing a share
 test('partner dashboard stays read-only and presents subscriber activity details', () => {
   assert.match(source, /Subscriber Activity/);
   assert.match(source, /Subscriber<\/th>/);
-  assert.match(source, /Current Subscribers/);
+  assert.match(source, /Active Trials/);
+  assert.match(source, /Paid Subscribers/);
   assert.match(source, /Trial Active/);
   assert.match(source, /Trial Cancelled Before Paid/);
   assert.match(source, /Paid \+ Renewing/);
