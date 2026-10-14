@@ -95,16 +95,17 @@ test('partner dashboard contains Overview and Breakdown tabs', () => {
   assert.match(html, /Currently Owed/);
 });
 
-test('partner dashboard uses one mutually exclusive current-state model', () => {
+test('partner dashboard keeps lifecycle detail in Breakdown instead of the overview', () => {
   const html = renderPartnerDashboardPage('abcdefghijklmnopqrstuvwxyz0123456789ABCDE');
-  assert.match(html, /Each referred subscriber appears in one current state only/);
+  assert.match(html, /Platform Breakdown/);
+  assert.match(html, /Full lifecycle details are in Breakdown/);
   assert.match(html, /Trial Active/);
   assert.match(html, /Trial Cancelled Before Paid/);
   assert.match(html, /Paid \+ Renewing/);
   assert.match(html, /Paid \+ Canceling/);
   assert.match(html, /Billing Retry/);
   assert.match(html, /Expired/);
-  assert.match(html, /Pending Apple State/);
+  assert.match(html, /Pending Store State/);
   assert.match(html, /Current State<\/th>/);
   assert.doesNotMatch(html, /<th>Stage<\/th>/);
 });
@@ -146,8 +147,11 @@ test('partner dashboard exposes the approved affiliate metrics without a creator
   assert.match(html, /Lifetime Commission Earned/);
   assert.match(html, /Lifetime Paid/);
   assert.match(html, /Subscriber Activity/);
-  assert.match(html, /App Store Active/);
-  assert.match(html, /Google Play Active/);
+  assert.match(html, /Platform Breakdown/);
+  assert.match(html, /id="platformAppStoreTrials"/);
+  assert.match(html, /id="platformGooglePlayTrials"/);
+  assert.match(html, /id="platformAppStorePaid"/);
+  assert.match(html, /id="platformGooglePlayPaid"/);
   assert.match(html, /<th>Subscriber<\/th><th>Store<\/th><th>Offer<\/th>/);
   assert.match(html, /App Store/);
   assert.match(html, /Google Play/);
@@ -183,8 +187,12 @@ test('dashboard service derives anonymous subscriber state from verified Apple s
   assert.match(source, /googlePlayCurrentSubscribers/);
   assert.match(source, /appStoreActiveTrials/);
   assert.match(source, /googlePlayActiveTrials/);
+  assert.match(source, /appStorePaidSubscribers/);
+  assert.match(source, /googlePlayPaidSubscribers/);
   assert.match(source, /const activeTrials = hasExactSubscribers/);
   assert.match(source, /Number\(appStoreActiveTrials \|\| 0\) \+ Number\(googlePlayActiveTrials \|\| 0\)/);
+  assert.match(source, /Number\(appStorePaidSubscribers \|\| 0\) \+/);
+  assert.match(source, /Number\(googlePlayPaidSubscribers \|\| 0\)/);
   assert.match(source, /autoRenewDisabledAt/);
   assert.match(source, /firstStandardPaidAt/);
   assert.match(source, /previous_offer_cancelled/);
