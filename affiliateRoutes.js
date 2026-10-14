@@ -380,9 +380,9 @@ function renderPartnerDashboardPage(token) {
         var(--bg);
     }
     button, input { font: inherit; }
-    .shell { width: min(1120px, calc(100% - 32px)); margin: 0 auto; padding: 34px 0 70px; }
+    .shell { width: min(1240px, calc(100% - 40px)); margin: 0 auto; padding: 32px 0 72px; }
     .eyebrow { color: var(--gold); letter-spacing: .17em; font-size: 11px; font-weight: 700; }
-    .header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin: 18px 0 26px; }
+    .header { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin: 14px 0 22px; }
     h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: clamp(34px, 6vw, 54px); font-weight: 500; }
     .code { margin-top: 7px; color: var(--muted); font-size: 14px; letter-spacing: .08em; }
     .copy-button {
@@ -402,7 +402,7 @@ function renderPartnerDashboardPage(token) {
       border: 1px solid rgba(255,255,255,.07);
       background: rgba(255,255,255,.025);
       border-radius: 14px;
-      margin-bottom: 24px;
+      margin-bottom: 20px;
     }
     .tab {
       appearance: none;
@@ -417,40 +417,99 @@ function renderPartnerDashboardPage(token) {
     .tab.active { background: var(--panel-2); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
     .notice {
       display: none;
-      border: 1px solid rgba(228,190,120,.24);
-      background: rgba(228,190,120,.07);
+      border: 1px solid rgba(228,190,120,.20);
+      background: linear-gradient(90deg, rgba(228,190,120,.075), rgba(228,190,120,.035));
       color: #dccaa7;
-      padding: 12px 14px;
-      border-radius: 12px;
-      margin-bottom: 18px;
-      font-size: 13px;
-      line-height: 1.45;
+      padding: 13px 15px;
+      border-radius: 13px;
+      margin-bottom: 20px;
+      font-size: 12px;
+      line-height: 1.5;
     }
-    .grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; }
+    .overview-heading {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 16px;
+      margin: 4px 0 12px;
+    }
+    .overview-heading h2 {
+      margin: 0;
+      font-family: Georgia, "Times New Roman", serif;
+      font-size: 22px;
+      font-weight: 500;
+    }
+    .overview-heading p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.4;
+      text-align: right;
+    }
+    .grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 11px; }
     .financial-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+    .financial-grid .mini {
+      min-height: 108px;
+      border-color: rgba(216,171,82,.14);
+      background: linear-gradient(180deg, rgba(216,171,82,.045), rgba(255,255,255,.018));
+    }
+    .financial-grid .mini .value { font-size: 28px; }
     .card {
       position: relative;
       overflow: hidden;
       background: linear-gradient(180deg, rgba(23,20,31,.98), rgba(16,14,22,.98));
       border: 1px solid rgba(255,255,255,.07);
-      border-radius: 18px;
-      padding: 20px;
-      box-shadow: var(--shadow);
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 16px 48px rgba(0,0,0,.24);
     }
-    .card.primary { border-color: var(--border); }
-    .card.owed { border-color: var(--border-strong); }
-    .label { color: var(--muted); font-size: 12px; font-weight: 650; letter-spacing: .02em; }
-    .value { margin-top: 9px; font-size: 31px; font-weight: 720; letter-spacing: -.04em; }
-    .subvalue { margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+    .card.primary {
+      border-color: rgba(216,171,82,.16);
+      min-height: 142px;
+    }
+    .card.primary::before,
+    .card.owed::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto auto 0;
+      width: 100%;
+      height: 2px;
+      background: linear-gradient(90deg, rgba(216,171,82,.72), rgba(216,171,82,0));
+      opacity: .7;
+    }
+    .card.owed { border-color: rgba(216,171,82,.34); }
+    .label { color: #aaa3b4; font-size: 11px; font-weight: 700; letter-spacing: .015em; }
+    .value { margin-top: 10px; font-size: 34px; font-weight: 760; letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
+    .subvalue { margin-top: 7px; color: #8e8799; font-size: 11px; line-height: 1.4; }
     .money { color: var(--gold-soft); }
-    .section { margin-top: 28px; }
-    .section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; margin-bottom: 13px; }
+    .section { margin-top: 30px; padding-top: 2px; }
+    .section + .section { border-top: 1px solid rgba(255,255,255,.055); padding-top: 26px; }
+    .section-title { display: flex; align-items: baseline; justify-content: space-between; gap: 18px; margin-bottom: 11px; }
     .section-title h2 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 22px; font-weight: 500; }
     .section-title span { color: var(--muted); font-size: 12px; }
     .section-note { color: var(--muted); font-size: 12px; line-height: 1.45; margin: -4px 0 12px; }
-    .mini-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
-    .mini { position: relative; border: 1px solid rgba(255,255,255,.06); background: rgba(255,255,255,.025); border-radius: 14px; padding: 15px; }
-    .mini .value { font-size: 22px; margin-top: 5px; }
+    .mini-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
+    .mini {
+      position: relative;
+      border: 1px solid rgba(255,255,255,.065);
+      background: linear-gradient(180deg, rgba(255,255,255,.032), rgba(255,255,255,.018));
+      border-radius: 13px;
+      padding: 14px 15px;
+      min-height: 94px;
+    }
+    .mini .value { font-size: 25px; margin-top: 7px; font-variant-numeric: tabular-nums; }
+    .mini.platform {
+      border-color: rgba(154,185,223,.16);
+      background: linear-gradient(180deg, rgba(154,185,223,.055), rgba(255,255,255,.018));
+    }
+    .mini.status-trial {
+      border-color: rgba(228,190,120,.16);
+      background: linear-gradient(180deg, rgba(228,190,120,.05), rgba(255,255,255,.018));
+    }
+    .mini.status-paid {
+      border-color: rgba(143,208,174,.16);
+      background: linear-gradient(180deg, rgba(143,208,174,.045), rgba(255,255,255,.018));
+    }
     .metric-heading {
       display: flex;
       align-items: flex-start;
@@ -649,19 +708,25 @@ function renderPartnerDashboardPage(token) {
     .fine-print { color: var(--muted); font-size: 11px; line-height: 1.55; margin-top: 20px; }
     .hidden { display: none !important; }
 
+    @media (max-width: 1000px) {
+      .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .mini-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
     @media (max-width: 820px) {
       .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .mini-grid, .financial-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .financial-grid { grid-template-columns: 1fr; }
       .split { grid-template-columns: 1fr; }
+      .overview-heading { align-items: flex-start; flex-direction: column; }
+      .overview-heading p { text-align: left; }
     }
     @media (max-width: 520px) {
-      .shell { width: min(100% - 22px, 1120px); padding-top: 24px; }
+      .shell { width: min(100% - 22px, 1240px); padding-top: 24px; }
       .header { align-items: flex-start; flex-direction: column; }
       .copy-button { width: 100%; }
       .grid { gap: 9px; }
       .card { border-radius: 15px; padding: 16px; }
       .value { font-size: 27px; }
-      .mini-grid, .financial-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
+      .mini-grid { grid-template-columns: 1fr 1fr; gap: 8px; }
       .tabs { width: 100%; }
       .tab { flex: 1; }
       .payout-grid { grid-template-columns: repeat(2, 1fr); }
@@ -695,6 +760,10 @@ function renderPartnerDashboardPage(token) {
     </div>
 
     <section id="overviewTab">
+      <div class="overview-heading">
+        <h2>At a glance</h2>
+        <p>Your verified referral and commission numbers, updated as store data is confirmed.</p>
+      </div>
       <div class="grid">
         <article class="card primary">
           <div class="metric-heading">
@@ -757,7 +826,7 @@ function renderPartnerDashboardPage(token) {
         <div class="section-title"><h2>Subscriber Snapshot</h2><span id="freshness"></span></div>
         <div class="section-note">Each referred subscriber appears in one current state only.</div>
         <div class="mini-grid">
-          <div class="mini">
+          <div class="mini platform">
             <div class="metric-heading">
               <div class="label">App Store Active</div>
               ${renderInfoButton(
@@ -767,7 +836,7 @@ function renderPartnerDashboardPage(token) {
             </div>
             <div class="value" id="appStoreCurrentSubscribers">—</div>
           </div>
-          <div class="mini">
+          <div class="mini platform">
             <div class="metric-heading">
               <div class="label">Google Play Active</div>
               ${renderInfoButton(
@@ -777,7 +846,7 @@ function renderPartnerDashboardPage(token) {
             </div>
             <div class="value" id="googlePlayCurrentSubscribers">—</div>
           </div>
-          <div class="mini">
+          <div class="mini status-trial">
             <div class="metric-heading">
               <div class="label">Trial Active</div>
               ${renderInfoButton(
@@ -787,7 +856,7 @@ function renderPartnerDashboardPage(token) {
             </div>
             <div class="value" id="promoActiveSubscribers">—</div>
           </div>
-          <div class="mini">
+          <div class="mini status-trial">
             <div class="metric-heading">
               <div class="label">Trial Cancelled Before Paid</div>
               ${renderInfoButton(
@@ -797,7 +866,7 @@ function renderPartnerDashboardPage(token) {
             </div>
             <div class="value" id="trialCancelingSubscribers">—</div>
           </div>
-          <div class="mini">
+          <div class="mini status-paid">
             <div class="metric-heading">
               <div class="label">Paid + Renewing</div>
               ${renderInfoButton(
@@ -807,7 +876,7 @@ function renderPartnerDashboardPage(token) {
             </div>
             <div class="value" id="paidRenewingSubscribers">—</div>
           </div>
-          <div class="mini">
+          <div class="mini status-paid">
             <div class="metric-heading">
               <div class="label">Paid + Canceling</div>
               ${renderInfoButton(
