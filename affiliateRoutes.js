@@ -1602,11 +1602,18 @@ function renderPartnerDashboardPage(token) {
       text('totalReferrals', number(o.totalReferrals));
       text(
         'activeTrials',
-        number(o.promoActiveSubscribers ?? o.promoSubscribers)
+        number(
+          o.activeTrials ??
+          (
+            Number(o.appStoreActiveTrials || 0) +
+            Number(o.googlePlayActiveTrials || 0)
+          )
+        )
       );
       text(
         'paidSubscribers',
         number(
+          o.paidSubscribers ??
           o.commissionEarningSubscribers ??
           (
             Number(o.paidRenewingSubscribers || 0) +
@@ -1625,7 +1632,14 @@ function renderPartnerDashboardPage(token) {
       text('estimatedThisMonth', money(o.estimatedThisMonth));
       text('currentlyOwed', money(o.currentlyOwed));
 
-      text('promoActiveSubscribers', number(o.promoActiveSubscribers ?? o.promoSubscribers));
+      text(
+        'promoActiveSubscribers',
+        number(
+          o.activeTrials ??
+          o.promoActiveSubscribers ??
+          o.promoSubscribers
+        )
+      );
       text('trialCancelingSubscribers', number(o.trialCancelingSubscribers));
       text('paidRenewingSubscribers', number(o.paidRenewingSubscribers));
       text('paidCancelingSubscribers', number(o.paidCancelingSubscribers));
