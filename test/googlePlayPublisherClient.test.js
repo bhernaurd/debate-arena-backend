@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import test from 'node:test';
 
 import {
+    GooglePlaySubscriptionError,
     createGooglePlayPublisherClient,
 } from '../lib/googlePlaySubscriptionService.js';
 
@@ -208,5 +209,105 @@ test(
         assert.equal(publisherGets, 1);
         assert.equal(acknowledgements, 1);
         assert.equal(requests.length, 3);
+    }
+);
+
+
+test(
+    'Publisher client preserves safe Google API failure diagnostics without exposing request secrets',
+    async () => {
+        const { privateKey } = crypto.generateKeyPairSync('rsa', {
+            modulusLength: 2048,
+        });
+        const privateKeyPem = privateKey.export({
+            type: 'pkcs8',
+            format: 'pem',
+        });
+
+        const fetchImpl = async (url) => {
+            if (String(url) === TOKEN_ENDPOINT) {
+                return makeJsonResponse(200, {
+                    access_token: ACCESS_TOKEN,
+                    expires_in: 3600,
+                    token_type: 'Bearer',
+                });
+            }
+
+            return makeJsonResponse(403, {
+                error: {
+                    code: 403,
+                    status: 'PERMISSION_DENIED',
+                    message: 'The caller does not have permission.',
+                    errors: [
+                        {
+                            reason: 'permissionDenied',
+                            message: 'Denied.',
+                        },
+                    ],
+                },
+            });
+        };
+
+        const client = createGooglePlayPublisherClient({
+            fetchImpl,
+            now: () => NOW,
+            tokenEndpoint: TOKEN_ENDPOINT,
+            publisherEndpoint: PUBLISHER_ENDPOINT,
+            credentialsProvider: () => ({
+                clientEmail:
+                    'publisher-service@example.test',
+                privateKey: privateKeyPem,
+                privateKeyId: 'test-key-id',
+            }),
+        });
+
+        await assert.rejects(
+            () => client.getSubscription({
+                packageName: PACKAGE_NAME,
+                purchaseToken: PURCHASE_TOKEN,
+            }),
+            (error) => {
+                assert.ok(
+                    error instanceof GooglePlaySubscriptionError
+                );
+                assert.equal(
+                    error.code,
+                    'google_play_verification_unavailable'
+                );
+                assert.equal(
+                    error.diagnostics?.stage,
+                    'publisher_response'
+                );
+                assert.equal(
+                    error.diagnostics?.googleHttpStatus,
+                    403
+                );
+                assert.equal(
+                    error.diagnostics?.googleErrorCode,
+                    403
+                );
+                assert.equal(
+                    error.diagnostics?.googleErrorStatus,
+                    'PERMISSION_DENIED'
+                );
+                assert.deepEqual(
+                    error.diagnostics?.googleErrorReasons,
+                    ['permissionDenied']
+                );
+
+                const serialized = JSON.stringify(
+                    error.diagnostics
+                );
+                assert.equal(
+                    serialized.includes(PURCHASE_TOKEN),
+                    false
+                );
+                assert.equal(
+                    serialized.includes(ACCESS_TOKEN),
+                    false
+                );
+                return true;
+            }
+        );
     }
 );
