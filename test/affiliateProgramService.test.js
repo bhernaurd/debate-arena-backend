@@ -134,7 +134,8 @@ test('processing-date comparison rejects older Apple instances', async () => {
 test('partner dashboard exposes the approved affiliate metrics without a creator-name browser', () => {
   const html = renderPartnerDashboardPage('abcdefghijklmnopqrstuvwxyz0123456789ABCDE');
   assert.doesNotMatch(html, /Search creators/i);
-  assert.match(html, /Current Subscribers/);
+  assert.match(html, /Active Trials/);
+  assert.match(html, /Paid Subscribers/);
   assert.match(html, /Trial Active/);
   assert.match(html, /Trial Cancelled Before Paid/);
   assert.match(html, /Paid \+ Renewing/);
