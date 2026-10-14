@@ -105,18 +105,18 @@ test('breakdown includes range-scoped previous-offer history without mixing it i
 });
 
 test('performance breakdown stays cohort-focused and compact', () => {
-  const start = source.indexOf('id="breakdownTrialConversion"');
-  const end = source.indexOf('id="breakdownCancellationRate"', start);
+  const start = source.indexOf('<div class="performance-grid">');
+  const end = source.indexOf('</article>', start);
 
   assert.ok(start >= 0, 'compact performance breakdown should exist');
   assert.ok(end > start, 'compact performance breakdown should have an end marker');
 
-  const block = source.slice(start, end + 200);
+  const block = source.slice(start, end);
   assert.match(block, /Trial Conversion/);
   assert.match(block, /Paid Conversion/);
   assert.match(block, /Active Retention/);
   assert.match(block, /Cancellation Rate/);
-  assert.match(source, /trial non-conversion/);
+  assert.match(block, /breakdownTrialNonConversions/);
   assert.doesNotMatch(block, /Trial Non-Conversion Rate/);
   assert.doesNotMatch(block, /Eligible Revenue Generated/);
   assert.doesNotMatch(block, /Lifetime Commission Earned/);
