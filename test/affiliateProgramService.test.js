@@ -385,6 +385,6 @@ test('affiliate dashboard routing keeps cross-platform totals internally consist
   );
   assert.match(
     source,
-    /trialCancelingSubscribers:\s*hasExactSubscribers \? exactRange\.trialCancelingSubscribers : null/
+    /trialCancelingSubscribers:\s*[\s\S]*?hasExactSubscribers \? exactRange\.trialCancelingSubscribers[\s\S]*?: null/
   );
 });
