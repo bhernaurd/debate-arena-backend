@@ -52,16 +52,21 @@ test('partner dashboard distinguishes inactive links from temporary server failu
   assert.match(source, /response\.status === 404 \|\| response\.status === 410/);
 });
 
-test('overview subscriber summary does not double-count cancelled referrals as current', () => {
-  assert.match(source, /Active referrals with auto-renew still on/);
-  assert.match(source, /Anyone who has cancelled is counted only under Cancelled Subscribers/);
+test('overview top metrics separate active trials from paid subscribers', () => {
+  assert.match(source, /id="activeTrials"/);
+  assert.match(source, /id="paidSubscribers"/);
+  assert.match(source, /Currently in the 7-day creator trial/);
+  assert.match(source, /Active paid referrals after trial conversion/);
+  assert.match(source, /o\.commissionEarningSubscribers/);
+  assert.match(source, /o\.paidRenewingSubscribers/);
+  assert.match(source, /o\.paidCancelingSubscribers/);
 });
 
-test('overview presents lifetime referrals and cancellations across creator offers', () => {
-  assert.match(source, /Cancelled Subscribers/);
-  assert.match(source, /id="cancelledSubscribers"/);
+test('overview keeps lifetime referrals prominent while moving cancellation detail below the top row', () => {
   assert.match(source, /All verified referrals across creator offers/);
-  assert.match(source, /o\.cancelledSubscribers/);
+  assert.doesNotMatch(source, /id="cancelledSubscribers"/);
+  assert.match(source, /Trial Cancelled Before Paid/);
+  assert.match(source, /Paid \+ Canceling/);
 });
 
 test('breakdown includes range-scoped previous-offer history without mixing it into current trial states', () => {
