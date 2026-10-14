@@ -175,6 +175,7 @@ test('dashboard service derives anonymous subscriber state from verified Apple s
   assert.match(source, /affiliate\.is_test \? 'Sandbox' : 'Production'/);
   assert.match(source, /commissionEarningSubscribers/);
   assert.match(source, /promoActiveSubscribers/);
+  assert.match(source, /trialCancelingSubscribers/);
   assert.match(source, /paidRenewingSubscribers/);
   assert.match(source, /paidCancelingSubscribers/);
   assert.match(source, /pendingStateSubscribers/);
@@ -193,6 +194,11 @@ test('dashboard service derives anonymous subscriber state from verified Apple s
   assert.match(source, /rangeAppStoreActiveTrials/);
   assert.match(source, /rangeGooglePlayActiveTrials/);
   assert.match(source, /rangePaidSubscribers/);
+  assert.match(source, /trial_canceling_subscribers/);
+  assert.match(source, /range_trial_canceling_subscribers/);
+  assert.match(source, /verifiedTotalReferrals/);
+  assert.match(source, /verifiedRangeReferrals/);
+  assert.match(source, /Math\.max\(rawTotalReferrals, stateTotal\)/);
   assert.match(source, /const activeTrials = hasExactSubscribers/);
   assert.match(source, /Number\(appStoreActiveTrials \|\| 0\) \+ Number\(googlePlayActiveTrials \|\| 0\)/);
   assert.match(source, /Number\(appStorePaidSubscribers \|\| 0\) \+/);
@@ -352,4 +358,33 @@ test('admin can refresh a whole payout month without finalizing it', async () =>
   assert.match(source, /async function refreshAffiliatePayoutsForPeriod/);
   assert.match(source, /finalize: false/);
   assert.match(source, /refreshAffiliatePayoutsForPeriod,/);
+});
+
+
+test('affiliate dashboard routing keeps cross-platform totals internally consistent', async () => {
+  const source = await readFile(
+    new URL('../lib/affiliateProgramService.js', import.meta.url),
+    'utf8'
+  );
+
+  assert.match(
+    source,
+    /const activeTrials = hasExactSubscribers[\s\S]*Number\(appStoreActiveTrials \|\| 0\) \+ Number\(googlePlayActiveTrials \|\| 0\)/
+  );
+  assert.match(
+    source,
+    /const paidSubscribers = hasExactSubscribers[\s\S]*Number\(appStorePaidSubscribers \|\| 0\)[\s\S]*Number\(googlePlayPaidSubscribers \|\| 0\)/
+  );
+  assert.match(
+    source,
+    /const rangeActiveTrials = hasExactSubscribers[\s\S]*Number\(rangeAppStoreActiveTrials \|\| 0\)[\s\S]*Number\(rangeGooglePlayActiveTrials \|\| 0\)/
+  );
+  assert.match(
+    source,
+    /const rangePaidSubscribers = hasExactSubscribers[\s\S]*Number\(rangeAppStorePaidSubscribers \|\| 0\)[\s\S]*Number\(rangeGooglePlayPaidSubscribers \|\| 0\)/
+  );
+  assert.match(
+    source,
+    /trialCancelingSubscribers:\s*hasExactSubscribers \? exactRange\.trialCancelingSubscribers : null/
+  );
 });
