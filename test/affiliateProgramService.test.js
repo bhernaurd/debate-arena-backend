@@ -181,6 +181,10 @@ test('dashboard service derives anonymous subscriber state from verified Apple s
   assert.match(source, /platform: 'app_store'/);
   assert.match(source, /appStoreCurrentSubscribers/);
   assert.match(source, /googlePlayCurrentSubscribers/);
+  assert.match(source, /appStoreActiveTrials/);
+  assert.match(source, /googlePlayActiveTrials/);
+  assert.match(source, /const activeTrials = hasExactSubscribers/);
+  assert.match(source, /Number\(appStoreActiveTrials \|\| 0\) \+ Number\(googlePlayActiveTrials \|\| 0\)/);
   assert.match(source, /autoRenewDisabledAt/);
   assert.match(source, /firstStandardPaidAt/);
   assert.match(source, /previous_offer_cancelled/);
