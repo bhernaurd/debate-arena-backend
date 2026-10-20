@@ -30,8 +30,8 @@ test('Overview uses compact monthly context',()=>{
   assert.match(html,/new this month/); assert.match(html,/first paid this month/); assert.match(html,/started this month/); assert.match(html,/Month to date/); assert.match(html,/overviewAppleHint/);
   const overview=html.match(/<section id="view-overview">([\s\S]*?)<section id="view-breakdown"/i)?.[1]||'';
   assert.doesNotMatch(overview,/historyPeriod|breakdownPeriod/);
-  assert.match(html,/metric\('App Store Active Pro',m\.app_store_active_pro_entitlements\|\|0/);
-  assert.match(html,/metric\('Google Play Active Pro',m\.google_play_active_pro_entitlements\|\|0/);
+  assert.match(html,/metric\('Apple subscribers',m\.app_store_active_pro_entitlements\|\|0/);
+  assert.match(html,/metric\('Android subscribers',m\.google_play_active_pro_entitlements\|\|0/);
 });
 test('Accounts has its own acquisition tab and is removed from Subscriber Analytics',()=>{
   const html=renderFinalDashboard();
@@ -40,6 +40,8 @@ test('Accounts has its own acquisition tab and is removed from Subscriber Analyt
   assert.match(html,/<h2>Accounts created by day<\/h2>/);
   assert.match(html,/<h2>Accounts created by month<\/h2>/);
   assert.match(html,/metric\('Current accounts'/);
+  assert.match(html,/metric\('Apple accounts',Number\(accountsData\.appleAccounts\|\|0\)/);
+  assert.match(html,/metric\('Android accounts',Number\(accountsData\.androidAccounts\|\|0\)/);
   assert.match(html,/metric\('Created today'/);
   assert.match(html,/metric\('Created this month'/);
   assert.match(html,/metric\('All-time created'/);
@@ -54,6 +56,6 @@ test('Accounts has its own acquisition tab and is removed from Subscriber Analyt
 test('rendered client stays valid',()=>{
   const script=renderFinalDashboard().match(/<script>\s*([\s\S]*?)\s*<\/script>/i)?.[1]||''; assert.ok(script); new vm.Script(script,{filename:'subscription-admin-client.js'});
 });
-test('account summary route tracks daily and monthly creations from canonical accounts table',()=>{
-  const source=fs.readFileSync(new URL('../subscriptionAdminDashboardRoutes.js',import.meta.url),'utf8'); assert.match(source,/router\.get\('\/data\/accounts-summary'/); assert.match(source,/FROM accounts/); assert.match(source,/status <> 'deleted'/); assert.match(source,/created_at AT TIME ZONE 'America\/Chicago'/); assert.match(source,/generate_series/); assert.match(source,/createdToday/); assert.match(source,/createdLast7Days/); assert.match(source,/createdPrevious7Days/); assert.match(source,/days: dailyResult\.rows/); assert.match(source,/createdAccounts/);
+test('account summary route tracks platform totals plus daily and monthly creations from canonical accounts table',()=>{
+  const source=fs.readFileSync(new URL('../subscriptionAdminDashboardRoutes.js',import.meta.url),'utf8'); assert.match(source,/router\.get\('\/data\/accounts-summary'/); assert.match(source,/FROM accounts/); assert.match(source,/status <> 'deleted'/); assert.match(source,/FROM account_apple_identities/); assert.match(source,/FROM account_google_identities/); assert.match(source,/appleAccounts/); assert.match(source,/androidAccounts/); assert.match(source,/created_at AT TIME ZONE 'America\/Chicago'/); assert.match(source,/generate_series/); assert.match(source,/createdToday/); assert.match(source,/createdLast7Days/); assert.match(source,/createdPrevious7Days/); assert.match(source,/days: dailyResult\.rows/); assert.match(source,/createdAccounts/);
 });
