@@ -12,6 +12,12 @@ import {
 const DEFAULT_SCAN_MS = 30_000;
 const DEFAULT_BATCH_SIZE = 100;
 const DEFAULT_MAX_BATCHES = 5;
+const DEFAULT_AFFILIATE_ATTRIBUTION_GRACE_MS = 120_000;
+const AFFILIATE_AWARE_MILESTONES = new Set([
+    'trial_started',
+    'new_paid_subscription',
+    'trial_converted_to_paid',
+]);
 
 function boundedInteger(value, defaultValue, minimum, maximum) {
     const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -83,6 +89,57 @@ function normalizedSubtype(row) {
 function positiveTransactionPrice(row) {
     const price = Number(row?.price_milliunits);
     return Number.isSafeInteger(price) && price > 0;
+}
+
+
+export function shouldDeferSubscriptionAdminMilestoneForAffiliate(
+    row,
+    {
+        kind = null,
+        graceMs = DEFAULT_AFFILIATE_ATTRIBUTION_GRACE_MS,
+        now = new Date(),
+    } = {}
+) {
+    if (!AFFILIATE_AWARE_MILESTONES.has(kind)) {
+        return false;
+    }
+
+    if (cleanText(row?.affiliate_code, 64)) {
+        return false;
+    }
+
+    const safeGraceMs = Math.max(
+        0,
+        Number.isFinite(Number(graceMs))
+            ? Number(graceMs)
+            : DEFAULT_AFFILIATE_ATTRIBUTION_GRACE_MS
+    );
+
+    if (safeGraceMs === 0) {
+        return false;
+    }
+
+    const eventAt = row?.event_at
+        ? new Date(row.event_at)
+        : null;
+    const currentAt = now instanceof Date
+        ? now
+        : new Date(now);
+
+    if (
+        !eventAt ||
+        Number.isNaN(eventAt.getTime()) ||
+        Number.isNaN(currentAt.getTime())
+    ) {
+        return false;
+    }
+
+    const ageMs = Math.max(
+        0,
+        currentAt.getTime() - eventAt.getTime()
+    );
+
+    return ageMs < safeGraceMs;
 }
 
 export function classifySubscriptionAdminMilestone(
@@ -561,6 +618,12 @@ export function createSubscriptionAdminEventScanner({
         1,
         20
     );
+    const affiliateAttributionGraceMs = boundedInteger(
+        environment.SUBSCRIPTION_ADMIN_AFFILIATE_GRACE_MS,
+        DEFAULT_AFFILIATE_ATTRIBUTION_GRACE_MS,
+        0,
+        300_000
+    );
 
     let timer = null;
     let scanPromise = null;
@@ -572,7 +635,9 @@ export function createSubscriptionAdminEventScanner({
 
         let scanned = 0;
         let queued = 0;
+        let deferred = 0;
 
+        batchLoop:
         for (let batch = 0; batch < maxBatches; batch += 1) {
             const result = await pool.query(
                 `
@@ -644,6 +709,26 @@ export function createSubscriptionAdminEventScanner({
                         row,
                         trialHistory
                     );
+
+                if (
+                    shouldDeferSubscriptionAdminMilestoneForAffiliate(
+                        row,
+                        {
+                            kind: milestoneKind,
+                            graceMs:
+                                affiliateAttributionGraceMs,
+                        }
+                    )
+                ) {
+                    // The App Store server notification can arrive before the
+                    // full app has had time to claim its exact creator handoff.
+                    // Keep this event at the scanner cursor briefly so the next
+                    // scan re-runs the attribution JOIN. This lets owner alerts
+                    // include the creator code without ever guessing from IP,
+                    // click timing, or the shared Apple offer identifier.
+                    deferred = 1;
+                    break batchLoop;
+                }
 
                 let outcome;
 
@@ -728,7 +813,7 @@ export function createSubscriptionAdminEventScanner({
             await notificationService.kick();
         }
 
-        return { scanned, queued };
+        return { scanned, queued, deferred };
     }
 
     function kick() {
@@ -769,7 +854,12 @@ export function createSubscriptionAdminEventScanner({
 
         logger.log(
             '[SubscriptionAdminAlerts] Apple event scanner started.',
-            { scanMs, batchSize, maxBatches }
+            {
+                scanMs,
+                batchSize,
+                maxBatches,
+                affiliateAttributionGraceMs,
+            }
         );
 
         void kick();
