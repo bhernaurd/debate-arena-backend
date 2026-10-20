@@ -395,6 +395,27 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
       historyPool.query(`
         SELECT
           COUNT(*) FILTER (WHERE status <> 'deleted')::int AS total_accounts,
+          COUNT(*) FILTER (
+            WHERE status <> 'deleted'
+              AND EXISTS (
+                SELECT 1
+                FROM account_apple_identities apple_identity
+                WHERE apple_identity.account_id = accounts.id
+              )
+          )::int AS apple_accounts,
+          COUNT(*) FILTER (
+            WHERE status <> 'deleted'
+              AND NOT EXISTS (
+                SELECT 1
+                FROM account_apple_identities apple_identity
+                WHERE apple_identity.account_id = accounts.id
+              )
+              AND EXISTS (
+                SELECT 1
+                FROM account_google_identities google_identity
+                WHERE google_identity.account_id = accounts.id
+              )
+          )::int AS android_accounts,
           COUNT(*) FILTER (WHERE status = 'active')::int AS active_accounts,
           COUNT(*)::int AS all_time_created,
           COUNT(*) FILTER (
@@ -452,6 +473,8 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
     return res.json({
       success: true,
       totalAccounts: Number(summaryResult.rows[0]?.total_accounts || 0),
+      appleAccounts: Number(summaryResult.rows[0]?.apple_accounts || 0),
+      androidAccounts: Number(summaryResult.rows[0]?.android_accounts || 0),
       activeAccounts: Number(summaryResult.rows[0]?.active_accounts || 0),
       allTimeCreated: Number(summaryResult.rows[0]?.all_time_created || 0),
       createdThisMonth: Number(summaryResult.rows[0]?.created_this_month || 0),
