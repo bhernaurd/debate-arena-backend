@@ -298,6 +298,13 @@ test('tracking health service is read-only and reconciles raw facts to projected
           }],
         };
       }
+      if (text.includes('FROM affiliate_google_play_subscription_attributions attr')) {
+        return { rows: [{
+          total_referrals: 1,
+          current_subscribers: 1,
+          cancelled_subscribers: 0,
+        }] };
+      }
       if (text.includes('FROM affiliate_alerts alert')) {
         return { rows: [{ open_partner_alerts: 0 }] };
       }
@@ -376,8 +383,8 @@ test('tracking health service is read-only and reconciles raw facts to projected
     }),
     projectAdminOverview: async () => ({
       activeAffiliates: 1,
-      totalReferrals: 1,
-      currentSubscribers: 0,
+      totalReferrals: 2,
+      currentSubscribers: 1,
       cancelledSubscribers: 1,
       openPartnerAlerts: 0,
       estimatedThisMonthByCurrency: {},
@@ -391,6 +398,8 @@ test('tracking health service is read-only and reconciles raw facts to projected
   assert.equal(result.affiliates.length, 1);
   assert.equal(result.affiliates[0].raw.totalReferrals, 1);
   assert.equal(result.affiliates[0].checks.currentSubscribersReconcile, true);
+  assert.equal(result.adminOverview.raw.totalReferrals, 2);
+  assert.equal(result.adminOverview.raw.currentSubscribers, 1);
   assert.equal(result.adminOverview.status, 'verified');
   assert.equal(result.ownerOverviewMismatch, false);
   assert.equal(result.adminOverview.checks.totalReferralsReconciles, true);
