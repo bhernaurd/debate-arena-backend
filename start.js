@@ -54,6 +54,7 @@ async function start() {
 
     await import('./appleProceedsSyncWorker.js');
     await import('./appleSubscriptionStatusReconciliationWorker.js');
+    await import('./googlePlaySubscriptionReconciliationWorker.js');
     await import('./server.js');
 }
 
