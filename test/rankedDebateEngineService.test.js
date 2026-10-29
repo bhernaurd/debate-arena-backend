@@ -1217,7 +1217,7 @@ test(
         });
         const engine = service([
             '',
-            valid + '\\n\\nSCORE:[7/10]: The argument needs stronger support.',
+            valid + '\n\nSCORE:[7/10]: The argument needs stronger support.',
         ]);
 
         const result = await engine.generateReply({
