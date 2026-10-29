@@ -66,7 +66,8 @@ test('unrelated endpoints retain their strict 50 KB limit', async () => {
         for (const route of ['/api/account/session/refresh', '/api/ai-jobs/123/retry']) {
             const result = await post(base, route, 100_000);
             assert.equal(result.status, 413);
-            assert.equal(result.body.code, 'debate_request_too_large');
+            assert.equal(result.body.code, 'request_payload_too_large');
+            assert.equal(result.body.error, 'This request is too large to process.');
         }
     });
 });
