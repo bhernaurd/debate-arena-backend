@@ -3,6 +3,7 @@
 import './env.js';
 
 import express from 'express';
+import { DEBATE_JSON_CREATE_ROUTES, debateJsonBodyParser, readablePayloadLimitError } from './lib/debateRequestBodyLimit.js';
 import cors from 'cors';
 import Anthropic from '@anthropic-ai/sdk';
 import rateLimit from 'express-rate-limit';
@@ -204,6 +205,10 @@ app.use(
   express.json({ limit: '512kb' })
 );
 
+// Large, long-running conversations include their complete turn history and
+// an authoritative philosopher prompt. Parse only debate creation requests
+// with the bounded larger cap before the strict default parser.
+app.post(DEBATE_JSON_CREATE_ROUTES, debateJsonBodyParser);
 app.use(express.json({ limit: '50kb' }));
 
 const limiter = rateLimit({
@@ -856,6 +861,9 @@ app.post('/debate', async (req, res) => {
 app.get('/health', (_, res) => {
   res.json({ status: 'ok' });
 });
+
+// Handle body-parser size rejections as JSON, never an HTML error page.
+app.use(readablePayloadLimitError);
 
 app.listen(PORT, () => {
   console.log(`Debate Arena backend running on port ${PORT}`);
