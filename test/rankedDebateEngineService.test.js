@@ -1157,4 +1157,108 @@ test(
             'later_generation_failed'
         );
     }
-); 
+);
+
+test(
+    'an empty first Ranked reply is regenerated without forfeiting the turn',
+    async () => {
+        const captured = [];
+        const valid = body([35, 35], {
+            finalEnding: '?',
+            prefix: 'recovered',
+        });
+        const engine = service(['', valid], captured);
+
+        const result = await engine.generateReply({
+            requestId: REQUEST_ID,
+            context: context('guided'),
+            conversation: conversation(1),
+            roundNumber: 1,
+        });
+
+        assert.equal(result.text, valid);
+        assert.equal(result.scoreValue, null);
+        assert.equal(captured.length, 2);
+        assert.match(
+            captured[1].system,
+            /no visible text/i
+        );
+    }
+);
+
+test(
+    'an empty Ranked opening is regenerated in the same request',
+    async () => {
+        const captured = [];
+        const valid = body([35, 35], {
+            finalEnding: '?',
+            prefix: 'openingrecovery',
+        });
+        const engine = service(['', valid], captured);
+
+        const result = await engine.generateOpening({
+            requestId: REQUEST_ID,
+            context: context('guided'),
+            conversation: [],
+        });
+
+        assert.equal(result.text, valid);
+        assert.equal(result.scoreValue, null);
+        assert.equal(captured.length, 2);
+    }
+);
+
+test(
+    'a scored Ranked turn regenerates empty output but never invents a score',
+    async () => {
+        const valid = body([50, 50], {
+            finalEnding: '?',
+            prefix: 'scoredrecovery',
+        });
+        const engine = service([
+            '',
+            valid + '\n\nSCORE:[7/10]: The argument needs stronger support.',
+        ]);
+
+        const result = await engine.generateReply({
+            requestId: REQUEST_ID,
+            context: context('balanced'),
+            conversation: conversation(2),
+            roundNumber: 2,
+        });
+
+        assert.equal(result.text, valid);
+        assert.equal(result.scoreValue, 7);
+    }
+);
+
+test(
+    'repeated empty Ranked AI responses remain retryable errors and never produce a fake answer',
+    async () => {
+        let calls = 0;
+        const engine = createRankedDebateEngineService({
+            createMessage: async () => {
+                calls += 1;
+                return { content: [] };
+            },
+            maxOutputAttempts: 3,
+            httpAttempts: 1,
+            logger: { warn() {} },
+        });
+
+        await assert.rejects(
+            engine.generateReply({
+                requestId: REQUEST_ID,
+                context: context('guided'),
+                conversation: conversation(1),
+                roundNumber: 1,
+            }),
+            (error) => {
+                assert.equal(error.code, 'ranked_model_empty_response');
+                assert.equal(error.retryable, true);
+                return true;
+            }
+        );
+        assert.equal(calls, 3);
+    }
+);
