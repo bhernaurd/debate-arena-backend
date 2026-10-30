@@ -1,5 +1,5 @@
 import express from 'express';
-import { sendTelegramMessage } from './scripts/analyticsReportV2Shared.js';
+import { createFounderFeedbackTelegramService } from './lib/founderFeedbackTelegramService.js';
 
 const MAX_AUTHORIZATION_HEADER_LENGTH = 16_512;
 const MAX_MESSAGE_LENGTH = 2_000;
@@ -124,61 +124,11 @@ function optionalPositiveIntegerHeader(req, name) {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
-function categoryLabel(category) {
-  switch (category) {
-    case 'feature_idea':
-      return 'Feature idea';
-    case 'bug':
-      return 'Bug';
-    case 'other':
-      return 'Other';
-    default:
-      return 'General';
-  }
-}
-
-function escapeHtml(value) {
-  return String(value)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;');
-}
-
-async function sendFounderFeedbackTelegram({
-  feedbackId,
-  category,
-  message,
-  displayName,
-  appVersion,
-  appBuild,
-}) {
-  if (!process.env.TELEGRAM_BOT_TOKEN || !process.env.TELEGRAM_CHAT_ID) {
-    return { skipped: true };
-  }
-
-  const appLabel = appVersion
-    ? `iOS ${escapeHtml(appVersion)}${appBuild ? ` (${appBuild})` : ''}`
-    : 'iOS';
-
-  const lines = [
-    '💬 <b>NEW APP FEEDBACK</b>',
-    '',
-    `<b>Type:</b> ${escapeHtml(categoryLabel(category))}`,
-    `<b>User:</b> ${escapeHtml(displayName || 'Signed-in Agora user')}`,
-    `<b>Feedback ID:</b> ${escapeHtml(feedbackId)}`,
-    `<b>App:</b> ${appLabel}`,
-    '',
-    escapeHtml(message),
-  ];
-
-  return sendTelegramMessage(lines.join('\n'));
-}
-
 export function createFounderFeedbackRouter({
   pool,
   accountAuthService,
   logger = console,
-  telegramSender = sendFounderFeedbackTelegram,
+  feedbackNotifier = null,
 } = {}) {
   if (!pool || typeof pool.query !== 'function') {
     throw new Error('A PostgreSQL pool is required.');
@@ -190,6 +140,9 @@ export function createFounderFeedbackRouter({
   ) {
     throw new Error('A valid account authentication service is required.');
   }
+
+  const notificationService = feedbackNotifier ||
+    createFounderFeedbackTelegramService({ pool, logger });
 
   const router = express.Router();
 
@@ -213,12 +166,19 @@ export function createFounderFeedbackRouter({
           accessToken,
         });
 
-      const clientPlatform =
-        optionalHeader(req, 'X-Client-Platform', 20) || 'ios';
-      const appVersion =
-        optionalHeader(req, 'X-iOS-Version', 32);
-      const appBuild =
-        optionalPositiveIntegerHeader(req, 'X-iOS-Build');
+      const platformHeader =
+        optionalHeader(req, 'X-Client-Platform', 20)?.toLowerCase();
+      const clientPlatform = platformHeader === 'android'
+        ? 'android' : platformHeader === 'ios' ? 'ios' : 'ios';
+      const appVersion = optionalHeader(
+        req,
+        clientPlatform === 'android' ? 'X-Android-Version' : 'X-iOS-Version',
+        32
+      );
+      const appBuild = optionalPositiveIntegerHeader(
+        req,
+        clientPlatform === 'android' ? 'X-Android-Build' : 'X-iOS-Build'
+      );
 
       const result = await pool.query(
         `
@@ -248,28 +208,30 @@ export function createFounderFeedbackRouter({
       const row = result.rows[0];
       const feedbackId = String(row.id);
 
+      // Feedback is committed before attempting Telegram delivery.
+      // If Telegram is unavailable, the background worker retries the
+      // durable outbox row instead of silently losing the notification.
+      let notificationStatus = 'queued';
       try {
-        await telegramSender({
-          feedbackId,
-          category,
-          message,
-          displayName: authorization.displayName ?? null,
-          appVersion,
-          appBuild,
-        });
+        const delivery = await notificationService.deliverId(feedbackId);
+        notificationStatus = delivery.notificationStatus;
       } catch (error) {
-        logger?.warn?.(
-          '[FounderFeedback] Telegram delivery failed; feedback is stored.',
-          {
-            feedbackId,
-            errorName: error?.name || 'Error',
-          }
-        );
+        logger?.warn?.('[FounderFeedback] Telegram dispatch deferred.', {
+          feedbackId,
+          errorName: error?.name || 'Error',
+        });
       }
+
+      logger?.info?.('[FounderFeedback] Feedback saved.', {
+        feedbackId,
+        platform: clientPlatform,
+        notificationStatus,
+      });
 
       return res.status(201).json({
         success: true,
         feedbackId,
+        notificationStatus,
         createdAt: new Date(row.created_at).toISOString(),
       });
     } catch (error) {
