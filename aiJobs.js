@@ -1146,7 +1146,7 @@ async function prepareStandardReplyMessages(job, messages) {
                   WHERE job_type = 'debate_reply'
                     AND debate_id = $1
                     AND user_id = $2
-                    AND metadata ? 'debateHistoryCompression'
+                    AND jsonb_typeof(metadata->'debateHistoryCompression') = 'object'
                   ORDER BY created_at DESC
                   LIMIT 1`,
                 [job.debate_id, job.user_id]
@@ -1795,6 +1795,10 @@ router.post('/api/ai-jobs', async (req, res) => {
 
                     expandedAgoraAccessReason: accessDecision.reason,
                     canonicalExpandedPromptApplied,
+
+                    // Reserved exclusively for backend-signed-in work. Client
+                    // metadata must never be able to spoof a summary checkpoint.
+                    debateHistoryCompression: null,
                 }),
             ]
         );
