@@ -27,17 +27,16 @@ test('founder feedback validates type and message length', () => {
   assert.match(routeSource, /Please enter feedback before sending/);
 });
 
-test('founder feedback is stored before Telegram delivery', () => {
+test('founder feedback is stored before durable Telegram dispatch', () => {
   const insert = routeSource.indexOf('INSERT INTO founder_feedback');
-  const telegram = routeSource.indexOf('await telegramSender');
+  const telegram = routeSource.indexOf('await notificationService.deliverId');
 
   assert.notEqual(insert, -1);
   assert.notEqual(telegram, -1);
   assert.ok(insert < telegram);
-  assert.match(
-    routeSource,
-    /Telegram delivery failed; feedback is stored/
-  );
+  assert.match(routeSource, /Telegram dispatch deferred/);
+  assert.match(routeSource, /notificationStatus/);
+  assert.match(serverSource, /founderFeedbackTelegram\.processPending\(10\)/);
 });
 
 test('founder feedback error logging excludes request body and access token', () => {
