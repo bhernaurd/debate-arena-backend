@@ -151,6 +151,6 @@ test('only standard debate jobs invoke compressor, not Ranked, Daily or reports'
     assert.match(source, /job\.job_type !== 'debate_reply'/);
     assert.match(source, /const generationMessages = await prepareStandardReplyMessages\(job, messages\)/);
     assert.match(source, /messages: generationMessages/);
-    assert.match(source, /model: 'claude-haiku-4-5-20251001'/);
+    assert.match(source, /model: 'claude-haiku-5-5'/);
     assert.match(source, /metadata\s*=\s*jsonb_set/);
 });
