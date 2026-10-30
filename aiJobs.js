@@ -1169,7 +1169,7 @@ async function prepareStandardReplyMessages(job, messages) {
         },
         summarize: async ({ priorSummary, olderMessages }) => {
             const requestPayload = {
-                model: 'claude-haiku-4-5-20251001',
+                model: 'claude-haiku-5-5',
                 max_tokens: 480,
                 system:
                     'You are a dialogue continuity summarizer for an educational philosophy app. ' +
