@@ -35,6 +35,7 @@ import { createAccountRankedLadderRouter } from './accountRankedLadderRoutes.js'
 import { createRankedPhilosopherEligibilityRouter } from './rankedPhilosopherEligibilityRoutes.js';
 import { createAiContentReportRouter } from './aiContentReportRoutes.js';
 import { createFounderFeedbackRouter } from './founderFeedbackRoutes.js';
+import { createFounderFeedbackTelegramService } from './lib/founderFeedbackTelegramService.js';
 import { createAccountAuthService } from './lib/accountAuthService.js';
 import { createAccountDebateHistoryService } from './lib/accountDebateHistoryService.js';
 import { createAccountMirrorService } from './lib/accountMirrorService.js';
@@ -637,12 +638,15 @@ app.use(
   })
 );
 
+const founderFeedbackTelegram = createFounderFeedbackTelegramService({ pool });
+
 app.use(
   '/api/account/feedback',
   founderFeedbackLimiter,
   createFounderFeedbackRouter({
     pool,
     accountAuthService,
+    feedbackNotifier: founderFeedbackTelegram,
   })
 );
 
@@ -867,4 +871,17 @@ app.use(readablePayloadLimitError);
 
 app.listen(PORT, () => {
   console.log(`Debate Arena backend running on port ${PORT}`);
+
+  // Pick up committed feedback that couldn't reach Telegram. The database
+  // lease avoids duplicate concurrent deliveries across deployments.
+  const deliverPendingFeedback = () =>
+    founderFeedbackTelegram.processPending(10).catch((error) => {
+      console.error('[FounderFeedback] Retry worker failed.', {
+        errorName: error?.name || 'Error',
+      });
+    });
+
+  void deliverPendingFeedback();
+  const feedbackRetryTimer = setInterval(deliverPendingFeedback, 60_000);
+  feedbackRetryTimer.unref?.();
 });
