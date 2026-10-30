@@ -1004,7 +1004,7 @@ function anthropicErrorFromResponse(parsed, statusCode, retryAfterMs) {
 
 // MARK: - Raw Anthropic HTTPS client
 
-function callAnthropicMessagesRaw(payload, label = 'ai job') {
+function callAnthropicMessagesRaw(payload, label = 'ai job', timeoutMs = 90_000) {
     return new Promise((resolve, reject) => {
         const apiKey = process.env.ANTHROPIC_API_KEY;
 
@@ -1031,7 +1031,7 @@ function callAnthropicMessagesRaw(payload, label = 'ai job') {
                 'Content-Length': Buffer.byteLength(body),
                 'Connection': 'close',
             },
-            timeout: 90_000,
+            timeout: timeoutMs,
             agent: new https.Agent({
                 keepAlive: false,
                 maxSockets: 1,
@@ -1193,7 +1193,8 @@ async function prepareStandardReplyMessages(job, messages) {
             // five retries or blocking a player's next philosopher response.
             const response = await callAnthropicMessagesRaw(
                 requestPayload,
-                'normal-debate-history-summary'
+                'normal-debate-history-summary',
+                15_000
             );
             const summary = (response?.content || [])
                 .filter((part) => part?.type === 'text')
