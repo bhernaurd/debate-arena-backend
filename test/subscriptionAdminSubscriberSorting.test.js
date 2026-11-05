@@ -46,7 +46,10 @@ test('Subscribers tab offers activity, newest, and oldest sorting',()=>{
   assert.doesNotMatch(html,/<th>Price<\/th>/);
   assert.match(html,/Months subscribed/);
   assert.match(html,/Lifetime value/);
-  assert.match(html,/lifetime_value_by_currency/);
+  assert.match(html,/lifetime_value_usd/);
+  assert.match(html,/subscriberPlanPriceUsd/);
+  assert.match(html,/subscriberOriginalPlanPrice/);
+  assert.match(html,/subscribed · USD/);
   assert.match(html,/subscriberMonths\(r\)/);
   assert.match(html,/subscriber_since\|\|r\.original_purchase_date/);
   assert.match(html,/api\('\/customers\?'\+subscriberParams\(\)\.toString\(\)\)/);
@@ -93,4 +96,10 @@ test('customer API uses a validated server-side sort',()=>{
   assert.match(source,/timeline\.product_id IN \('agora_pro_monthly', 'agora_pro_yearly'\)/);
   assert.match(source,/THEN 7990/);
   assert.match(source,/THEN 24990/);
+  assert.match(source,/createSubscriptionUsdConverter/);
+  assert.match(source,/subscriberUsdSummary/);
+  assert.match(source,/currencyConverter\.convertBag/);
+  assert.match(source,/lifetime_value_usd/);
+  assert.match(source,/price_usd/);
+  assert.match(source,/reportingCurrency: 'USD'/);
 });
