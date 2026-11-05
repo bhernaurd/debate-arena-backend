@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import express from 'express';
+import { createSubscriptionUsdConverter } from './lib/subscriptionUsdConversionService.js';
 
 const VALID_ENVIRONMENTS = new Map([
   ['production', 'Production'],
@@ -28,6 +29,105 @@ const CUSTOMER_SORTS = new Set([
   'newest',
   'oldest',
 ]);
+
+const GOOGLE_PLAY_USD_PLAN_MILLIUNITS = Object.freeze({
+  agora_pro_monthly: 7990,
+  agora_pro_yearly: 24990,
+});
+
+function transactionMonthKey(value) {
+  const date = value ? new Date(value) : new Date();
+  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 7);
+  return date.toISOString().slice(0, 7);
+}
+
+function transactionMoneyParts(row) {
+  if (row?.is_trial === true || row?.revocation_date) return null;
+
+  let priceMilliunits = row?.price_milliunits;
+  let currency = String(row?.currency || '').trim().toUpperCase();
+
+  if (
+    (priceMilliunits == null || !currency) &&
+    row?.store_platform === 'google_play'
+  ) {
+    priceMilliunits = GOOGLE_PLAY_USD_PLAN_MILLIUNITS[row?.product_id] ?? null;
+    currency = priceMilliunits == null ? '' : 'USD';
+  }
+
+  const price = Number(priceMilliunits);
+  const quantity = Math.max(1, Number(row?.quantity || 1));
+  if (!Number.isFinite(price) || price < 0 || !currency || !Number.isFinite(quantity)) {
+    return null;
+  }
+
+  return {
+    currency,
+    amount: (price / 1000) * quantity,
+    month: transactionMonthKey(row?.purchase_date || row?.updated_at),
+  };
+}
+
+async function subscriberUsdSummary(row, transactions, currencyConverter) {
+  const bagsByMonth = new Map();
+  for (const transaction of transactions || []) {
+    const money = transactionMoneyParts(transaction);
+    if (!money) continue;
+    const bag = bagsByMonth.get(money.month) || {};
+    bag[money.currency] = Number(bag[money.currency] || 0) + money.amount;
+    bagsByMonth.set(money.month, bag);
+  }
+
+  let lifetimeValueUsd = 0;
+  let lifetimeValueComplete = true;
+  for (const [month, bag] of bagsByMonth.entries()) {
+    try {
+      const converted = await currencyConverter.convertBag(bag, month);
+      lifetimeValueUsd += Number(converted?.bag?.USD || 0);
+    } catch {
+      lifetimeValueComplete = false;
+    }
+  }
+
+  let priceUsd = null;
+  const rawPrice = Number(row?.price_milliunits);
+  const rawCurrency = String(row?.currency || '').trim().toUpperCase();
+  const isZeroTrialPrice = row?.is_trial === true && rawPrice === 0;
+
+  if (!isZeroTrialPrice && Number.isFinite(rawPrice) && rawPrice >= 0 && rawCurrency) {
+    try {
+      const converted = await currencyConverter.convertBag(
+        { [rawCurrency]: rawPrice / 1000 },
+        transactionMonthKey(row?.latest_purchase_date || row?.purchase_date || row?.updated_at)
+      );
+      priceUsd = Number(converted?.bag?.USD);
+      if (!Number.isFinite(priceUsd)) priceUsd = null;
+    } catch {
+      priceUsd = null;
+    }
+  }
+
+  if (priceUsd == null && GOOGLE_PLAY_USD_PLAN_MILLIUNITS[row?.product_id] != null) {
+    priceUsd = GOOGLE_PLAY_USD_PLAN_MILLIUNITS[row.product_id] / 1000;
+  }
+
+  if (priceUsd == null && isZeroTrialPrice) {
+    const fallback = GOOGLE_PLAY_USD_PLAN_MILLIUNITS[row?.product_id];
+    if (fallback != null) priceUsd = fallback / 1000;
+    else if (row?.product_id === 'agora_pro_monthly') priceUsd = 7.99;
+    else if (row?.product_id === 'agora_pro_yearly') priceUsd = 24.99;
+  }
+
+  return {
+    ...row,
+    lifetime_value_usd: lifetimeValueComplete
+      ? Math.round((lifetimeValueUsd + Number.EPSILON) * 100) / 100
+      : null,
+    price_usd: priceUsd == null
+      ? null
+      : Math.round((priceUsd + Number.EPSILON) * 100) / 100,
+  };
+}
 
 function cleanText(value, maxLength = 500) {
   if (value == null) return '';
@@ -261,6 +361,7 @@ export function createSubscriptionAdminRouter(
     adminKey =
       process.env.SUBSCRIPTION_DASHBOARD_ADMIN_KEY ||
       process.env.ANALYTICS_ADMIN_KEY,
+    currencyConverter = createSubscriptionUsdConverter(),
   } = {}
 ) {
   if (!pool || typeof pool.query !== 'function') {
@@ -533,13 +634,72 @@ export function createSubscriptionAdminRouter(
         values
       );
 
+      const customerRows = customersResult.rows;
+      let transactionRows = [];
+      if (customerRows.length) {
+        const keys = [...new Set(customerRows.map((row) => String(row.customer_key)))];
+        const transactionResult = await pool.query(
+          `
+          SELECT DISTINCT ON (
+            customer.customer_key,
+            timeline.environment,
+            timeline.store_platform,
+            timeline.transaction_id
+          )
+            customer.customer_key,
+            timeline.environment,
+            timeline.store_platform,
+            timeline.transaction_id,
+            timeline.product_id,
+            timeline.is_trial,
+            timeline.revocation_date,
+            timeline.purchase_date,
+            timeline.currency,
+            timeline.price_milliunits,
+            timeline.quantity,
+            timeline.updated_at
+          FROM subscription_admin_cross_platform_transaction_timeline_v1 timeline
+          JOIN subscription_admin_cross_platform_customers_v1 customer
+            ON customer.original_transaction_id = timeline.original_transaction_id
+           AND customer.environment = timeline.environment
+          WHERE customer.customer_key = ANY($1::text[])
+          ORDER BY
+            customer.customer_key,
+            timeline.environment,
+            timeline.store_platform,
+            timeline.transaction_id,
+            timeline.updated_at DESC NULLS LAST
+          `,
+          [keys]
+        );
+        transactionRows = transactionResult.rows;
+      }
+
+      const transactionsByCustomer = new Map();
+      for (const transaction of transactionRows) {
+        const key = `${transaction.customer_key}::${transaction.environment}`;
+        if (!transactionsByCustomer.has(key)) transactionsByCustomer.set(key, []);
+        transactionsByCustomer.get(key).push(transaction);
+      }
+
+      const customers = await Promise.all(
+        customerRows.map((row) =>
+          subscriberUsdSummary(
+            row,
+            transactionsByCustomer.get(`${row.customer_key}::${row.environment}`) || [],
+            currencyConverter
+          )
+        )
+      );
+
       return res.json({
         success: true,
         total: Number(countResult.rows[0]?.count || 0),
         limit,
         offset,
         sort,
-        customers: customersResult.rows,
+        reportingCurrency: 'USD',
+        customers,
       });
     } catch (error) {
       return jsonError(res, error);
