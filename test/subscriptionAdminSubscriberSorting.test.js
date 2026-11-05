@@ -51,6 +51,10 @@ test('Subscribers tab offers activity, newest, and oldest sorting',()=>{
   assert.match(html,/lifetime_value_usd/);
   assert.match(html,/subscriberPlanPriceUsd/);
   assert.match(html,/subscriberOriginalPlanPrice/);
+  assert.match(html,/actualPaymentText/);
+  assert.match(html,/Actual payment/);
+  assert.match(html,/US plan price/);
+  assert.match(html,/Local currency not reported by Google Play/);
   assert.match(html,/payment_count/);
   assert.match(html,/paymentCountFromTransactions/);
   assert.doesNotMatch(html,/subscriberMonths\(r\)/);
