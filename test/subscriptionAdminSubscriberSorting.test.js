@@ -40,6 +40,10 @@ test('Subscribers tab offers activity, newest, and oldest sorting',()=>{
   assert.match(html,/Newest subscribers/);
   assert.match(html,/Oldest subscribers/);
   assert.match(html,/Subscriber since/);
+  assert.match(html,/Months subscribed/);
+  assert.match(html,/Lifetime value/);
+  assert.match(html,/lifetime_value_by_currency/);
+  assert.match(html,/subscriberMonths\(r\)/);
   assert.match(html,/subscriber_since\|\|r\.original_purchase_date/);
   assert.match(html,/api\('\/customers\?'\+subscriberParams\(\)\.toString\(\)\)/);
   const script=html.match(/<script>\s*([\s\S]*?)\s*<\/script>/i)?.[1]||'';
@@ -70,4 +74,9 @@ test('customer API uses a validated server-side sort',()=>{
   assert.match(source,/subscriber_since DESC NULLS LAST/);
   assert.match(source,/subscriber_since ASC NULLS LAST/);
   assert.match(source,/SELECT MIN\(COALESCE\(history\.original_purchase_date, history\.purchase_date, history\.created_at\)\)/);
+  assert.match(source,/lifetime_value_by_currency/);
+  assert.match(source,/subscription_admin_cross_platform_transaction_timeline_v1/);
+  assert.match(source,/timeline\.is_trial IS NOT TRUE/);
+  assert.match(source,/timeline\.revocation_date IS NULL/);
+  assert.match(source,/timeline\.price_milliunits IS NOT NULL/);
 });
