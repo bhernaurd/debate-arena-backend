@@ -424,6 +424,56 @@ export function createSubscriptionAdminRouter(
             WHERE history.customer_key = subscription_admin_cross_platform_current_customers_v1.customer_key
               AND history.environment = subscription_admin_cross_platform_current_customers_v1.environment
           ) AS subscriber_since,
+          (
+            SELECT COALESCE(
+              jsonb_object_agg(amounts.currency, amounts.amount ORDER BY amounts.currency),
+              '{}'::jsonb
+            )
+            FROM (
+              SELECT
+                paid.currency,
+                ROUND(
+                  SUM(
+                    (paid.price_milliunits::numeric / 1000.0)
+                    * GREATEST(COALESCE(paid.quantity, 1), 1)
+                  ),
+                  2
+                ) AS amount
+              FROM (
+                SELECT DISTINCT ON (
+                  timeline.store_platform,
+                  timeline.environment,
+                  timeline.transaction_id
+                )
+                  timeline.store_platform,
+                  timeline.environment,
+                  timeline.transaction_id,
+                  timeline.currency,
+                  timeline.price_milliunits,
+                  timeline.quantity,
+                  timeline.updated_at
+                FROM subscription_admin_cross_platform_transaction_timeline_v1 timeline
+                JOIN subscription_admin_cross_platform_customers_v1 history
+                  ON history.original_transaction_id = timeline.original_transaction_id
+                 AND history.environment = timeline.environment
+                WHERE history.customer_key =
+                      subscription_admin_cross_platform_current_customers_v1.customer_key
+                  AND history.environment =
+                      subscription_admin_cross_platform_current_customers_v1.environment
+                  AND timeline.is_trial IS NOT TRUE
+                  AND timeline.revocation_date IS NULL
+                  AND timeline.price_milliunits IS NOT NULL
+                  AND timeline.price_milliunits >= 0
+                  AND NULLIF(BTRIM(timeline.currency), '') IS NOT NULL
+                ORDER BY
+                  timeline.store_platform,
+                  timeline.environment,
+                  timeline.transaction_id,
+                  timeline.updated_at DESC NULLS LAST
+              ) paid
+              GROUP BY paid.currency
+            ) amounts
+          ) AS lifetime_value_by_currency,
           purchase_date,
           original_purchase_date,
           expires_date,
