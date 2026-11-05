@@ -70,9 +70,11 @@ function transactionMoneyParts(row) {
 
 async function subscriberUsdSummary(row, transactions, currencyConverter) {
   const bagsByMonth = new Map();
+  let paymentCount = 0;
   for (const transaction of transactions || []) {
     const money = transactionMoneyParts(transaction);
     if (!money) continue;
+    paymentCount += 1;
     const bag = bagsByMonth.get(money.month) || {};
     bag[money.currency] = Number(bag[money.currency] || 0) + money.amount;
     bagsByMonth.set(money.month, bag);
@@ -126,6 +128,7 @@ async function subscriberUsdSummary(row, transactions, currencyConverter) {
     price_usd: priceUsd == null
       ? null
       : Math.round((priceUsd + Number.EPSILON) * 100) / 100,
+    payment_count: paymentCount,
   };
 }
 
