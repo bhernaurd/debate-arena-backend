@@ -71,7 +71,7 @@ test('Subscribers table combines plan/store and keeps detailed attribution in cu
   assert.match(html,/agora_pro_monthly/);
   assert.match(html,/7990/);
   assert.match(html,/agora_pro_yearly/);
-  assert.match(html,/24990/);
+  assert.match(html,/49990/);
   assert.match(html,/affiliate_display_name/);
   assert.match(html,/affiliate_code/);
   assert.match(html,/\['Referral',c\.affiliate_display_name/);
@@ -98,10 +98,11 @@ test('customer API uses a validated server-side sort',()=>{
   assert.match(source,/timeline\.store_platform = 'google_play'/);
   assert.match(source,/timeline\.product_id IN \('agora_pro_monthly', 'agora_pro_yearly'\)/);
   assert.match(source,/THEN 7990/);
-  assert.match(source,/THEN 24990/);
+  assert.match(source,/THEN 49990/);
   assert.match(source,/createSubscriptionUsdConverter/);
   assert.match(source,/subscriberUsdSummary/);
-  assert.match(source,/currencyConverter\.convertBag/);
+  assert.match(source,/canonicalPlanPriceUsd/);
+  assert.match(source,/US_PLAN_PRICE_MILLIUNITS/);
   assert.match(source,/lifetime_value_usd/);
   assert.match(source,/price_usd/);
   assert.match(source,/payment_count: paymentCount/);
