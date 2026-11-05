@@ -30,104 +30,41 @@ const CUSTOMER_SORTS = new Set([
   'oldest',
 ]);
 
-const GOOGLE_PLAY_USD_PLAN_MILLIUNITS = Object.freeze({
+const US_PLAN_PRICE_MILLIUNITS = Object.freeze({
   agora_pro_monthly: 7990,
-  agora_pro_yearly: 24990,
+  agora_pro_yearly: 49990,
 });
 
-function transactionMonthKey(value) {
-  const date = value ? new Date(value) : new Date();
-  if (Number.isNaN(date.getTime())) return new Date().toISOString().slice(0, 7);
-  return date.toISOString().slice(0, 7);
+function canonicalPlanPriceUsd(row) {
+  const milliunits = US_PLAN_PRICE_MILLIUNITS[row?.product_id];
+  if (milliunits == null) return null;
+  return milliunits / 1000;
 }
 
-function transactionMoneyParts(row) {
-  if (row?.is_trial === true || row?.revocation_date) return null;
-
-  let priceMilliunits = row?.price_milliunits;
-  let currency = String(row?.currency || '').trim().toUpperCase();
-
-  if (
-    (priceMilliunits == null || !currency) &&
-    row?.store_platform === 'google_play'
-  ) {
-    priceMilliunits = GOOGLE_PLAY_USD_PLAN_MILLIUNITS[row?.product_id] ?? null;
-    currency = priceMilliunits == null ? '' : 'USD';
-  }
-
-  const price = Number(priceMilliunits);
-  const quantity = Math.max(1, Number(row?.quantity || 1));
-  if (!Number.isFinite(price) || price < 0 || !currency || !Number.isFinite(quantity)) {
-    return null;
-  }
-
-  return {
-    currency,
-    amount: (price / 1000) * quantity,
-    month: transactionMonthKey(row?.purchase_date || row?.updated_at),
-  };
-}
-
-async function subscriberUsdSummary(row, transactions, currencyConverter) {
-  const bagsByMonth = new Map();
-  let paymentCount = 0;
+function paidTransactionCount(transactions) {
+  let count = 0;
   for (const transaction of transactions || []) {
-    const money = transactionMoneyParts(transaction);
-    if (!money) continue;
-    paymentCount += 1;
-    const bag = bagsByMonth.get(money.month) || {};
-    bag[money.currency] = Number(bag[money.currency] || 0) + money.amount;
-    bagsByMonth.set(money.month, bag);
+    if (transaction?.is_trial === true || transaction?.revocation_date) continue;
+    if (!US_PLAN_PRICE_MILLIUNITS[transaction?.product_id]) continue;
+    count += 1;
   }
+  return count;
+}
 
-  let lifetimeValueUsd = 0;
-  let lifetimeValueComplete = true;
-  for (const [month, bag] of bagsByMonth.entries()) {
-    try {
-      const converted = await currencyConverter.convertBag(bag, month);
-      lifetimeValueUsd += Number(converted?.bag?.USD || 0);
-    } catch {
-      lifetimeValueComplete = false;
-    }
-  }
-
-  let priceUsd = null;
-  const rawPrice = Number(row?.price_milliunits);
-  const rawCurrency = String(row?.currency || '').trim().toUpperCase();
-  const isZeroTrialPrice = row?.is_trial === true && rawPrice === 0;
-
-  if (!isZeroTrialPrice && Number.isFinite(rawPrice) && rawPrice >= 0 && rawCurrency) {
-    try {
-      const converted = await currencyConverter.convertBag(
-        { [rawCurrency]: rawPrice / 1000 },
-        transactionMonthKey(row?.latest_purchase_date || row?.purchase_date || row?.updated_at)
-      );
-      priceUsd = Number(converted?.bag?.USD);
-      if (!Number.isFinite(priceUsd)) priceUsd = null;
-    } catch {
-      priceUsd = null;
-    }
-  }
-
-  if (priceUsd == null && GOOGLE_PLAY_USD_PLAN_MILLIUNITS[row?.product_id] != null) {
-    priceUsd = GOOGLE_PLAY_USD_PLAN_MILLIUNITS[row.product_id] / 1000;
-  }
-
-  if (priceUsd == null && isZeroTrialPrice) {
-    const fallback = GOOGLE_PLAY_USD_PLAN_MILLIUNITS[row?.product_id];
-    if (fallback != null) priceUsd = fallback / 1000;
-    else if (row?.product_id === 'agora_pro_monthly') priceUsd = 7.99;
-    else if (row?.product_id === 'agora_pro_yearly') priceUsd = 24.99;
-  }
+async function subscriberUsdSummary(row, transactions, _currencyConverter) {
+  const paymentCount = paidTransactionCount(transactions);
+  const planPriceUsd = canonicalPlanPriceUsd(row);
 
   return {
     ...row,
-    lifetime_value_usd: lifetimeValueComplete
-      ? Math.round((lifetimeValueUsd + Number.EPSILON) * 100) / 100
-      : null,
-    price_usd: priceUsd == null
-      ? null
-      : Math.round((priceUsd + Number.EPSILON) * 100) / 100,
+    lifetime_value_usd:
+      planPriceUsd == null
+        ? null
+        : Math.round((paymentCount * planPriceUsd + Number.EPSILON) * 100) / 100,
+    price_usd:
+      planPriceUsd == null
+        ? null
+        : Math.round((planPriceUsd + Number.EPSILON) * 100) / 100,
     payment_count: paymentCount,
   };
 }
@@ -550,7 +487,7 @@ export function createSubscriptionAdminRouter(
                             THEN 7990
                           WHEN paid.store_platform = 'google_play'
                            AND paid.product_id = 'agora_pro_yearly'
-                            THEN 24990
+                            THEN 49990
                           ELSE NULL
                         END
                       )::numeric / 1000.0
