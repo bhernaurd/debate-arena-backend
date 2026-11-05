@@ -44,13 +44,16 @@ test('Subscribers tab offers activity, newest, and oldest sorting',()=>{
   assert.match(html,/<th>Next billing<\/th>/);
   assert.doesNotMatch(html,/<th>Environment<\/th>/);
   assert.doesNotMatch(html,/<th>Price<\/th>/);
-  assert.match(html,/Months subscribed/);
+  assert.doesNotMatch(html,/Months subscribed/);
+  assert.match(html,/Payments collected/);
+  assert.match(html,/payments\)\+' collected'/);
   assert.match(html,/Lifetime value/);
   assert.match(html,/lifetime_value_usd/);
   assert.match(html,/subscriberPlanPriceUsd/);
   assert.match(html,/subscriberOriginalPlanPrice/);
-  assert.match(html,/subscribed · USD/);
-  assert.match(html,/subscriberMonths\(r\)/);
+  assert.match(html,/payment_count/);
+  assert.match(html,/paymentCountFromTransactions/);
+  assert.doesNotMatch(html,/subscriberMonths\(r\)/);
   assert.match(html,/subscriber_since\|\|r\.original_purchase_date/);
   assert.match(html,/api\('\/customers\?'\+subscriberParams\(\)\.toString\(\)\)/);
   const script=html.match(/<script>\s*([\s\S]*?)\s*<\/script>/i)?.[1]||'';
@@ -101,5 +104,6 @@ test('customer API uses a validated server-side sort',()=>{
   assert.match(source,/currencyConverter\.convertBag/);
   assert.match(source,/lifetime_value_usd/);
   assert.match(source,/price_usd/);
+  assert.match(source,/payment_count: paymentCount/);
   assert.match(source,/reportingCurrency: 'USD'/);
 });
