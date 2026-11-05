@@ -39,7 +39,11 @@ test('Subscribers tab offers activity, newest, and oldest sorting',()=>{
   assert.match(html,/Last activity/);
   assert.match(html,/Newest subscribers/);
   assert.match(html,/Oldest subscribers/);
-  assert.match(html,/Subscriber since/);
+  assert.match(html,/<th>Subscription<\/th>/);
+  assert.match(html,/<th>Value<\/th>/);
+  assert.match(html,/<th>Next billing<\/th>/);
+  assert.doesNotMatch(html,/<th>Environment<\/th>/);
+  assert.doesNotMatch(html,/<th>Price<\/th>/);
   assert.match(html,/Months subscribed/);
   assert.match(html,/Lifetime value/);
   assert.match(html,/lifetime_value_by_currency/);
@@ -51,11 +55,17 @@ test('Subscribers tab offers activity, newest, and oldest sorting',()=>{
   new vm.Script(script,{filename:'subscription-admin-client.js'});
 });
 
-test('Subscribers and customer detail show store and referral attribution',()=>{
+test('Subscribers table combines plan/store and keeps detailed attribution in customer drawer',()=>{
   const html=renderFinalDashboard();
-  assert.match(html,/<th>Store<\/th><th>Referral<\/th>/);
+  assert.match(html,/<th>Subscription<\/th>/);
+  assert.match(html,/<th>Referral<\/th>/);
   assert.match(html,/Google Play/);
   assert.match(html,/App Store/);
+  assert.match(html,/googlePlanMilli/);
+  assert.match(html,/agora_pro_monthly/);
+  assert.match(html,/7990/);
+  assert.match(html,/agora_pro_yearly/);
+  assert.match(html,/24990/);
   assert.match(html,/affiliate_display_name/);
   assert.match(html,/affiliate_code/);
   assert.match(html,/\['Referral',c\.affiliate_display_name/);
@@ -79,4 +89,8 @@ test('customer API uses a validated server-side sort',()=>{
   assert.match(source,/timeline\.is_trial IS NOT TRUE/);
   assert.match(source,/timeline\.revocation_date IS NULL/);
   assert.match(source,/timeline\.price_milliunits IS NOT NULL/);
+  assert.match(source,/timeline\.store_platform = 'google_play'/);
+  assert.match(source,/timeline\.product_id IN \('agora_pro_monthly', 'agora_pro_yearly'\)/);
+  assert.match(source,/THEN 7990/);
+  assert.match(source,/THEN 24990/);
 });
