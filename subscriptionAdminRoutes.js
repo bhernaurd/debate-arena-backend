@@ -431,10 +431,26 @@ export function createSubscriptionAdminRouter(
             )
             FROM (
               SELECT
-                paid.currency,
+                COALESCE(
+                  NULLIF(BTRIM(paid.currency), ''),
+                  CASE WHEN paid.store_platform = 'google_play' THEN 'USD' END
+                ) AS currency,
                 ROUND(
                   SUM(
-                    (paid.price_milliunits::numeric / 1000.0)
+                    (
+                      COALESCE(
+                        paid.price_milliunits,
+                        CASE
+                          WHEN paid.store_platform = 'google_play'
+                           AND paid.product_id = 'agora_pro_monthly'
+                            THEN 7990
+                          WHEN paid.store_platform = 'google_play'
+                           AND paid.product_id = 'agora_pro_yearly'
+                            THEN 24990
+                          ELSE NULL
+                        END
+                      )::numeric / 1000.0
+                    )
                     * GREATEST(COALESCE(paid.quantity, 1), 1)
                   ),
                   2
@@ -448,6 +464,7 @@ export function createSubscriptionAdminRouter(
                   timeline.store_platform,
                   timeline.environment,
                   timeline.transaction_id,
+                  timeline.product_id,
                   timeline.currency,
                   timeline.price_milliunits,
                   timeline.quantity,
@@ -462,16 +479,28 @@ export function createSubscriptionAdminRouter(
                       subscription_admin_cross_platform_current_customers_v1.environment
                   AND timeline.is_trial IS NOT TRUE
                   AND timeline.revocation_date IS NULL
-                  AND timeline.price_milliunits IS NOT NULL
-                  AND timeline.price_milliunits >= 0
-                  AND NULLIF(BTRIM(timeline.currency), '') IS NOT NULL
+                  AND (
+                    (
+                      timeline.price_milliunits IS NOT NULL
+                      AND timeline.price_milliunits >= 0
+                      AND NULLIF(BTRIM(timeline.currency), '') IS NOT NULL
+                    )
+                    OR (
+                      timeline.store_platform = 'google_play'
+                      AND timeline.product_id IN ('agora_pro_monthly', 'agora_pro_yearly')
+                    )
+                  )
                 ORDER BY
                   timeline.store_platform,
                   timeline.environment,
                   timeline.transaction_id,
                   timeline.updated_at DESC NULLS LAST
               ) paid
-              GROUP BY paid.currency
+              GROUP BY
+                COALESCE(
+                  NULLIF(BTRIM(paid.currency), ''),
+                  CASE WHEN paid.store_platform = 'google_play' THEN 'USD' END
+                )
             ) amounts
           ) AS lifetime_value_by_currency,
           purchase_date,
