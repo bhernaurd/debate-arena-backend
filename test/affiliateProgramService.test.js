@@ -92,7 +92,9 @@ test('admin exposes affiliate payout navigation and correct payment confirmation
   assert.match(source, /Mark Paid \/ Record Payment/);
   assert.match(source, /const p = payouts.find\(x => x.id === payoutId\)/);
   assert.match(source, /payoutAffiliateFilter = id/);
-  assert.match(source, /Finalize completed month to enable payment/);
+  assert.match(source, /Apple payouts require completed-month finalization/);
+  assert.match(source, /isVerifiedGooglePayout/);
+  assert.match(source, /Calculate Commission/);
 });
 
 test('partner dashboard contains Overview and Breakdown tabs', () => {
