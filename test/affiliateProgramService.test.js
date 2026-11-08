@@ -109,7 +109,7 @@ test('unpaid open-month commission uses verified event calculation and payment l
   const source = await readFile(new URL('../lib/affiliateProgramService.js', import.meta.url), 'utf8');
   assert.match(source, /status IN \('open', 'ready_to_pay', 'partially_paid'\)/);
   assert.match(source, /calculateMonthlyExpectation\(pool, \{/);
-  assert.match(source, /outstanding - previouslyIncluded/);
+  assert.match(source, /outstanding \+= freshBalance - previouslyIncluded/);
   assert.match(source, /currentlyOwed: outstanding\.toFixed\(2\)/);
 });
 
