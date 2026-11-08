@@ -185,6 +185,43 @@ test('unpaid open-month commission uses verified event calculation and payment l
   assert.match(source, /currentlyOwed: outstanding\.toFixed\(2\)/);
 });
 
+test('partner dashboard reconstructs missing October performance from verified Google subscriber activity', () => {
+  const html = renderPartnerDashboardPage('abcdefghijklmnopqrstuvwxyz0123456789ABCDE');
+  const script = html.match(/<script>\\s*([\\s\\S]*?)\\s*<\\/script>/i)?.[1] || '';
+  const begin = script.indexOf('const cohortRows =');
+  const end = script.indexOf("text('breakdownReferrals'", begin);
+  assert.ok(begin > 0 && end > begin, 'verified cohort fallback must be present');
+  const derive = new Function(
+    'b', 's', 'data', 'selectedPaidSubscribers', 'selectedActiveTrials',
+    script.slice(begin, end) + `
+      return {
+        referrals: verifiedReferralCount,
+        paidConversion: rate(paidCount, verifiedReferralCount),
+        activeRetention: rate(activeCount, verifiedReferralCount),
+        cancellation: rate(cancelingCount, activeCount),
+        trialConversion: rate(verifiedTrialConversions, trialDenominator)
+      };
+    `
+  );
+  const result = derive({
+    anonymousSubscriberActivity: [{
+      subscriberAlias: '#A1', joinedAt: '2026-10-20T22:12:00Z',
+      currentState: 'paid_renewing', offerLabel: '7-Day Free Trial',
+      firstStandardPaidAt: '2026-10-27T22:41:00Z',
+      autoRenewEnabled: true
+    }]
+  }, {
+    newReferrals: 0, currentSubscribers: 0, promoNonRenewals: 0,
+    canceling: 0
+  }, {
+    range: { start: '2026-10-01', endExclusive: '2026-11-01' }
+  }, 1, 0);
+  assert.deepEqual(result, {
+    referrals: 1, paidConversion: 100, activeRetention: 100,
+    cancellation: 0, trialConversion: 100
+  });
+});
+
 test('partner dashboard keeps lifecycle detail in Breakdown instead of the overview', () => {
   const html = renderPartnerDashboardPage('abcdefghijklmnopqrstuvwxyz0123456789ABCDE');
   assert.match(html, /Platform Breakdown/);
