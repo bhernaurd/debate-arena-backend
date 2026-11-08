@@ -2917,6 +2917,7 @@ function renderAffiliateAdminDashboardPage() {
           '<td>' + badge(number(a.open_alerts), alertKind) + '</td>' +
           '<td><div class="affiliate-actions">' +
             '<button class="button small" data-action="dashboard" data-id="' + html(a.id) + '">Dashboard</button>' +
+            '<button class="button small gold" data-action="payouts" data-id="' + html(a.id) + '">Payouts</button>' +
             '<details class="row-menu"><summary title="More actions" aria-label="More actions">•••</summary><div class="row-menu-panel">' +
               (canToggle ? '<button class="button small ' + (operationalActive ? '' : 'gold') + '" data-action="toggle" data-id="' + html(a.id) + '" data-active="' + (operationalActive ? 'false' : 'true') + '">' + (operationalActive ? 'Pause Affiliate' : 'Activate Affiliate') + '</button>' : '') +
               '<button class="button small danger" data-action="delete" data-id="' + html(a.id) + '">Delete Affiliate</button>' +
@@ -3365,6 +3366,7 @@ function renderAffiliateAdminDashboardPage() {
       } catch (error) { toast(error.message, true); }
     }
 
+    let payoutAffiliateFilter = null;
     async function loadPayouts(showToast) {
       if (!adminKey) return;
       try {
@@ -3380,11 +3382,19 @@ function renderAffiliateAdminDashboardPage() {
     }
 
     function renderPayouts() {
-      if (!payouts.length) {
-        $('payoutRows').innerHTML = '<tr><td colspan="11" class="empty">No payout rows exist for this month yet. Use Refresh Month after Apple data is available to build or update the month for all included affiliates.</td></tr>';
+      const visiblePayouts = payoutAffiliateFilter
+        ? payouts.filter(p => p.affiliate_id === payoutAffiliateFilter)
+        : payouts;
+      if (!visiblePayouts.length) {
+        const affiliate = affiliates.find(a => a.id === payoutAffiliateFilter);
+        $('payoutRows').innerHTML = '<tr><td colspan="11" class="empty">' +
+          (affiliate
+            ? 'No payout record yet for ' + html(affiliate.display_name) + ' in this month. Select the month the subscriber paid, then click Refresh Month. Open months cannot be marked paid until they are finalized.'
+            : 'No payout rows exist for this month yet. Use Refresh Month to calculate payouts.') +
+          '</td></tr>';
         return;
       }
-      $('payoutRows').innerHTML = payouts.map(p => {
+      $('payoutRows').innerHTML = visiblePayouts.map(p => {
         const canPay = ['ready_to_pay','partially_paid'].includes(p.status) && numeric(p.remaining_owed) > 0;
         return '<tr>' +
           '<td><div class="partner-name">' + html(p.affiliate_display_name) + '</div><div class="code">' + html(p.affiliate_code) + '</div></td>' +
@@ -3398,7 +3408,13 @@ function renderAffiliateAdminDashboardPage() {
           '<td>' + payoutStatusBadge(p) + '</td>' +
           '<td>' + number(p.adjustment_count) + '</td>' +
           '<td><div class="actions"><button class="button small" data-payout-refresh="' + html(p.affiliate_id) + '">Refresh</button>' +
-          (canPay ? '<button class="button small gold" data-payout-pay="' + html(p.id) + '">Record Payment</button>' : '') + '</div></td>' +
+          (canPay
+            ? '<button class="button small gold" data-payout-pay="' + html(p.id) + '">Mark Paid / Record Payment</button>'
+            : '<span class="muted tiny">' +
+                (p.status === 'paid' ? 'Paid in full' :
+                p.data_status === 'needs_review' ? 'Review required before payment' :
+                p.status === 'open' ? 'Finalize completed month to enable payment' :
+                'No unpaid balance') + '</span>') + '</div></td>' +
         '</tr>';
       }).join('');
     }
@@ -3468,6 +3484,8 @@ function renderAffiliateAdminDashboardPage() {
     }
 
     async function recordPayment(payoutId) {
+      const p = payouts.find(x => x.id === payoutId);
+      if (!p) { $('paymentError').textContent = 'Payout record not found. Reload the month.'; return; }
       const amount = $('payAmount').value.trim();
       const paymentDate = $('payDate').value;
       if (!amount || Number(amount) <= 0 || !paymentDate) { $('paymentError').textContent = 'A positive amount and payment date are required.'; return; }
@@ -3542,7 +3560,10 @@ function renderAffiliateAdminDashboardPage() {
     $('affiliateFilter').addEventListener('change', renderAffiliateRows);
     $('loadAlerts').addEventListener('click', () => loadAlerts(true));
     $('alertFilter').addEventListener('change', () => loadAlerts(false));
-    $('loadPayouts').addEventListener('click', () => loadPayouts(true));
+    $('loadPayouts').addEventListener('click', () => {
+      payoutAffiliateFilter = null;
+      loadPayouts(true);
+    });
     $('refreshMonth').addEventListener('click', refreshSelectedMonth);
     $('includeTestPayouts').addEventListener('change', () => loadPayouts(false));
     $('payoutMonth').addEventListener('change', () => { updateFinalizeButton(); loadPayouts(false); });
@@ -3554,6 +3575,12 @@ function renderAffiliateAdminDashboardPage() {
       const id = button.dataset.id;
       if (button.dataset.action === 'details') openDetails(id);
       if (button.dataset.action === 'dashboard') openPartnerDashboard(id);
+      if (button.dataset.action === 'payouts') {
+        payoutAffiliateFilter = id;
+        const tab = document.querySelector('.tab[data-tab="payouts"]');
+        if (tab) tab.click();
+        $('payoutsTab').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
       if (button.dataset.action === 'toggle') toggleAffiliate(id, button.dataset.active === 'true');
       if (button.dataset.action === 'delete') deleteAffiliate(id);
     });
