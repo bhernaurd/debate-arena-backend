@@ -1626,7 +1626,7 @@ function renderPartnerDashboardPage(token) {
     }
 
     function validMonthKey(value) {
-      return /^\d{4}-\d{2}$/.test(String(value || ''));
+      return /^[0-9]{4}-[0-9]{2}$/.test(String(value || ''));
     }
 
     function monthKeyLabel(value) {
