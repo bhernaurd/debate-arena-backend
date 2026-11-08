@@ -2100,7 +2100,10 @@ function renderPartnerDashboardPage(token) {
         }
         document.body.innerHTML =
           '<main class="shell"><div class="eyebrow">THE AGORA PARTNERS</div>' +
-          '<h1 style="margin-top:18px">Dashboard unavailable</h1>' +
+          '<h1 style="margin-top:18px">' +
+          (response.status === 404 || response.status === 410
+            ? 'Dashboard unavailable' : 'Dashboard temporarily unavailable') +
+          '</h1>' +
           '<p style="color:var(--muted)">' + message + '</p></main>';
         return;
       }
