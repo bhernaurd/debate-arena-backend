@@ -3399,7 +3399,7 @@ function renderAffiliateAdminDashboardPage() {
         $('payoutRows').innerHTML = '<tr><td colspan="11" class="empty">' +
           (affiliate
             ? 'No payout calculated for ' + html(affiliate.display_name) + ' in ' + html(monthName($('payoutMonth').value)) + '. <button class="button small gold" data-payout-refresh="' + html(affiliate.id) + '">Calculate Commission</button>'
-            : 'No payout rows exist for this month yet. Use Refresh Month to calculate payouts.') +
+            : 'No payout rows exist for this month yet. Use Refresh Month after Apple data is available to build or update the month for all included affiliates.') +
           '</td></tr>';
         return;
       }
