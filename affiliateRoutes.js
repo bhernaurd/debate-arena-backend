@@ -4345,6 +4345,7 @@ export function createAffiliateRouter(pool, options = {}) {
   router.get('/partners/:token', partnerLimiter, partnerSecurityHeaders, async (req, res) => {
     try {
       await service.resolvePartnerToken(req.params.token, { touch: false });
+      res.set('Cache-Control', 'private, no-store, max-age=0');
       return res.type('html').send(renderPartnerDashboardPage(req.params.token));
     } catch (error) {
       return res.status(404).type('text/plain').send('This private dashboard link is no longer active.');
@@ -4403,6 +4404,7 @@ export function createAffiliateRouter(pool, options = {}) {
         }
       }
 
+      res.set('Cache-Control', 'private, no-store, max-age=0');
       return res.json({
         success: true,
         data: {
