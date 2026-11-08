@@ -1958,7 +1958,57 @@ function renderPartnerDashboardPage(token) {
         s.promoActiveSubscribers ??
         s.promoSubscribers;
 
-      text('breakdownReferrals', number(s.newReferrals));
+      // Subscriber Activity may be more complete than delayed aggregate
+      // counters. Reconcile the visible cohort before rendering rates.
+      const cohortRows = (Array.isArray(b.anonymousSubscriberActivity)
+        ? b.anonymousSubscriberActivity : []).filter(item => {
+          const joined = String(item.joinedAt || '').slice(0, 10);
+          const from = String(data.range?.start || '').slice(0, 10);
+          const until = String(data.range?.endExclusive || '').slice(0, 10);
+          return joined && (!from || joined >= from) && (!until || joined < until);
+        });
+      const uniqueCohort = [...new Map(cohortRows.map((item, index) => [
+        item.subscriberAlias || item.subscriberLabel || String(index), item
+      ])).values()];
+      const verifiedReferralCount = Math.max(
+        Number(s.newReferrals || 0), uniqueCohort.length,
+        Number(selectedPaidSubscribers || 0) + Number(selectedActiveTrials || 0)
+      );
+      const paidFromActivity = uniqueCohort.filter(item =>
+        Boolean(item.firstStandardPaidAt) ||
+        ['paid_renewing','paid_canceling'].includes(item.currentState)
+      ).length;
+      const paidCount = Math.min(verifiedReferralCount,
+        Math.max(Number(selectedPaidSubscribers || 0), paidFromActivity));
+      const activeFromActivity = uniqueCohort.filter(item =>
+        ['paid_renewing','paid_canceling','promo_active','trial_canceling','billing_retry'].includes(item.currentState)
+      ).length;
+      const activeCount = Math.min(verifiedReferralCount, Math.max(
+        Number(s.currentSubscribers || 0),
+        Number(selectedPaidSubscribers || 0) + Number(selectedActiveTrials || 0),
+        activeFromActivity
+      ));
+      const cancelingCount = Math.max(
+        Number(s.canceling || 0),
+        uniqueCohort.filter(item =>
+          item.autoRenewEnabled === false &&
+          ['paid_canceling','trial_canceling'].includes(item.currentState)
+        ).length
+      );
+      const verifiedTrialConversions = uniqueCohort.filter(item =>
+        Boolean(item.firstStandardPaidAt) &&
+        /trial/i.test(item.offerLabel || '')
+      ).length;
+      const verifiedTrialNonConversions = Math.max(0, Number(s.promoNonRenewals || 0));
+      const trialDenominator = verifiedTrialConversions + verifiedTrialNonConversions;
+      const rate = (part, total) => total > 0
+        ? Math.round((Math.min(total, Math.max(0, part)) / total) * 1000) / 10
+        : null;
+      const performanceValue = (reported, fallback) =>
+        reported == null || !Number.isFinite(Number(reported))
+          ? fallback : reported;
+
+      text('breakdownReferrals', number(verifiedReferralCount));
       text('breakdownActiveTrials', number(selectedActiveTrials));
       text('breakdownPaidSubscribers', number(selectedPaidSubscribers));
       text(
@@ -1983,7 +2033,10 @@ function renderPartnerDashboardPage(token) {
         Number(s.pendingStateSubscribers || 0) === 0
       );
 
-      text('breakdownTrialConversion', percent(p.promoRenewalRate));
+      text('breakdownTrialConversion', percent(performanceValue(
+        p.promoRenewalRate,
+        rate(verifiedTrialConversions, trialDenominator)
+      )));
       text(
         'breakdownTrialNonConversions',
         s.promoNonRenewals == null
@@ -1991,9 +2044,15 @@ function renderPartnerDashboardPage(token) {
           : number(s.promoNonRenewals) + ' trial non-conversion' +
             (Number(s.promoNonRenewals) === 1 ? '' : 's')
       );
-      text('breakdownPaidConversion', percent(p.paidConversionRate));
-      text('breakdownActiveRetention', percent(p.activeRetention));
-      text('breakdownCancellationRate', percent(p.cancellationRate));
+      text('breakdownPaidConversion', percent(performanceValue(
+        p.paidConversionRate, rate(paidCount, verifiedReferralCount)
+      )));
+      text('breakdownActiveRetention', percent(performanceValue(
+        p.activeRetention, rate(activeCount, verifiedReferralCount)
+      )));
+      text('breakdownCancellationRate', percent(performanceValue(
+        p.cancellationRate, rate(cancelingCount, activeCount)
+      )));
 
       const previousOfferSelected = b.previousOfferHistory || {};
       const previousOfferSelectedSignups = Number(previousOfferSelected.totalSignups || 0);
@@ -4286,6 +4345,7 @@ export function createAffiliateRouter(pool, options = {}) {
   router.get('/partners/:token', partnerLimiter, partnerSecurityHeaders, async (req, res) => {
     try {
       await service.resolvePartnerToken(req.params.token, { touch: false });
+      res.set('Cache-Control', 'private, no-store, max-age=0');
       return res.type('html').send(renderPartnerDashboardPage(req.params.token));
     } catch (error) {
       return res.status(404).type('text/plain').send('This private dashboard link is no longer active.');
@@ -4344,6 +4404,7 @@ export function createAffiliateRouter(pool, options = {}) {
         }
       }
 
+      res.set('Cache-Control', 'private, no-store, max-age=0');
       return res.json({
         success: true,
         data: {
