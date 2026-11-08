@@ -2090,7 +2090,7 @@ function renderPartnerDashboardPage(token) {
       if (!response.ok) {
         const message = response.status === 404 || response.status === 410
           ? 'This private dashboard link is no longer active.'
-          : 'Could not load that month. Please try again.';
+          : 'The dashboard could not load right now. Your private link is still valid. Please refresh in a moment.';
         // Do not destroy an already loaded dashboard on a failed month request.
         // The user must be able to navigate again or select another month.
         if (currentData) {
