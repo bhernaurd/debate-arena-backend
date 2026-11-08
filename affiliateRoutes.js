@@ -795,6 +795,7 @@ function renderPartnerDashboardPage(token) {
       outline: none;
     }
     .month-arrow:disabled { opacity: .22; cursor: default; }
+    .month-arrow:not(:disabled) { opacity: 1; min-width: 38px; min-height: 44px; }
     .month-selector {
       position: relative;
       min-width: 188px;
@@ -1003,11 +1004,11 @@ function renderPartnerDashboardPage(token) {
             <div class="label">Currently Owed</div>
             ${renderInfoButton(
               'Currently Owed',
-              'Finalized commission that has not yet been paid. Open monthly estimates are not included here until they are finalized.'
+              'Verified earned commission not yet paid, including amounts in the current open month. Estimates can change if billing is reversed or adjusted.'
             )}
           </div>
           <div class="value money" id="currentlyOwed">—</div>
-          <div class="subvalue">Finalized unpaid commission</div>
+          <div class="subvalue">Verified unpaid commission · includes open month</div>
         </article>
       </div>
 
@@ -1625,7 +1626,7 @@ function renderPartnerDashboardPage(token) {
     }
 
     function validMonthKey(value) {
-      return /^\d{4}-\d{2}$/.test(String(value || ''));
+      return /^[0-9]{4}-[0-9]{2}$/.test(String(value || ''));
     }
 
     function monthKeyLabel(value) {
@@ -1698,8 +1699,8 @@ function renderPartnerDashboardPage(token) {
       text('selectedMonthStatus', selectedMonthStatus(data));
 
       navigator.classList.toggle('aggregate-mode', !monthly);
-      previous.disabled = !currentMonthKey || currentMonthKey <= minMonth;
-      next.disabled = !currentMonthKey || !maxMonth || currentMonthKey >= maxMonth;
+      previous.disabled = !validMonthKey(currentMonthKey) || currentMonthKey <= minMonth;
+      next.disabled = !validMonthKey(currentMonthKey) || !validMonthKey(maxMonth) || currentMonthKey >= maxMonth;
 
       document.querySelectorAll('.range').forEach(button => {
         button.classList.toggle('active', button.dataset.range === range.key);
@@ -2087,16 +2088,23 @@ function renderPartnerDashboardPage(token) {
       });
 
       if (!response.ok) {
-        const linkInactive = response.status === 404 || response.status === 410;
+        const message = response.status === 404 || response.status === 410
+          ? 'This private dashboard link is no longer active.'
+          : 'The dashboard could not load right now. Your private link is still valid. Please refresh in a moment.';
+        // Do not destroy an already loaded dashboard on a failed month request.
+        // The user must be able to navigate again or select another month.
+        if (currentData) {
+          window.alert(message);
+          updatePeriodControls(currentData);
+          return;
+        }
         document.body.innerHTML =
           '<main class="shell"><div class="eyebrow">THE AGORA PARTNERS</div>' +
           '<h1 style="margin-top:18px">' +
-          (linkInactive ? 'Dashboard unavailable' : 'Dashboard temporarily unavailable') +
-          '</h1><p style="color:var(--muted)">' +
-          (linkInactive
-            ? 'This private dashboard link is no longer active.'
-            : 'The dashboard could not load right now. Your private link is still valid. Please refresh in a moment.') +
-          '</p></main>';
+          (response.status === 404 || response.status === 410
+            ? 'Dashboard unavailable' : 'Dashboard temporarily unavailable') +
+          '</h1>' +
+          '<p style="color:var(--muted)">' + message + '</p></main>';
         return;
       }
 
@@ -2118,16 +2126,30 @@ function renderPartnerDashboardPage(token) {
       currentMonthKey = monthKey;
       currentRange = 'month:' + monthKey;
       document.querySelectorAll('.range').forEach(item => item.classList.remove('active'));
-      await load(currentRange);
+      try {
+        await load(currentRange);
+      } catch (error) {
+        window.alert('Could not load that month. Please try again.');
+        if (currentData) {
+          currentRange = currentData.range?.key || 'this_month';
+          updatePeriodControls(currentData);
+        }
+      }
     }
 
     document.getElementById('previousMonth').addEventListener('click', async () => {
-      const target = shiftMonthKey(currentMonthKey, -1);
-      if (target) await loadMonth(target);
+      const current = validMonthKey(currentRange.slice(6))
+        ? currentRange.slice(6)
+        : (currentMonthKey || currentData?.range?.currentMonthKey);
+      const target = shiftMonthKey(current, -1);
+      if (target && target >= '2000-01') await loadMonth(target);
     });
 
     document.getElementById('nextMonth').addEventListener('click', async () => {
-      const target = shiftMonthKey(currentMonthKey, 1);
+      const current = validMonthKey(currentRange.slice(6))
+        ? currentRange.slice(6)
+        : (currentMonthKey || currentData?.range?.currentMonthKey);
+      const target = shiftMonthKey(current, 1);
       const maxMonth = currentData?.range?.currentMonthKey;
       if (target && (!validMonthKey(maxMonth) || target <= maxMonth)) {
         await loadMonth(target);
@@ -2136,7 +2158,11 @@ function renderPartnerDashboardPage(token) {
 
     document.getElementById('monthPicker').addEventListener('change', async event => {
       const target = String(event.target.value || '');
-      if (validMonthKey(target)) await loadMonth(target);
+      const maxMonth = currentData?.range?.currentMonthKey;
+      if (validMonthKey(target) && target >= '2000-01' &&
+          (!validMonthKey(maxMonth) || target <= maxMonth)) {
+        await loadMonth(target);
+      }
     });
 
     document.querySelectorAll('.range').forEach(button => {

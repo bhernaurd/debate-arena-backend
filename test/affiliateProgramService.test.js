@@ -95,6 +95,24 @@ test('partner dashboard contains Overview and Breakdown tabs', () => {
   assert.match(html, /Currently Owed/);
 });
 
+test('partner dashboard renders working month validation and navigation controls', () => {
+  const html = renderPartnerDashboardPage('abcdefghijklmnopqrstuvwxyz0123456789ABCDE');
+  assert.match(html, /return \/\^\[0-9\]\{4\}-\[0-9\]\{2\}\$\//);
+  assert.match(html, /id="previousMonth"/);
+  assert.match(html, /id="nextMonth"/);
+  assert.match(html, /id="monthPicker"/);
+  assert.match(html, /shiftMonthKey\(current, -1\)/);
+  assert.match(html, /shiftMonthKey\(current, 1\)/);
+});
+
+test('unpaid open-month commission uses verified event calculation and payment ledger', async () => {
+  const source = await readFile(new URL('../lib/affiliateProgramService.js', import.meta.url), 'utf8');
+  assert.match(source, /status IN \('open', 'ready_to_pay', 'partially_paid'\)/);
+  assert.match(source, /calculateMonthlyExpectation\(pool, \{/);
+  assert.match(source, /outstanding \+= freshBalance - previouslyIncluded/);
+  assert.match(source, /currentlyOwed: outstanding\.toFixed\(2\)/);
+});
+
 test('partner dashboard keeps lifecycle detail in Breakdown instead of the overview', () => {
   const html = renderPartnerDashboardPage('abcdefghijklmnopqrstuvwxyz0123456789ABCDE');
   assert.match(html, /Platform Breakdown/);
