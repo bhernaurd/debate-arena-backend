@@ -187,7 +187,7 @@ test('unpaid open-month commission uses verified event calculation and payment l
 
 test('partner dashboard reconstructs missing October performance from verified Google subscriber activity', () => {
   const html = renderPartnerDashboardPage('abcdefghijklmnopqrstuvwxyz0123456789ABCDE');
-  const script = html.match(/<script>\\s*([\\s\\S]*?)\\s*<\\/script>/i)?.[1] || '';
+  const script = html.match(/<script>\s*([\s\S]*?)\s*<\/script>/i)?.[1] || '';
   const begin = script.indexOf('const cohortRows =');
   const end = script.indexOf("text('breakdownReferrals'", begin);
   assert.ok(begin > 0 && end > begin, 'verified cohort fallback must be present');
