@@ -2502,7 +2502,7 @@ function renderAffiliateAdminDashboardPage() {
           <button id="finalizeMonth" class="button gold" type="button">Finalize Month</button>
         </div>
       </div>
-      <div id="payoutNotice" class="notice">Finalization is allowed only for completed prior calendar months. Production finalization remains subject to the server's Apple-data safety rules.</div>
+      <div id="payoutNotice" class="notice">Mark Paid / Record Payment records money you have already sent. Verified Google Play commissions may be paid in the open month; Apple Analytics-based payouts require a completed month and approval of their accounting basis. Nothing is marked paid automatically.</div>
       <div class="card table-card">
         <div class="table-wrap">
           <table>
