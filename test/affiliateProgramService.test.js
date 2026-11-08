@@ -86,6 +86,15 @@ test('fractional-cent commissions are not rounded per transaction', () => {
   assert.equal(result.finalCommission, '7.99');
 });
 
+test('admin exposes affiliate payout navigation and correct payment confirmation context', async () => {
+  const source = await readFile(new URL('../affiliateRoutes.js', import.meta.url), 'utf8');
+  assert.match(source, /data-action="payouts"/);
+  assert.match(source, /Mark Paid \/ Record Payment/);
+  assert.match(source, /const p = payouts.find\(x => x.id === payoutId\)/);
+  assert.match(source, /payoutAffiliateFilter = id/);
+  assert.match(source, /Finalize completed month to enable payment/);
+});
+
 test('partner dashboard contains Overview and Breakdown tabs', () => {
   const html = renderPartnerDashboardPage('abcdefghijklmnopqrstuvwxyz0123456789ABCDE');
   assert.match(html, />Overview</);
