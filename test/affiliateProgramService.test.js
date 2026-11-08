@@ -73,6 +73,15 @@ test('base-price commission rounds once at the monthly level', () => {
   assert.equal(result.finalCommission, '176.21');
 });
 
+test('commission calculations retain verified Google Play provenance for safe early payouts', () => {
+  const result = calculateBasePriceCommission({
+    commissionRate: '0.5',
+    lines: [{ label: 'Google Play Monthly', unitPrice: '7.99', count: 1, platform: 'google_play' }],
+  });
+  assert.equal(result.finalCommission, '4.00');
+  assert.equal(result.lines[0].platform, 'google_play');
+});
+
 test('fractional-cent commissions are not rounded per transaction', () => {
   const result = calculateBasePriceCommission({
     commissionRate: '0.5',
@@ -84,6 +93,17 @@ test('fractional-cent commissions are not rounded per transaction', () => {
   assert.equal(result.eligibleRevenue, '15.98');
   assert.equal(result.commissionExact, '7.990000');
   assert.equal(result.finalCommission, '7.99');
+});
+
+test('admin exposes affiliate payout navigation and correct payment confirmation context', async () => {
+  const source = await readFile(new URL('../affiliateRoutes.js', import.meta.url), 'utf8');
+  assert.match(source, /data-action="payouts"/);
+  assert.match(source, /Mark Paid \/ Record Payment/);
+  assert.match(source, /const p = payouts.find\(x => x.id === payoutId\)/);
+  assert.match(source, /payoutAffiliateFilter = id/);
+  assert.match(source, /Apple payouts require completed-month finalization/);
+  assert.match(source, /isVerifiedGooglePayout/);
+  assert.match(source, /Calculate Commission/);
 });
 
 test('partner dashboard contains Overview and Breakdown tabs', () => {
