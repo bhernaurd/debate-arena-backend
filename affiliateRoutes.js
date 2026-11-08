@@ -3381,6 +3381,15 @@ function renderAffiliateAdminDashboardPage() {
       } catch (error) { toast(error.message, true); }
     }
 
+    function isVerifiedGooglePayout(p) {
+      const details = p.calculation_details || {};
+      const lines = Array.isArray(details.lines) ? details.lines : [];
+      const issues = Array.isArray(details.issues) ? details.issues : [];
+      return lines.length > 0 &&
+        lines.every(line => line.platform === 'google_play' && Number(line.count) > 0) &&
+        Number(details.sourceRows || 0) > 0 && issues.length === 0;
+    }
+
     function renderPayouts() {
       const visiblePayouts = payoutAffiliateFilter
         ? payouts.filter(p => p.affiliate_id === payoutAffiliateFilter)
@@ -3389,13 +3398,16 @@ function renderAffiliateAdminDashboardPage() {
         const affiliate = affiliates.find(a => a.id === payoutAffiliateFilter);
         $('payoutRows').innerHTML = '<tr><td colspan="11" class="empty">' +
           (affiliate
-            ? 'No payout record yet for ' + html(affiliate.display_name) + ' in this month. Select the month the subscriber paid, then click Refresh Month. Open months cannot be marked paid until they are finalized.'
+            ? 'No payout calculated for ' + html(affiliate.display_name) + ' in ' + html(monthName($('payoutMonth').value)) + '. <button class="button small gold" data-payout-refresh="' + html(affiliate.id) + '">Calculate Commission</button>'
             : 'No payout rows exist for this month yet. Use Refresh Month to calculate payouts.') +
           '</td></tr>';
         return;
       }
       $('payoutRows').innerHTML = visiblePayouts.map(p => {
-        const canPay = ['ready_to_pay','partially_paid'].includes(p.status) && numeric(p.remaining_owed) > 0;
+        const googleVerified = isVerifiedGooglePayout(p);
+        const canPay = numeric(p.remaining_owed) > 0 &&
+          ['provisional','reconciled'].includes(p.data_status) &&
+          (['ready_to_pay','partially_paid'].includes(p.status) || (p.status === 'open' && googleVerified));
         return '<tr>' +
           '<td><div class="partner-name">' + html(p.affiliate_display_name) + '</div><div class="code">' + html(p.affiliate_code) + '</div></td>' +
           '<td>' + html(monthName(p.payout_period)) + '</td>' +
@@ -3413,7 +3425,7 @@ function renderAffiliateAdminDashboardPage() {
             : '<span class="muted tiny">' +
                 (p.status === 'paid' ? 'Paid in full' :
                 p.data_status === 'needs_review' ? 'Review required before payment' :
-                p.status === 'open' ? 'Finalize completed month to enable payment' :
+                p.status === 'open' ? 'Apple payouts require completed-month finalization' :
                 'No unpaid balance') + '</span>') + '</div></td>' +
         '</tr>';
       }).join('');
@@ -3489,7 +3501,7 @@ function renderAffiliateAdminDashboardPage() {
       const amount = $('payAmount').value.trim();
       const paymentDate = $('payDate').value;
       if (!amount || Number(amount) <= 0 || !paymentDate) { $('paymentError').textContent = 'A positive amount and payment date are required.'; return; }
-      if (!confirm('Confirm that ' + money(amount, p.payout_currency) + ' was actually paid?')) return;
+      if (!confirm('Confirm that ' + money(amount, p.payout_currency) + ' was actually sent to ' + p.affiliate_display_name + '? This records a real payout and lowers the outstanding balance.')) return;
       try {
         await adminFetch('/api/admin/affiliate-payouts/' + encodeURIComponent(payoutId) + '/payments', {
           method:'POST',
