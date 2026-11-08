@@ -6,6 +6,7 @@ import { DateTime } from 'luxon';
 import {
   buildAppleOfferRedemptionUrl,
   calculateBasePriceCommission,
+  calculateVerifiedCohortPerformance,
   hashPartnerToken,
   normalizeAffiliateCode,
   parseAffiliateDashboardRange,
@@ -57,6 +58,57 @@ test('dashboard supports explicit calendar-month accounting periods', () => {
     () => parseAffiliateDashboardRange('month:2026-09', now),
     (error) => error?.code === 'invalid_dashboard_month'
   );
+});
+
+test('verified paid referral produces meaningful affiliate performance', () => {
+  const performance = calculateVerifiedCohortPerformance({
+    totalReferrals: 0, // delayed referral count must not hide a verified cohort
+    activeSubscribers: 1,
+    currentSubscribers: 1,
+    paidRenewingSubscribers: 1,
+    paidCancelingSubscribers: 0,
+    canceling: 0,
+    _convertedTotal: 1,
+    _completedPromos: 1,
+  });
+  assert.equal(performance.referrals, 1);
+  assert.equal(performance.promoRenewalRate, 100);
+  assert.equal(performance.paidConversionRate, 100);
+  assert.equal(performance.activeRetention, 100);
+  assert.equal(performance.cancellationRate, 0);
+});
+
+test('does not invent trial conversion without a completed trial', () => {
+  const performance = calculateVerifiedCohortPerformance({
+    totalReferrals: 1,
+    activeSubscribers: 1,
+    paidRenewingSubscribers: 1,
+    canceling: 0,
+    _convertedTotal: 0,
+    _completedPromos: 0,
+  });
+  assert.equal(performance.promoRenewalRate, null);
+  assert.equal(performance.paidConversionRate, 100);
+  assert.equal(performance.activeRetention, 100);
+  assert.equal(performance.cancellationRate, 0);
+});
+
+test('verified cohort performance respects cancellation and multiple referrals', () => {
+  const p = calculateVerifiedCohortPerformance({
+    totalReferrals: 4,
+    activeSubscribers: 2,
+    paidRenewingSubscribers: 1,
+    promoActiveSubscribers: 1,
+    expired: 2,
+    canceling: 1,
+    _convertedTotal: 1,
+    _completedPromos: 2,
+    promoNonRenewals: 1,
+  });
+  assert.equal(p.promoRenewalRate, 50);
+  assert.equal(p.paidConversionRate, 25);
+  assert.equal(p.activeRetention, 50);
+  assert.equal(p.cancellationRate, 50);
 });
 
 test('base-price commission rounds once at the monthly level', () => {
