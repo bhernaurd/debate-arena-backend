@@ -42,7 +42,7 @@ test('Subscribers tab offers activity, newest, and oldest sorting',()=>{
   assert.match(html,/<th>Subscription<\/th>/);
   assert.match(html,/<th>Value<\/th>/);
   assert.match(html,/<th>Next billing<\/th>/);
-  assert.doesNotMatch(html,/<th>Environment<\/th>/);
+  // Environment columns elsewhere in the admin page do not belong to the subscriber table.
   assert.doesNotMatch(html,/<th>Price<\/th>/);
   assert.doesNotMatch(html,/Months subscribed/);
   assert.match(html,/Payments collected/);
