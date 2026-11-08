@@ -73,6 +73,15 @@ test('base-price commission rounds once at the monthly level', () => {
   assert.equal(result.finalCommission, '176.21');
 });
 
+test('commission calculations retain verified Google Play provenance for safe early payouts', () => {
+  const result = calculateBasePriceCommission({
+    commissionRate: '0.5',
+    lines: [{ label: 'Google Play Monthly', unitPrice: '7.99', count: 1, platform: 'google_play' }],
+  });
+  assert.equal(result.finalCommission, '4.00');
+  assert.equal(result.lines[0].platform, 'google_play');
+});
+
 test('fractional-cent commissions are not rounded per transaction', () => {
   const result = calculateBasePriceCommission({
     commissionRate: '0.5',
