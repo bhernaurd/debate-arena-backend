@@ -35,3 +35,20 @@ test('accounts UI exposes activity search, filters and Newest default', () => {
   assert.match(html, /function accountActivityParams\(\)/);
   assert.match(html, /loadAccountActivity/);
 });
+
+test('account activity resolves verified subscription referrals when no account claim exists', () => {
+  const source = fs.readFileSync('subscriptionAdminDashboardRoutes.js', 'utf8');
+  const start = source.indexOf("router.get('/data/accounts-activity'");
+  const end = source.indexOf("router.get('/data/accounts-geography'", start);
+  const route = source.slice(start, end);
+  assert.match(route, /LEFT JOIN LATERAL \([\s\S]*?FROM subscription_admin_customers_v1 sc/);
+  assert.match(route, /sc.account_id = a.id/);
+  assert.match(route, /sc.environment = 'Production'/);
+  assert.match(route, /FROM affiliate_google_play_subscription_attributions g/);
+  assert.match(route, /g.account_id = a.id/);
+  assert.match(route, /COALESCE\(apple_aff.creator_code, play_aff.creator_code, ar.creator_code\) AS referral_code/);
+  assert.match(route, /verified_apple_subscription/);
+  assert.match(route, /verified_google_play_subscription/);
+  assert.match(route, /OR COALESCE\(apple_aff.creator_code, ''\) ILIKE/);
+  assert.match(route, /OR COALESCE\(play_aff.creator_code, ''\) ILIKE/);
+});
