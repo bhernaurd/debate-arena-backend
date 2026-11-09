@@ -183,7 +183,8 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
     try {
       const limit = req.query.limit === undefined ? 25 : Number(req.query.limit);
       const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
-      return res.json({ success: true, ...(await rankedAdmin.list({ limit, offset })) });
+      const sort = String(req.query.sort || 'newest');
+      return res.json({ success: true, ...(await rankedAdmin.list({ limit, offset, sort })) });
     } catch (error) { return rankedAdminError(res, error); }
   });
   router.get('/data/ranked/search', async (req, res) => {
