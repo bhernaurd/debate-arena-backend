@@ -240,6 +240,8 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
           OR COALESCE(ai.email, '') ILIKE ${p}
           OR COALESCE(gi.email, '') ILIKE ${p}
           OR COALESCE(ar.creator_code, '') ILIKE ${p}
+          OR COALESCE(apple_aff.creator_code, '') ILIKE ${p}
+          OR COALESCE(play_aff.creator_code, '') ILIKE ${p}
           OR COALESCE(aff.display_name, '') ILIKE ${p}
         )`);
       }
@@ -297,10 +299,14 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
             WHEN COALESCE(sub.has_pro_access, FALSE) THEN 'Pro'
             ELSE 'Free'
           END AS access_label,
-          ar.creator_code AS referral_code,
-          aff.display_name AS affiliate_display_name,
-          ar.claim_source AS referral_source,
-          ar.claimed_at AS referral_claimed_at,
+          COALESCE(apple_aff.creator_code, play_aff.creator_code, ar.creator_code) AS referral_code,
+          COALESCE(apple_aff.affiliate_display_name, play_aff.affiliate_display_name, aff.display_name) AS affiliate_display_name,
+          CASE
+            WHEN apple_aff.creator_code IS NOT NULL THEN 'verified_apple_subscription'
+            WHEN play_aff.creator_code IS NOT NULL THEN 'verified_google_play_subscription'
+            ELSE ar.claim_source
+          END AS referral_source,
+          COALESCE(apple_aff.attributed_at, play_aff.attributed_at, ar.claimed_at) AS referral_claimed_at,
           COALESCE(usage.total_events, 0)::int AS total_events,
           usage.last_event_at
         FROM accounts a
@@ -308,6 +314,30 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
         LEFT JOIN latest_google_identity gi ON gi.account_id = a.id
         LEFT JOIN affiliate_account_referrals ar ON ar.account_id = a.id
         LEFT JOIN affiliates aff ON aff.id = ar.affiliate_id
+        -- Verified subscription ownership can exist without a separate
+        -- affiliate_account_referrals claim (e.g. Apple shared offer handoffs).
+        -- Only use subscription rows attached to THIS authenticated account.
+        LEFT JOIN LATERAL (
+          SELECT sc.affiliate_code AS creator_code,
+                 sc.affiliate_display_name,
+                 sc.affiliate_attributed_at AS attributed_at
+          FROM subscription_admin_customers_v1 sc
+          WHERE sc.account_id = a.id
+            AND sc.environment = 'Production'
+            AND sc.affiliate_code IS NOT NULL
+          ORDER BY sc.affiliate_attributed_at DESC NULLS LAST,
+                   sc.original_transaction_id DESC
+          LIMIT 1
+        ) apple_aff ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT g.creator_code, af.display_name AS affiliate_display_name,
+                 g.attributed_at
+          FROM affiliate_google_play_subscription_attributions g
+          JOIN affiliates af ON af.id = g.affiliate_id
+          WHERE g.account_id = a.id
+          ORDER BY g.attributed_at DESC, g.purchase_token_sha256 DESC
+          LIMIT 1
+        ) play_aff ON TRUE
         LEFT JOIN LATERAL (
           SELECT
             COUNT(*)::int AS total_events,
