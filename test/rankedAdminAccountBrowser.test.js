@@ -38,3 +38,25 @@ test('ranked account browser validates the page size and offset', async () => {
   await assert.rejects(() => service.list({ limit: 25, offset: -1 }),
     (error) => error.code === 'invalid_offset');
 });
+
+test('highest and lowest Ranked sorting uses full-ladder server ranking before pagination', async () => {
+  const clauses = [];
+  const pool = {
+    connect() {},
+    async query(sql, params) {
+      if (sql.includes('COUNT(*)::int AS total')) return { rows: [{ total: 2 }] };
+      clauses.push(sql);
+      return { rows: [] };
+    },
+  };
+  const service = createRankedAdminService(pool);
+  await service.list({ sort: 'highest' });
+  await service.list({ sort: 'lowest' });
+  assert.match(clauses[0], /rank_score DESC NULLS LAST/);
+  assert.match(clauses[1], /rank_score ASC NULLS LAST/);
+  assert.match(clauses[0], /WHEN 'alchemist' THEN 21/);
+  assert.match(clauses[0], /LIMIT \$1 OFFSET \$2/);
+  assert.match(clauses[1], /CASE WHEN p.placement_status = 'completed' THEN 0 ELSE 1 END ASC/);
+  await assert.rejects(() => service.list({ sort: 'unexpected' }),
+    (error) => error.code === 'invalid_sort');
+});
