@@ -1262,3 +1262,133 @@ test(
         assert.equal(calls, 3);
     }
 );
+test(
+    'Sonnet 5.5 Ranked replies use enough tokens for adaptive thinking and visible text',
+    async () => {
+        const captured = [];
+        const valid = body([35, 35], {
+            finalEnding: '?',
+            prefix: 'sonnet55reply',
+        });
+        const engine = createRankedDebateEngineService({
+            maxOutputAttempts: 3,
+            httpAttempts: 1,
+            logger: { warn() {} },
+            createMessage: async (payload) => {
+                captured.push(payload);
+                return {
+                    content: captured.length < 3
+                        ? [{ type: 'thinking', thinking: '' }]
+                        : [{ type: 'text', text: valid }],
+                    stop_reason: captured.length < 3 ? 'max_tokens' : 'end_turn',
+                    usage: { output_tokens: payload.max_tokens },
+                };
+            },
+        });
+        const result = await engine.generateReply({
+            requestId: REQUEST_ID,
+            context: { ...context('guided'), modelName: 'claude-sonnet-5-5' },
+            conversation: conversation(1),
+            roundNumber: 1,
+        });
+        assert.equal(result.text, valid);
+        assert.equal(captured.length, 3);
+        assert.equal(captured[0].max_tokens, 1700);
+        assert.deepEqual(captured[0].thinking, { type: 'adaptive' });
+        assert.equal(captured[0].output_config.effort, 'medium');
+        assert.ok(captured[1].max_tokens > captured[0].max_tokens);
+        assert.equal(captured[1].thinking.type, 'adaptive');
+        assert.deepEqual(captured[2].thinking, { type: 'between_tools' });
+        assert.equal(captured[2].output_config.effort, 'high');
+        assert.equal(captured[0].temperature, undefined);
+    }
+);
+
+test(
+    'Sonnet 5.5 Ranked reply mode budgets preserve higher Relentless reasoning allowance',
+    async () => {
+        const captured = [];
+        const engine = createRankedDebateEngineService({
+            createMessage: async (payload) => {
+                captured.push(payload);
+                return { content: [{ type: 'text', text: body([20, 20, 20], {
+                    prefix: 'relentlessbudget',
+                    finalEnding: '?',
+                }) }] };
+            },
+            httpAttempts: 1,
+            maxOutputAttempts: 3,
+            logger: { warn() {} },
+        });
+        await engine.generateReply({
+            requestId: REQUEST_ID,
+            context: { ...context('relentless'), modelName: 'claude-sonnet-5-5' },
+            conversation: conversation(1),
+            roundNumber: 1,
+        });
+        assert.equal(captured[0].max_tokens, 3600);
+        assert.equal(captured[0].output_config.effort, 'high');
+    }
+);
+
+test(
+    'Sonnet 5.5 retries nonempty but max-token-truncated Ranked responses',
+    async () => {
+        const captured = [];
+        const warnings = [];
+        const valid = body([50, 50], {
+            finalEnding: '?',
+            prefix: 'balancedrecovery',
+        });
+        const engine = createRankedDebateEngineService({
+            createMessage: async (payload) => {
+                captured.push(payload);
+                return {
+                    content: [{ type: 'text', text: valid }],
+                    stop_reason: captured.length === 1 ? 'max_tokens' : 'end_turn',
+                    usage: { output_tokens: payload.max_tokens },
+                };
+            },
+            httpAttempts: 1,
+            maxOutputAttempts: 3,
+            logger: { warn: (...args) => warnings.push(args) },
+        });
+        const result = await engine.generateReply({
+            requestId: REQUEST_ID,
+            context: { ...context('balanced'), modelName: 'claude-sonnet-5-5' },
+            conversation: conversation(1),
+            roundNumber: 1,
+        });
+        assert.equal(result.text, valid);
+        assert.equal(captured.length, 2);
+        assert.equal(captured[0].max_tokens, 2400);
+        assert.ok(captured[1].max_tokens > captured[0].max_tokens);
+        assert.equal(warnings[0][1].reason, 'token_limit');
+        assert.equal(warnings[0][1].outputTokens, 2400);
+        assert.doesNotMatch(JSON.stringify(warnings), /balancedrecovery/);
+    }
+);
+
+test(
+    'Sonnet 5.5 opens Ranked debates with enough tokens, including Guided placement',
+    async () => {
+        const captured = [];
+        const valid = body([35, 35], { prefix: 'opening55', finalEnding: '?' });
+        const engine = createRankedDebateEngineService({
+            createMessage: async (payload) => {
+                captured.push(payload);
+                return { content: [{ type: 'text', text: valid }] };
+            },
+            httpAttempts: 1,
+            maxOutputAttempts: 3,
+            logger: { warn() {} },
+        });
+        await engine.generateOpening({
+            requestId: REQUEST_ID,
+            context: { ...context('guided'), modelName: 'claude-sonnet-5-5' },
+            conversation: [],
+        });
+        assert.equal(captured[0].max_tokens, 1200);
+        assert.deepEqual(captured[0].thinking, { type: 'adaptive' });
+    }
+);
