@@ -129,6 +129,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
           ? enhanceSubscriptionAdminMobileHtml(
               enhanceSubscriptionAdminSubscribersHtml(
               enhanceSubscriptionAdminAutoRenewHtml(
+              enhanceSubscriptionAdminRankedHtml(
               enhanceSubscriptionAdminAccountsHtml(
               enhanceSubscriptionAdminLifetimeHtml(
                 enhanceSubscriptionAdminRevenueHtml(
@@ -139,6 +140,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
                     )
                   )
                 )
+              )
               )
               )
               )
@@ -156,6 +158,42 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
   router.use(
     createBaseSubscriptionAdminDashboardRouter(options)
   );
+
+  const rankedAdmin = createRankedAdminService(historyPool);
+  function rankedAdminError(res, error) {
+    if (!(error instanceof RankedAdminError)) console.error('[RankedAdmin]', error);
+    return res.status(error instanceof RankedAdminError ? error.status : 500).json({
+      success: false,
+      error: {
+        code: error instanceof RankedAdminError ? error.code : 'ranked_admin_error',
+        message: error instanceof RankedAdminError ? error.message : 'Ranked management is temporarily unavailable.',
+      },
+    });
+  }
+
+  router.get('/data/ranked/search', async (req, res) => {
+    try { return res.json({ success: true, accounts: await rankedAdmin.search(req.query.q) }); }
+    catch (error) { return rankedAdminError(res, error); }
+  });
+  router.get('/data/ranked/account/:accountId', async (req, res) => {
+    try { return res.json({ success: true, ...(await rankedAdmin.read(req.params.accountId)) }); }
+    catch (error) { return rankedAdminError(res, error); }
+  });
+  router.post('/data/ranked/account/:accountId', async (req, res) => {
+    try {
+      if (process.env.RANKED_ADMIN_MUTATIONS_ENABLED !== 'true') {
+        throw new RankedAdminError('mutations_disabled', 'Ranked adjustments have not been enabled for production.', 403);
+      }
+      const requestOrigin = req.get('origin');
+      const expectedOrigin = `${req.protocol}://${req.get('host')}`;
+      if (requestOrigin !== expectedOrigin || req.get('x-requested-with') !== 'AgoraRankedAdmin' ||
+          !String(req.get('content-type') || '').toLowerCase().startsWith('application/json')) {
+        throw new RankedAdminError('request_not_allowed', 'This change must be submitted from the signed-in dashboard.', 403);
+      }
+      const result = await rankedAdmin.mutate(req.params.accountId, req.body);
+      return res.json({ success: true, ...result });
+    } catch (error) { return rankedAdminError(res, error); }
+  });
 
   // These private data routes intentionally come after the base dashboard router.
   // Requests therefore pass through the base dashboard's secure session middleware.
