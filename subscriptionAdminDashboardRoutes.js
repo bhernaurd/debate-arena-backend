@@ -179,6 +179,13 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
     });
   }
 
+  router.get('/data/ranked/list', async (req, res) => {
+    try {
+      const limit = req.query.limit === undefined ? 25 : Number(req.query.limit);
+      const offset = req.query.offset === undefined ? 0 : Number(req.query.offset);
+      return res.json({ success: true, ...(await rankedAdmin.list({ limit, offset })) });
+    } catch (error) { return rankedAdminError(res, error); }
+  });
   router.get('/data/ranked/search', async (req, res) => {
     try { return res.json({ success: true, accounts: await rankedAdmin.search(req.query.q) }); }
     catch (error) { return rankedAdminError(res, error); }
