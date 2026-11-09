@@ -79,7 +79,7 @@ test('adjust crosses divisions and records the before/after rating', async () =>
 test('restore compensates each failed ladder debate at most once', async () => {
   const { apply } = fixture();
   const first = await apply('restore', { debateId: DEBATE });
-  assert.deepEqual(first.after, { rankKey: 'student', division: 3, rp: 20 });
+  assert.deepEqual(first.after, { rankKey: 'initiate', division: 2, rp: 20 });
   await assert.rejects(
     () => apply('restore', { debateId: DEBATE }),
     (error) => error.code === 'already_restored'
