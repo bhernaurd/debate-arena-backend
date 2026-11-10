@@ -9,6 +9,8 @@ test('account activity route supports newest-first account creation inspection',
   assert.match(source, /router\.get\('\/data\/accounts-activity'/);
   assert.match(source, /: 'newest';/);
   assert.match(source, /newest: 'a\.created_at DESC, a\.id DESC'/);
+  assert.match(source, /most_recently_active: 'usage\.last_event_at DESC NULLS LAST, a\.created_at DESC, a\.id DESC'/);
+  assert.match(source, /MAX\(e\.created_at\) AS last_event_at/);
   assert.match(source, /FROM accounts a/);
   assert.match(source, /account_apple_identities/);
   assert.match(source, /affiliate_account_referrals/);
@@ -32,6 +34,7 @@ test('accounts UI exposes activity search, filters and Newest default', () => {
   assert.match(html, /id="accountActivitySearch"/);
   assert.match(html, /id="accountActivitySort"/);
   assert.match(html, /<option value="newest" selected>Newest<\/option>/);
+  assert.match(html, /<option value="most_recently_active">Most recently active<\/option>/);
   assert.match(html, /function accountActivityParams\(\)/);
   assert.match(html, /loadAccountActivity/);
 });

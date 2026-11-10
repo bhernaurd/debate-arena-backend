@@ -222,7 +222,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
 
   router.get('/data/accounts-activity', async (req, res) => {
     try {
-      const allowedSorts = new Set(['newest', 'oldest', 'last_sign_in', 'most_events']);
+      const allowedSorts = new Set(['newest', 'oldest', 'last_sign_in', 'most_events', 'most_recently_active']);
       const allowedPeriods = new Set(['all', 'today', '7d']);
       const allowedAccess = new Set(['all', 'pro', 'free']);
       const sort = allowedSorts.has(String(req.query.sort || '')) ? String(req.query.sort) : 'newest';
@@ -257,6 +257,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
         oldest: 'a.created_at ASC, a.id ASC',
         last_sign_in: 'COALESCE(GREATEST(a.last_authenticated_at, ai.last_authenticated_at, gi.last_authenticated_at), a.created_at) DESC, a.created_at DESC',
         most_events: 'COALESCE(usage.total_events, 0) DESC, a.created_at DESC',
+        most_recently_active: 'usage.last_event_at DESC NULLS LAST, a.created_at DESC, a.id DESC',
       }[sort];
       const result = await historyPool.query(`
         WITH latest_apple_identity AS (
