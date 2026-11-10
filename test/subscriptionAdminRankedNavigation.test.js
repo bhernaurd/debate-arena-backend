@@ -33,9 +33,9 @@ test('Ranked Management clearly labels users with unfinished placements', () => 
   const html = `<button class="nav" data-view="accounts">Accounts</button>
   <section id="view-history" class="hidden"></section><script>function eventParams(){}</script>`;
   const output = enhanceSubscriptionAdminRankedHtml(html);
-  assert.match(output, /function rankedAccountStatus\\(a\\)/);
-  assert.match(output, /a\\.placement_status==='in_progress'/);
+  assert.match(output, /function rankedAccountStatus\(a\)/);
+  assert.match(output, /a\.placement_status==='in_progress'/);
   assert.match(output, /Placements · /);
-  assert.match(output, /a\\.placement_trials_completed/);
-  assert.match(output, /esc\\(rankedAccountStatus\\(a\\)\\)/);
+  assert.match(output, /a\.placement_trials_completed/);
+  assert.match(output, /esc\(rankedAccountStatus\(a\)\)/);
 });
