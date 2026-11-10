@@ -56,7 +56,13 @@ test('highest and lowest Ranked sorting uses full-ladder server ranking before p
   assert.match(clauses[1], /rank_score ASC NULLS LAST/);
   assert.match(clauses[0], /WHEN 'alchemist' THEN 21/);
   assert.match(clauses[0], /LIMIT \$1 OFFSET \$2/);
-  assert.match(clauses[1], /CASE WHEN p.placement_status = 'completed' THEN 0 ELSE 1 END ASC/);
+  for (const sql of clauses) {
+    assert.match(sql, /CASE WHEN p\.placement_status = 'completed' THEN 0 WHEN p\.placement_status = 'in_progress' THEN 1 ELSE 2 END ASC/);
+    assert.match(sql, /p\.placement_trials_completed DESC NULLS LAST/);
+    assert.match(sql, /p\.placement_status, p\.placement_trials_completed, p\.current_rank_key/);
+  }
+  assert.match(clauses[0], /rank_score DESC NULLS LAST, p\.placement_trials_completed/);
+  assert.match(clauses[1], /rank_score ASC NULLS LAST, p\.placement_trials_completed/);
   await assert.rejects(() => service.list({ sort: 'unexpected' }),
     (error) => error.code === 'invalid_sort');
 });
