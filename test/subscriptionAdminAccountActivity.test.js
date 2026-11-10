@@ -35,6 +35,10 @@ test('accounts UI exposes activity search, filters and Newest default', () => {
   assert.match(html, /id="accountActivitySort"/);
   assert.match(html, /<option value="newest" selected>Newest<\/option>/);
   assert.match(html, /<option value="most_recently_active">Most recently active<\/option>/);
+  assert.doesNotMatch(html, /<option value="last_sign_in">/);
+  assert.match(html, /<th>Last active<\/th>/);
+  assert.match(html, /row\.lastEventAt\?fmtDate\(row\.lastEventAt\):'Never'/);
+  assert.doesNotMatch(html, /<th>Last sign-in<\/th>/);
   assert.match(html, /function accountActivityParams\(\)/);
   assert.match(html, /loadAccountActivity/);
 });
@@ -54,4 +58,12 @@ test('account activity resolves verified subscription referrals when no account 
   assert.match(route, /verified_google_play_subscription/);
   assert.match(route, /OR COALESCE\(apple_aff.creator_code, ''\) ILIKE/);
   assert.match(route, /OR COALESCE\(play_aff.creator_code, ''\) ILIKE/);
+});
+
+test('account activity table shows last tracked event rather than last authentication', () => {
+  const source = fs.readFileSync('lib/subscriptionAdminAccountsUi.js', 'utf8');
+  assert.match(source, /<th>Last active<\/th>/);
+  assert.match(source, /row\.lastEventAt\?fmtDate\(row\.lastEventAt\):'Never'/);
+  assert.doesNotMatch(source, /row\.lastAuthenticatedAt/);
+  assert.doesNotMatch(source, /<th>Last sign-in<\/th>/);
 });
