@@ -309,6 +309,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
           END AS referral_source,
           COALESCE(apple_aff.attributed_at, play_aff.attributed_at, ar.claimed_at) AS referral_claimed_at,
           COALESCE(usage.total_events, 0)::int AS total_events,
+          COALESCE(usage.app_opens, 0)::int AS app_opens,
           usage.last_event_at
         FROM accounts a
         LEFT JOIN latest_apple_identity ai ON ai.account_id = a.id
@@ -342,6 +343,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
         LEFT JOIN LATERAL (
           SELECT
             COUNT(*)::int AS total_events,
+            COUNT(*) FILTER (WHERE e.event_name = 'app_opened')::int AS app_opens,
             MAX(e.created_at) AS last_event_at
           FROM user_events e
           WHERE e.user_id IN (
@@ -391,6 +393,7 @@ export function createSubscriptionAdminDashboardRouter(options = {}) {
           referralSource: row.referral_source,
           referralClaimedAt: row.referral_claimed_at,
           totalEvents: Number(row.total_events || 0),
+          appOpens: Number(row.app_opens || 0),
           lastEventAt: row.last_event_at,
         })),
       });
