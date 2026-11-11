@@ -67,3 +67,23 @@ test('account activity table shows last tracked event rather than last authentic
   assert.doesNotMatch(source, /row\.lastAuthenticatedAt/);
   assert.doesNotMatch(source, /<th>Last sign-in<\/th>/);
 });
+
+test('account activity counts only app opens over linked installations', () => {
+  const source = fs.readFileSync('subscriptionAdminDashboardRoutes.js', 'utf8');
+  const start = source.indexOf("router.get('/data/accounts-activity'");
+  const end = source.indexOf("router.get('/data/accounts-geography'", start);
+  const route = source.slice(start, end);
+  assert.match(route, /COUNT\(\*\) FILTER \(WHERE e\.event_name = 'app_opened'\)::int AS app_opens/);
+  assert.match(route, /COALESCE\(usage\.app_opens, 0\)::int AS app_opens/);
+  assert.match(route, /appOpens: Number\(row\.app_opens \|\| 0\)/);
+  assert.match(route, /FROM account_installations account_install/);
+  assert.match(route, /FROM excluded_analytics_users excluded/);
+});
+
+test('account activity shows lifetime app opens between referral and created', () => {
+  for (const path of ['lib/subscriptionAdminAccountsUi.js', 'lib/subscriptionAdminAccountsUiBase.js']) {
+    const source = fs.readFileSync(path, 'utf8');
+    assert.match(source, /<th>Referral<\/th><th>App opens<\/th><th>Created<\/th>/);
+    assert.match(source, /Number\(row\.appOpens\|\|0\)\.toLocaleString\(\)/);
+  }
+});
